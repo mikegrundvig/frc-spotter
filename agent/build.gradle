@@ -229,6 +229,8 @@ def agentTarball = tasks.register("agentTarball", Tar) {
 def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
     description = "The -all.jar, for a board with Java 17 or newer, with its unit, rules, and install script beside it."
     into distributions.map { it.dir("jar") }
+    // The jar's name holds the version, which the rename below hides from Gradle's up-to-date check.
+    inputs.property("version", agentVersion)
     from(tasks.named("jar")) {
         rename {
             "frc-spotter-${agentVersion}-all.jar"
