@@ -1,0 +1,118 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.michaelgrundvig.frc",
+    "module": "spotter-client",
+    "version": "0.3.1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.4.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "com.michaelgrundvig.frc",
+          "module": "spotter-api",
+          "version": {
+            "requires": "0.3.1"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spotter-client-0.3.1.jar",
+          "url": "spotter-client-0.3.1.jar",
+          "size": 40148,
+          "sha512": "de8b1fb436fef9b9903dd694cfec0ec7609a1e96d5c7cf01d13256842902c086f796bd9c919b796a0537383908d4c6f4d19db54e86e33f1034dab1c92421a008",
+          "sha256": "04b92dce98f1f62d0b52f19d3193b50e95ee7751ec512620a5df48831ea3c243",
+          "sha1": "a5cce35f427d6b79acf62619a871ce5f879f5bda",
+          "md5": "89fd55337bd35b54ec952954b20fe98d"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "com.michaelgrundvig.frc",
+          "module": "spotter-api",
+          "version": {
+            "requires": "0.3.1"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spotter-client-0.3.1.jar",
+          "url": "spotter-client-0.3.1.jar",
+          "size": 40148,
+          "sha512": "de8b1fb436fef9b9903dd694cfec0ec7609a1e96d5c7cf01d13256842902c086f796bd9c919b796a0537383908d4c6f4d19db54e86e33f1034dab1c92421a008",
+          "sha256": "04b92dce98f1f62d0b52f19d3193b50e95ee7751ec512620a5df48831ea3c243",
+          "sha1": "a5cce35f427d6b79acf62619a871ce5f879f5bda",
+          "md5": "89fd55337bd35b54ec952954b20fe98d"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "spotter-client-0.3.1-sources.jar",
+          "url": "spotter-client-0.3.1-sources.jar",
+          "size": 16838,
+          "sha512": "77b5e82d12fc6ce5cc72bb97baf0c96de8ae6f6d073a3bfe24e4362e4ab9360a9616a04aa4387da274f64911e10ee00b37c710c95345652081092cc40731e5b1",
+          "sha256": "c65011951716e4e16ac7208d7d8dd96a2c01277330d8f07a78a1ae3433c11d10",
+          "sha1": "03a7acb31911275c125ecc3ef4dbc3ea5c7a6a80",
+          "md5": "06b705e1c0eba87abb03a03d759d60a8"
+        }
+      ]
+    },
+    {
+      "name": "javadocElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "spotter-client-0.3.1-javadoc.jar",
+          "url": "spotter-client-0.3.1-javadoc.jar",
+          "size": 4255103,
+          "sha512": "657d62dfbfbd3e65646ce665b8cdc4bf5a1bf13d442cbfbdb3a36dc3dc7bb8632b8f50e15e9f434531825068b014c2f0299fbe3a20cec5fe1986699011b1c2ac",
+          "sha256": "4a4b51275a8750b30786ec6389e04d6e94ef9e89549bd5228c53ff66ba537e7a",
+          "sha1": "118c1519bf092a685efc96c5983a198a4e3f312b",
+          "md5": "6d9abb7932f2fcce7ae15d490cefd70e"
+        }
+      ]
+    }
+  ]
+}
