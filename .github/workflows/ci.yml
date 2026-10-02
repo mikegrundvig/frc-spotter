@@ -1,0 +1,44 @@
+name: CI
+
+# Runs the generic monitor's checks: the API, the agent and its packages, the client, and the
+# container harness, each project's own `ci` task (formatting, static analysis, tests, coverage);
+# the checks live in Gradle, not here. x86 Linux only: Docker is there for the container tests (the
+# agent's .deb on Debian 13 under systemd, Toxiproxy, the -all.jar on Java 17), and they must run,
+# not skip (CI=true). The .deb built here is x86's; an ARM one is built on ARM.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Build, check, test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # Actions are pinned to a commit (the version beside it), so a moved tag can't change what
+      # runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Caches Gradle, its dependencies, and the JDK 25 toolchain Gradle downloads on first use.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Formatting, static analysis, tests, coverage, container tests
+        run: ./gradlew :api:ci :agent:ci :client:ci :harness:ci
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports-${{ github.sha }}
+          path: |
+            */build/reports/
+            */build/test-results/
+          if-no-files-found: warn
