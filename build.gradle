@@ -1,4 +1,4 @@
-// Spotter: a coprocessor's agent, what the robot shares with it, and the image builder. The supporting
+// Spotter: a coprocessor's agent, what the robot shares with it, and its container harness. The supporting
 // build rules live in gradle/ (quality.gradle: formatting, static analysis, coverage, the ci task).
 //
 //   ./gradlew ci        every check CI runs; run it before pushing
@@ -6,6 +6,14 @@
 plugins {
     alias(libs.plugins.spotless) apply false
     alias(libs.plugins.errorprone) apply false
+}
+
+// Every project's coordinates, so another build (an image builder's, with includeBuild) can use its
+// api, client, or harness by them: com.michaelgrundvig.frc.spotter:<project>. The version is the
+// agent's (-PagentVersion, as a release sets it).
+allprojects {
+    group = "com.michaelgrundvig.frc.spotter"
+    version = (findProperty("agentVersion") ?: "0.1.0").toString()
 }
 
 // Everything CI checks: each project's ci.

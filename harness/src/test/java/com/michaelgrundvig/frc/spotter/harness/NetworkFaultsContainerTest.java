@@ -3,10 +3,8 @@ package com.michaelgrundvig.frc.spotter.harness;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.client.AgentClient;
-import com.michaelgrundvig.frc.spotter.client.ClientSettings;
 import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import eu.rekawek.toxiproxy.Proxy;
-import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import eu.rekawek.toxiproxy.model.toxic.Latency;
 import java.io.IOException;
@@ -21,7 +19,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.testcontainers.containers.Network;
-import org.testcontainers.toxiproxy.ToxiproxyContainer;
 
 /**
  * The robot's client polling the agent through Toxiproxy, as over a robot's network that
@@ -38,12 +35,9 @@ import org.testcontainers.toxiproxy.ToxiproxyContainer;
 @ContainerTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class NetworkFaultsContainerTest {
-  /** Toxiproxy's image, pinned. */
-  static final String TOXIPROXY = "ghcr.io/shopify/toxiproxy:2.12.0";
-
   Network network;
   Coprocessor coprocessor;
-  ToxiproxyContainer toxiproxy;
+  Toxiproxied toxiproxy;
   Proxy proxy;
   AgentClient client;
   Thread loop;
@@ -53,27 +47,13 @@ class NetworkFaultsContainerTest {
   @BeforeAll
   void aCoprocessorBehindToxiproxy() throws IOException {
     network = TestNetwork.create();
-    coprocessor = new Coprocessor(Images.agent(), network, 11);
+    coprocessor = new Coprocessor(TestImages.agent(), network, 11);
     coprocessor.start();
     coprocessor.configure(
         new AgentConfig("vision-front", "", 5808, List.of("standin"), List.of(), List.of()));
-    toxiproxy =
-        new ToxiproxyContainer(TOXIPROXY)
-            .withNetwork(network)
-            .withLabel(ContainerRuntime.LABEL, "true")
-            .withCreateContainerCmdModifier(cmd -> cmd.withIpv4Address(Images.address(3)));
-    toxiproxy.start();
-    proxy =
-        new ToxiproxyClient(toxiproxy.getHost(), toxiproxy.getControlPort())
-            .createProxy("agent", "0.0.0.0:8666", Images.address(11) + ":" + Coprocessor.AGENT);
-    client =
-        new AgentClient(
-            "vision-front",
-            toxiproxy.getHost(),
-            toxiproxy.getMappedPort(8666),
-            coprocessor.softwarePort(),
-            ClientSettings.DEFAULTS,
-            System::nanoTime);
+    toxiproxy = Toxiproxied.start(network, 3, 11);
+    proxy = toxiproxy.proxy();
+    client = toxiproxy.client("vision-front", coprocessor);
   }
 
   @AfterAll

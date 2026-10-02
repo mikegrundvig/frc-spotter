@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.michaelgrundvig.frc.spotter.api.Health;
 import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.client.AgentClient;
-import com.michaelgrundvig.frc.spotter.client.ClientSettings;
 import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.util.List;
 import java.util.Objects;
@@ -23,7 +22,7 @@ class AgentJarContainerTest {
   @Test
   void theAllJarAndAPacksJavaHelperRunOnJava17() throws Exception {
     try (Network network = TestNetwork.create();
-        Coprocessor coprocessor = new Coprocessor(Images.agentOnJava17(), network, 21)) {
+        Coprocessor coprocessor = new Coprocessor(TestImages.agentOnJava17(), network, 21)) {
       coprocessor.start();
       String version = coprocessor.run("sh", "-c", "java -version 2>&1 | head -n 1").strip();
       System.out.println("The board's Java: " + version);
@@ -39,14 +38,7 @@ class AgentJarContainerTest {
 
       coprocessor.configure(
           new AgentConfig("vision-front", "", 5808, List.of("java-helper"), List.of(), List.of()));
-      try (AgentClient client =
-          new AgentClient(
-              "vision-front",
-              coprocessor.agentHost(),
-              coprocessor.agentPort(),
-              coprocessor.softwarePort(),
-              ClientSettings.DEFAULTS,
-              System::nanoTime)) {
+      try (AgentClient client = coprocessor.client("vision-front")) {
         for (int i = 0; i < 50 && client.latest().answer() == null; i++) {
           Thread.sleep(100);
         }

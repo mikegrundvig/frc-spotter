@@ -1,11 +1,14 @@
-// The container tests (@ContainerTest, tagged "container"): the agent installed from its .deb in a
-// plain Debian 13 container under systemd, with no Java of its own, its root read-only and /data
-// writable as on a board; the -all.jar on a stock Java 17. The tests play the robot with Spotter's own client. They need Docker or Podman running
+// The container harness: a library for container tests of the agent and its packs (src/main: a
+// coprocessor in a container under systemd, its images, the tests' network, the robot's client,
+// Toxiproxy), which a pack's own tests use too, and Spotter's own container tests (src/test,
+// @ContainerTest, tagged "container"): the agent installed from its .deb in a plain Debian 13
+// container under systemd, with no Java of its own, its root read-only and /data writable as on a
+// board; the -all.jar on a stock Java 17. The tests play the robot with Spotter's own client. They need Docker or Podman running
 // Linux containers, and skip themselves without (as on a Windows laptop); in CI on Linux they must
 // run. `test -Pquick` leaves them out unless --tests names them.
 
 plugins {
-    id "java"
+    id "java-library"
     id "jacoco"
     id "com.diffplug.spotless"
     id "net.ltgt.errorprone"
@@ -48,11 +51,13 @@ dependencies {
     errorprone libs.errorprone.core
     errorprone libs.nullaway
 
-    testImplementation project(":client")
-    testImplementation platform(libs.testcontainers.bom)
-    testImplementation libs.testcontainers.core
-    testImplementation libs.testcontainers.toxiproxy
-    testImplementation platform(libs.junit.bom)
+    api project(":client")
+    api platform(libs.testcontainers.bom)
+    api libs.testcontainers.core
+    api libs.testcontainers.toxiproxy
+    api platform(libs.junit.bom)
+    api "org.junit.jupiter:junit-jupiter-api"
+
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     testImplementation libs.assertj.core

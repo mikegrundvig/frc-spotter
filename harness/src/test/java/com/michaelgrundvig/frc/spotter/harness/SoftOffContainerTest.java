@@ -3,7 +3,6 @@ package com.michaelgrundvig.frc.spotter.harness;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.client.AgentClient;
-import com.michaelgrundvig.frc.spotter.client.ClientSettings;
 import com.michaelgrundvig.frc.spotter.client.PowerDowner;
 import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.util.ArrayList;
@@ -31,7 +30,7 @@ class SoftOffContainerTest {
   @Test
   void theControllerAloneMayPowerItDownAndItsGoneFromBothPorts() throws Exception {
     try (Network network = TestNetwork.create();
-        Coprocessor coprocessor = new Coprocessor(Images.agent(), network, 11)) {
+        Coprocessor coprocessor = new Coprocessor(TestImages.agent(), network, 11)) {
       coprocessor.start();
       String robot = coprocessor.robotAddress();
       coprocessor.configure(controlledBy("vision-front", robot));
@@ -63,14 +62,7 @@ class SoftOffContainerTest {
           .contains("Refused a shutdown from " + Images.address(50) + ": not the robot controller");
 
       // The robot asks: taken, its step runs, and it powers off.
-      try (AgentClient client =
-          new AgentClient(
-              "vision-front",
-              coprocessor.agentHost(),
-              coprocessor.agentPort(),
-              coprocessor.softwarePort(),
-              ClientSettings.DEFAULTS,
-              System::nanoTime)) {
+      try (AgentClient client = coprocessor.client("vision-front")) {
         long asked = System.nanoTime();
         client.powerDown();
         PowerDowner.State state = client.powerDownState();
@@ -98,8 +90,8 @@ class SoftOffContainerTest {
   @Test
   void aKilledOrHungAgentNeverTakesItAndSaysWhyAfterThirtySeconds() throws Exception {
     try (Network network = TestNetwork.create();
-        Coprocessor killed = new Coprocessor(Images.agent(), network, 12);
-        Coprocessor hung = new Coprocessor(Images.agent(), network, 13)) {
+        Coprocessor killed = new Coprocessor(TestImages.agent(), network, 12);
+        Coprocessor hung = new Coprocessor(TestImages.agent(), network, 13)) {
       killed.start();
       hung.start();
       killed.configure(controlledBy("vision-back", killed.robotAddress()));
@@ -110,14 +102,7 @@ class SoftOffContainerTest {
       List<AgentClient> clients = new ArrayList<>();
       try {
         for (Coprocessor coprocessor : List.of(killed, hung)) {
-          clients.add(
-              new AgentClient(
-                  coprocessor == killed ? "vision-back" : "vision-side",
-                  coprocessor.agentHost(),
-                  coprocessor.agentPort(),
-                  coprocessor.softwarePort(),
-                  ClientSettings.DEFAULTS,
-                  System::nanoTime));
+          clients.add(coprocessor.client(coprocessor == killed ? "vision-back" : "vision-side"));
         }
         long asked = System.nanoTime();
         clients.forEach(AgentClient::powerDown);

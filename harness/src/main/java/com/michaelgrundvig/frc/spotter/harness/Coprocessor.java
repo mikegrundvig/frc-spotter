@@ -2,6 +2,8 @@ package com.michaelgrundvig.frc.spotter.harness;
 
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.HostConfig;
+import com.michaelgrundvig.frc.spotter.client.AgentClient;
+import com.michaelgrundvig.frc.spotter.client.ClientSettings;
 import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -23,15 +25,15 @@ import org.testcontainers.utility.DockerImageName;
  * SYS_ADMIN (its user namespace's, for systemd's sandboxing) and no SELinux labels; Docker needs
  * privileged mode.
  */
-final class Coprocessor extends GenericContainer<Coprocessor> {
+public final class Coprocessor extends GenericContainer<Coprocessor> {
   /** The agent's port. */
-  static final int AGENT = 5808;
+  public static final int AGENT = 5808;
 
-  /** The software's port: the stand-in's page. */
-  static final int SOFTWARE = 5800;
+  /** The software's port: a vision program's page, 5800, as the stand-in's is. */
+  public static final int SOFTWARE = 5800;
 
   /** What's written while it runs, in RAM, as on a board's image (its fstab's tmpfs). */
-  static final Map<String, String> TMPFS =
+  public static final Map<String, String> TMPFS =
       Map.of(
           "/run", "rw,mode=755",
           "/run/lock", "rw",
@@ -45,7 +47,7 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
    * @param network the tests' network
    * @param last the last number of its address: 10.99.71.last
    */
-  Coprocessor(String image, Network network, int last) {
+  public Coprocessor(String image, Network network, int last) {
     super(DockerImageName.parse(image));
     boolean podman = ContainerRuntime.podman();
     withNetwork(network);
@@ -74,20 +76,31 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
   }
 
   /** The agent's address and port as the robot (this test) reaches it. */
-  String agentHost() {
+  public String agentHost() {
     return getHost();
   }
 
-  int agentPort() {
+  public int agentPort() {
     return getMappedPort(AGENT);
   }
 
-  int softwarePort() {
+  public int softwarePort() {
     return getMappedPort(SOFTWARE);
   }
 
+  /**
+   * The robot's client for this coprocessor's agent, as a robot program makes one: polling now,
+   * with the client's defaults. Close it when the test is done.
+   *
+   * @param name the computer's name, for the client's threads and messages
+   */
+  public AgentClient client(String name) {
+    return new AgentClient(
+        name, agentHost(), agentPort(), softwarePort(), ClientSettings.DEFAULTS, System::nanoTime);
+  }
+
   /** Runs a command as root inside, and answers what it printed; fails if it fails. */
-  String run(String... command) {
+  public String run(String... command) {
     try {
       Container.ExecResult result = execInContainer(command);
       if (result.getExitCode() != 0) {
@@ -109,7 +122,7 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
   }
 
   /** Runs a command inside as the agent's own account, and answers how it went. */
-  Container.ExecResult runAsAgent(String... command) {
+  public Container.ExecResult runAsAgent(String... command) {
     try {
       return execInContainerWithUser("frc-coprocessor-agent", command);
     } catch (IOException e) {
@@ -121,7 +134,7 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
   }
 
   /** Writes a file inside, as root: on /data, or a tmpfs. */
-  void write(String path, String text) {
+  public void write(String path, String text) {
     String encoded = Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
     run(
         "sh",
@@ -139,14 +152,14 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
    * Configures its agent as a team would on a board whose root is read-only ({@code
    * /data/frc-coprocessor/agent.json}), and restarts it to read it.
    */
-  void configure(AgentConfig config) {
+  public void configure(AgentConfig config) {
     write(AgentConfig.DATA_PATH, config.text());
     run("systemctl", "restart", "frc-coprocessor-agent.service");
     awaitAgent();
   }
 
   /** Waits until its agent answers again. */
-  void awaitAgent() {
+  public void awaitAgent() {
     for (int i = 0; i < 300; i++) {
       try {
         Container.ExecResult stamp =
@@ -174,7 +187,7 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
    * the robot's address on the tests' network is found, not assumed: a connection is held open and
    * the agent's side of it read from {@code /proc/net/tcp}.
    */
-  String robotAddress() throws IOException {
+  public String robotAddress() throws IOException {
     try (java.net.Socket socket = new java.net.Socket(agentHost(), agentPort())) {
       // A request begun, never finished: a port forwarder may dial the container only once data
       // comes, and the agent holds a request that hasn't finished for up to 4 s.
@@ -203,7 +216,7 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
    * An IPv4 address as /proc/net/tcp writes it (or the last word of an IPv4-mapped one in tcp6):
    * hex, its bytes reversed.
    */
-  static String address(String hex) {
+  public static String address(String hex) {
     long value = Long.parseLong(hex, 16);
     return (value & 0xff)
         + "."
@@ -215,14 +228,14 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
   }
 
   /** How much memory it uses now and has at most, its cgroup's, in MiB. */
-  long[] memoryMb() {
+  public long[] memoryMb() {
     String current = run("cat", "/sys/fs/cgroup/memory.current").strip();
     String peak = run("sh", "-c", "cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0").strip();
     return new long[] {Long.parseLong(current) >> 20, Long.parseLong(peak) >> 20};
   }
 
   /** The agent's own memory: its unit's cgroup, in MiB, now. */
-  long agentMemoryMb() {
+  public long agentMemoryMb() {
     String value =
         run("systemctl", "show", "frc-coprocessor-agent", "--property=MemoryCurrent", "--value")
             .strip();

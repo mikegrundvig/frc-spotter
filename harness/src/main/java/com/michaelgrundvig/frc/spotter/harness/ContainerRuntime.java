@@ -17,9 +17,9 @@ import org.testcontainers.DockerClientFactory;
  * build says they must run ({@code spotter.requireContainers}, in CI on Linux), when they fail
  * instead. Rootless Podman runs a container's systemd as is; Docker needs privileged mode for it.
  */
-final class ContainerRuntime implements ExecutionCondition {
+public final class ContainerRuntime implements ExecutionCondition {
   /** The label every container a test starts carries, so a crashed run's are found and removed. */
-  static final String LABEL = "spotter.test";
+  public static final String LABEL = "spotter.test";
 
   @Override
   public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
@@ -34,7 +34,7 @@ final class ContainerRuntime implements ExecutionCondition {
   }
 
   /** Why containers can't run here; empty when they can. */
-  static String unavailable() {
+  public static String unavailable() {
     try {
       if (!DockerClientFactory.instance().isDockerAvailable()) {
         return "neither Docker nor Podman answers";
@@ -48,7 +48,7 @@ final class ContainerRuntime implements ExecutionCondition {
   }
 
   /** Whether the runtime is Podman: it runs systemd in a container without privileged mode. */
-  static boolean podman() {
+  public static boolean podman() {
     List<VersionComponent> components =
         DockerClientFactory.instance().client().versionCmd().exec().getComponents();
     return components != null
@@ -59,7 +59,7 @@ final class ContainerRuntime implements ExecutionCondition {
    * Removes the containers a crashed run left (Podman runs without Testcontainers' cleanup
    * container), by their label: never anything else.
    */
-  static void removeLeftovers() {
+  public static void removeLeftovers() {
     DockerClient client = DockerClientFactory.instance().client();
     for (Container container :
         client.listContainersCmd().withShowAll(true).withLabelFilter(List.of(LABEL)).exec()) {

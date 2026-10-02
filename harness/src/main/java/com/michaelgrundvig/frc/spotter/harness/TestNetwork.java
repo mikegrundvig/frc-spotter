@@ -12,11 +12,11 @@ import org.testcontainers.containers.Network;
  * fixed address as on a robot. Labeled, so what a crashed run left (Podman runs without
  * Testcontainers' cleanup container) is removed before a new one is made.
  */
-final class TestNetwork {
+public final class TestNetwork {
   private TestNetwork() {}
 
   /** A fresh network, after removing any a crashed run left, and their containers. */
-  static Network create() {
+  public static Network create() {
     ContainerRuntime.removeLeftovers();
     DockerClient client = DockerClientFactory.instance().client();
     for (com.github.dockerjava.api.model.Network left :

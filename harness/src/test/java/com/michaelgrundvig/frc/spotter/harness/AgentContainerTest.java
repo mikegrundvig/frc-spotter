@@ -9,7 +9,6 @@ import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.client.AgentClient;
 import com.michaelgrundvig.frc.spotter.client.AgentHttp;
-import com.michaelgrundvig.frc.spotter.client.ClientSettings;
 import com.michaelgrundvig.frc.spotter.client.DeployCheck;
 import com.michaelgrundvig.frc.spotter.json.Json;
 import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
@@ -51,17 +50,10 @@ class AgentContainerTest {
   @BeforeAll
   void aCoprocessor() {
     network = TestNetwork.create();
-    coprocessor = new Coprocessor(Images.agent(), network, 11);
+    coprocessor = new Coprocessor(TestImages.agent(), network, 11);
     coprocessor.start();
     coprocessor.configure(STANDIN);
-    client =
-        new AgentClient(
-            "vision-front",
-            coprocessor.agentHost(),
-            coprocessor.agentPort(),
-            coprocessor.softwarePort(),
-            ClientSettings.DEFAULTS,
-            System::nanoTime);
+    client = coprocessor.client("vision-front");
   }
 
   @AfterAll
@@ -139,9 +131,9 @@ class AgentContainerTest {
   /** The packs the agent runs, as the robot's build reads them. */
   static List<Pack> packs() {
     return List.of(
-        Pack.parseYaml(Images.resource("builtin.yaml"), "builtin"),
-        Pack.parseYaml(Images.resource("standin.yaml"), "standin"),
-        Pack.parseYaml(Images.resource("kinds.yaml"), "kinds"));
+        Pack.parseYaml(TestImages.resource("builtin.yaml"), "builtin"),
+        Pack.parseYaml(TestImages.resource("standin.yaml"), "standin"),
+        Pack.parseYaml(TestImages.resource("kinds.yaml"), "kinds"));
   }
 
   @Test
