@@ -53,5 +53,13 @@ tasks.named("test") {
     .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
+// The built-in pack, which every computer runs: the build tool finds it in the jar wherever it runs.
+tasks.named("processResources") {
+    from(rootProject.file("packs/builtin/pack.yaml")) {
+        into "com/michaelgrundvig/frc/spotter/table"
+        rename { "builtin-pack.yaml" }
+    }
+}
+
 ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
 apply from: rootProject.file("gradle/quality.gradle")

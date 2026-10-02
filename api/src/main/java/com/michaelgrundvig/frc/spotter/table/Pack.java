@@ -2,9 +2,11 @@ package com.michaelgrundvig.frc.spotter.table;
 
 import com.michaelgrundvig.frc.spotter.json.JsonValue;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -137,51 +139,66 @@ public record Pack(
     return PackYaml.pack(yaml, source);
   }
 
+  /** Where the jar carries the built-in pack's definitions, as a resource. */
+  static final String BUILTIN_RESOURCE = "builtin-pack.yaml";
+
+  /** The pack of this name in a repository; see {@link #read(Path, List, String)}. */
+  public static Pack read(Path repository, String name) throws IOException {
+    return read(repository, List.of(), name);
+  }
+
   /**
-   * The pack of this name in a repository: the team's ({@code coprocessors/packs/<name>/}) if it
-   * has one, else Spotter's own ({@code packs/<name>/}).
+   * The pack of this name: the team's ({@code coprocessors/packs/<name>/} in its repository) if it
+   * has one, else one in {@code folders} (each a folder of packs, such as an image builder's), else
+   * {@code packs/<name>/} in the repository; the built-in pack, when none of those has it, is the
+   * one this jar carries.
    *
    * @throws TableException when there's no such pack, or it has a problem
    */
-  public static Pack read(Path repository, String name) throws IOException {
-    for (String folder : List.of(TEAM_PACKS, TEMPLATE_PACKS)) {
-      Path file = repository.resolve(folder).resolve(name).resolve(FILE);
+  public static Pack read(Path repository, List<Path> folders, String name) throws IOException {
+    List<Path> places = new ArrayList<>();
+    List<String> names = new ArrayList<>();
+    places.add(repository.resolve(TEAM_PACKS));
+    names.add(TEAM_PACKS + "/" + name + "/" + FILE);
+    for (Path folder : folders) {
+      places.add(folder);
+      names.add(folder.resolve(name).resolve(FILE).toString());
+    }
+    places.add(repository.resolve(TEMPLATE_PACKS));
+    names.add(TEMPLATE_PACKS + "/" + name + "/" + FILE);
+    for (int i = 0; i < places.size(); i++) {
+      Path file = places.get(i).resolve(name).resolve(FILE);
       if (Files.isRegularFile(file)) {
-        Pack pack =
-            parseYaml(
-                Files.readString(file, StandardCharsets.UTF_8), folder + "/" + name + "/" + FILE);
-        if (!pack.name().equals(name)) {
-          throw new TableException(
-              List.of(
-                  folder
-                      + "/"
-                      + name
-                      + "/"
-                      + FILE
-                      + ": its pack is \""
-                      + pack.name()
-                      + "\", not \""
-                      + name
-                      + "\""));
+        return named(parseYaml(Files.readString(file, StandardCharsets.UTF_8), names.get(i)), name);
+      }
+    }
+    if (name.equals(BUILTIN)) {
+      try (InputStream in = Pack.class.getResourceAsStream(BUILTIN_RESOURCE)) {
+        if (in != null) {
+          String source = TEMPLATE_PACKS + "/" + BUILTIN + "/" + FILE;
+          return named(
+              parseYaml(new String(in.readAllBytes(), StandardCharsets.UTF_8), source), name);
         }
-        return pack;
       }
     }
     throw new TableException(
-        List.of(
-            "no pack named \""
-                + name
-                + "\": neither "
-                + TEAM_PACKS
-                + "/"
-                + name
-                + "/"
-                + FILE
-                + " nor "
-                + TEMPLATE_PACKS
-                + "/"
-                + name
-                + "/"
-                + FILE));
+        List.of("no pack named \"" + name + "\": not at " + String.join(", nor ", names)));
+  }
+
+  private static Pack named(Pack pack, String name) {
+    if (!pack.name().equals(name)) {
+      throw new TableException(
+          List.of(
+              "pack \""
+                  + name
+                  + "\"'s "
+                  + FILE
+                  + ": its pack is \""
+                  + pack.name()
+                  + "\", not \""
+                  + name
+                  + "\""));
+    }
+    return pack;
   }
 }

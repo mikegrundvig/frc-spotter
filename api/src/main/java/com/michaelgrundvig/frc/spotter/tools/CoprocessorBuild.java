@@ -24,16 +24,19 @@ import java.util.Map;
  * checks exactly what the robot and the agents do:
  *
  * <ul>
- *   <li>{@code table <repository> <out.json>}: compiles the coprocessor table for the robot
- *       program, with each computer's probes ({@link CompiledTable});
- *   <li>{@code probes <repository> <out-dir>}: compiles each computer's probe definitions from the
- *       table and the packs it names ({@link Packs}), as its agent will, and writes them to {@code
- *       <out-dir>/<computer>.json}, printing each one's hash;
+ *   <li>{@code table [--packs DIR]... <repository> <out.json>}: compiles the coprocessor table for
+ *       the robot program, with each computer's probes ({@link CompiledTable});
+ *   <li>{@code probes [--packs DIR]... <repository> <out-dir>}: compiles each computer's probe
+ *       definitions from the table and the packs it names ({@link Packs}), as its agent will, and
+ *       writes them to {@code <out-dir>/<computer>.json}, printing each one's hash;
  *   <li>{@code agent-configs <repository> <out-dir>}: writes each computer's agent configuration
  *       ({@link AgentConfig}) to {@code <out-dir>/<computer>.json}, for its image;
  *   <li>{@code pack <pack.yaml> <out.json>}: checks a pack and writes its {@code pack.json}, as its
  *       folder carries it on a computer.
  * </ul>
+ *
+ * <p>{@code --packs DIR} names a folder of packs (each {@code <name>/pack.yaml}), such as an image
+ * builder's, looked in after the team's own ({@link Pack#read(Path, List, String)}).
  *
  * <p>A failure prints what's wrong and exits with status 1.
  */
@@ -49,12 +52,22 @@ public final class CoprocessorBuild {
   }
 
   /** Runs one task, printing to {@code out} and {@code err}; the exit status. */
-  static int run(String[] args, PrintStream out, PrintStream err) throws IOException {
+  static int run(String[] given, PrintStream out, PrintStream err) throws IOException {
     try {
+      List<Path> packFolders = new ArrayList<>();
+      List<String> rest = new ArrayList<>();
+      for (int i = 0; i < given.length; i++) {
+        if (given[i].equals("--packs") && i + 1 < given.length) {
+          packFolders.add(Path.of(given[++i]));
+        } else {
+          rest.add(given[i]);
+        }
+      }
+      String[] args = rest.toArray(new String[0]);
       if (args.length == 3 && args[0].equals("table")) {
         Path target = Path.of(args[2]);
         Files.createDirectories(target.toAbsolutePath().getParent());
-        CompiledTable table = compile(Path.of(args[1]));
+        CompiledTable table = compile(Path.of(args[1]), packFolders);
         Files.writeString(target, Json.pretty(table.toJson()), StandardCharsets.UTF_8);
         return 0;
       }
@@ -62,7 +75,7 @@ public final class CoprocessorBuild {
         Path root = Path.of(args[1]);
         Path target = Path.of(args[2]);
         Files.createDirectories(target);
-        Map<String, ProbeSet> sets = probeSets(root, readTable(root));
+        Map<String, ProbeSet> sets = probeSets(root, packFolders, readTable(root));
         for (Map.Entry<String, ProbeSet> set : sets.entrySet()) {
           Files.writeString(
               target.resolve(set.getKey() + ".json"),
@@ -99,7 +112,8 @@ public final class CoprocessorBuild {
         return 0;
       }
       err.println(
-          "Usage: table <repository> <out.json> | probes <repository> <out-dir>"
+          "Usage: table [--packs DIR]... <repository> <out.json>"
+              + " | probes [--packs DIR]... <repository> <out-dir>"
               + " | agent-configs <repository> <out-dir> | pack <pack.yaml> <out.json>");
       return 2;
     } catch (IllegalArgumentException e) {
@@ -108,14 +122,22 @@ public final class CoprocessorBuild {
     }
   }
 
-  /** The compiled table for the repository at {@code root}. */
+  /** The compiled table for the repository at {@code root}, its packs found as its own are. */
   static CompiledTable compile(Path root) throws IOException {
+    return compile(root, List.of());
+  }
+
+  /**
+   * The compiled table for the repository at {@code root}, with packs also from {@code
+   * packFolders}.
+   */
+  public static CompiledTable compile(Path root, List<Path> packFolders) throws IOException {
     Table table = readTable(root);
-    return new CompiledTable(table, "", Map.of(), probeSets(root, table));
+    return new CompiledTable(table, "", Map.of(), probeSets(root, packFolders, table));
   }
 
   /** The table in the repository, checked; a problem is an {@link IllegalArgumentException}. */
-  static Table readTable(Path root) throws IOException {
+  public static Table readTable(Path root) throws IOException {
     try {
       return Table.readYaml(root.resolve(Table.PATH));
     } catch (TableException e) {
@@ -127,7 +149,8 @@ public final class CoprocessorBuild {
    * Each computer's probe definitions: the built-in pack's, the packs it names, and its own from
    * the table; a problem is an {@link IllegalArgumentException} listing them all.
    */
-  static Map<String, ProbeSet> probeSets(Path root, Table table) throws IOException {
+  public static Map<String, ProbeSet> probeSets(Path root, List<Path> packFolders, Table table)
+      throws IOException {
     Map<String, ProbeSet> sets = new LinkedHashMap<>();
     Map<String, Pack> packs = new LinkedHashMap<>();
     try {
@@ -136,7 +159,7 @@ public final class CoprocessorBuild {
         for (String name : prepend(Pack.BUILTIN, computer.packs())) {
           Pack pack = packs.get(name);
           if (pack == null) {
-            pack = Pack.read(root, name);
+            pack = Pack.read(root, packFolders, name);
             packs.put(name, pack);
           }
           named.add(pack);

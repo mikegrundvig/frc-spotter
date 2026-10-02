@@ -202,6 +202,35 @@ class CoprocessorBuildTest {
   }
 
   @Test
+  void packsAreFoundInFoldersOutsideTheRepositoryAndTheBuiltInOneInTheJar() throws IOException {
+    // No built-in pack in the repository: the jar's is the same.
+    ProbeSet withIt = CoprocessorBuild.compile(root).probeSets().get("vision-back");
+    Files.delete(root.resolve("packs/builtin/pack.yaml"));
+    assertThat(CoprocessorBuild.compile(root).probeSets().get("vision-back")).isEqualTo(withIt);
+
+    // A builder's pack, in a folder of its own.
+    Path builder = root.resolveSibling(root.getFileName() + "-builder");
+    Files.createDirectories(builder.resolve("service"));
+    Files.move(
+        root.resolve(Pack.TEAM_PACKS + "/service/" + Pack.FILE),
+        builder.resolve("service/" + Pack.FILE));
+    assertThatThrownBy(() -> CoprocessorBuild.compile(root))
+        .hasMessageContaining("no pack named \"service\": not at coprocessors/packs/service");
+    Path out = root.resolve("build/table.json");
+    assertThat(
+            CoprocessorBuild.run(
+                new String[] {
+                  "table", "--packs", builder.toString(), root.toString(), out.toString()
+                },
+                System.out,
+                System.err))
+        .isZero();
+    CompiledTable compiled = CompiledTable.parse(Files.readString(out));
+    assertThat(compiled.probeSet(compiled.table().computers().get(0)).packs())
+        .containsExactly("builtin", "service");
+  }
+
+  @Test
   void aBrokenPackOrProbeFailsTheBuildSayingWhere() throws IOException {
     write(
         "coprocessors/coprocessors.yaml",
