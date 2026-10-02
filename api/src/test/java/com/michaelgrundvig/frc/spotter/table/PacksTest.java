@@ -167,9 +167,8 @@ class PacksTest {
             computers:
               - name: vision-front
                 address: 11
-                board: orangepi-5
                 cameras: [front-left, front right]
-                packs: [photonvision]
+                packs: [vision]
                 ports:
                   front-left: platform-a-usb-0:1:1.0-video-index0
                   front right: /dev/v4l/by-path/platform-b-usb-0:1:1.0-video-index0
@@ -180,7 +179,7 @@ class PacksTest {
             """,
             "t.yaml");
     Computer computer = table.computers().get(0);
-    assertThat(computer.packs()).containsExactly("photonvision");
+    assertThat(computer.packs()).containsExactly("vision");
     assertThat(computer.ports()).containsKeys("front-left", "front right");
     assertThat(computer.probes()).hasSize(1);
     assertThat(Table.fromJson(Json.parse(Json.compact(table.toJson())))).isEqualTo(table);
@@ -200,9 +199,9 @@ class PacksTest {
         computers:
           - name: vision-front
             address: 11
-            board: orangepi-5
+            agentPort: 5808
             cameras: [front-left]
-            packs: [builtin, Photon, photonvision, photonvision]
+            packs: [builtin, Vision, vision, vision]
             ports:
               back-left: platform-a-video-index0
               front-left: /dev/video0
@@ -215,8 +214,8 @@ class PacksTest {
             e ->
                 assertThat(((TableException) e).problems())
                     .anyMatch(p -> p.startsWith("t.yaml:7: pack builtin needn't be listed"))
-                    .anyMatch(p -> p.startsWith("t.yaml:7: pack \"Photon\" isn't a pack's name"))
-                    .anyMatch(p -> p.startsWith("t.yaml:7: pack photonvision is listed twice"))
+                    .anyMatch(p -> p.startsWith("t.yaml:7: pack \"Vision\" isn't a pack's name"))
+                    .anyMatch(p -> p.startsWith("t.yaml:7: pack vision is listed twice"))
                     .anyMatch(p -> p.startsWith("t.yaml:9: back-left isn't one of"))
                     .anyMatch(
                         p -> p.startsWith("t.yaml:10:") && p.contains("isn't a /dev/v4l/by-path/"))
@@ -224,7 +223,7 @@ class PacksTest {
     assertThatThrownBy(
             () ->
                 Table.parseYaml(
-                    "team: 1\ncomputers:\n  - name: a\n    address: 11\n    board: orangepi-5\n    packs: x\n    ports: [a]\n",
+                    "team: 1\ncomputers:\n  - name: a\n    address: 11\n    agentPort: 5808\n    packs: x\n    ports: [a]\n",
                     "u.yaml"))
         .satisfies(
             e ->
@@ -240,8 +239,8 @@ class PacksTest {
     assertThatThrownBy(
             () -> new AgentConfig("a", "robot.local", 5808, List.of(), List.of(), List.of()))
         .hasMessageContaining("isn't an IPv4 address");
-    assertThatThrownBy(() -> new AgentConfig("a", "", 5800, List.of(), List.of(), List.of()))
-        .hasMessageContaining("is taken");
+    assertThatThrownBy(() -> new AgentConfig("a", "", 80, List.of(), List.of(), List.of()))
+        .hasMessageContaining("is out of range");
     assertThatThrownBy(() -> new AgentConfig("a", "", 5808, List.of("table"), List.of(), List.of()))
         .hasMessageContaining("needn't be listed");
     AgentConfig.Camera camera = new AgentConfig.Camera("x", "");
@@ -255,7 +254,7 @@ class PacksTest {
 
   @Test
   void aStampWhoseProbesDifferFromThisBuildsIsAWarning() {
-    Computer computer = new Computer("vision-front", 11, Board.ORANGEPI_5, List.of(), 5808);
+    Computer computer = new Computer("vision-front", 11, List.of(), 5808);
     Table table = new Table(1234, 5808, List.of(computer));
     ProbeSet set =
         Packs.compile(AgentConfig.of(table, computer), List.of(Pack.parseYaml(PACK, "p")));

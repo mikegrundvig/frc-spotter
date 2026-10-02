@@ -83,7 +83,8 @@ class CoprocessorBuildTest {
         computers:
           - name: vision-front
             address: 11
-            board: orangepi-5
+            image:
+              board: orangepi-5
             cameras: [front-left, front-right]
             packs: [service]
             ports:
@@ -96,7 +97,8 @@ class CoprocessorBuildTest {
                 every: 5
           - name: vision-back
             address: 12
-            board: orangepi-5
+            image:
+              board: orangepi-5
         """);
   }
 
@@ -208,7 +210,8 @@ class CoprocessorBuildTest {
         computers:
           - name: vision-front
             address: 11
-            board: orangepi-5
+            image:
+              board: orangepi-5
             packs: [nothing-here]
         """);
     assertThatThrownBy(() -> CoprocessorBuild.compile(root))
@@ -221,7 +224,8 @@ class CoprocessorBuildTest {
         computers:
           - name: vision-front
             address: 11
-            board: orangepi-5
+            image:
+              board: orangepi-5
             probes:
               - id: builtin.memory
                 kind: unit
@@ -230,7 +234,7 @@ class CoprocessorBuildTest {
     assertThatThrownBy(() -> CoprocessorBuild.compile(root))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining(
-            "coprocessors/coprocessors.yaml:7: probe builtin.memory is already defined at packs/builtin/pack.yaml:");
+            "coprocessors/coprocessors.yaml:8: probe builtin.memory is already defined at packs/builtin/pack.yaml:");
   }
 
   @Test

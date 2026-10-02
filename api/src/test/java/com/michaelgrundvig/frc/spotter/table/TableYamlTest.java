@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
 
@@ -28,25 +29,35 @@ class TableYamlTest {
             """
             team: 1234             # the team number; addresses are 10.TE.AM.x
             agentPort: 5808
+            image:                 # what the image builder is told, for every computer
+              recipe: vision-orangepi
             computers:
               - name: vision-front # hostname
                 address: 11
-                board: orangepi-5
                 cameras: [front-left, front-right]
+                image:
+                  board: orangepi-5
               - name: vision-back
                 address: 12
-                board: orangepi-5-plus
                 agentPort: 5809
                 cameras:
                   - back
             """);
     assertThat(table.team()).isEqualTo(1234);
     assertThat(table.agentPort()).isEqualTo(5808);
+    assertThat(table.image()).containsExactly(Map.entry("recipe", "vision-orangepi"));
     assertThat(table.computers())
         .containsExactly(
             new Computer(
-                "vision-front", 11, Board.ORANGEPI_5, List.of("front-left", "front-right"), 5808),
-            new Computer("vision-back", 12, Board.ORANGEPI_5_PLUS, List.of("back"), 5809));
+                "vision-front",
+                11,
+                List.of("front-left", "front-right"),
+                5808,
+                List.of(),
+                List.of(),
+                Map.of(),
+                Map.of("board", "orangepi-5")),
+            new Computer("vision-back", 12, List.of("back"), 5809));
     assertThat(table.ip(table.computers().get(0))).isEqualTo("10.12.34.11");
   }
 
@@ -60,18 +71,19 @@ class TableYamlTest {
             computers:
             - name: 'vision'
               address: 11
-              board: "orangepi-5b"
+              image:
+                board: "orangepi-5b"
               cameras: ["it's", 'say ''hi''', "\\u0041BC", no]
             -
               name: other
               address: 12
-              board: orangepi-5-max
               cameras:
             """);
     assertThat(table.agentPort()).isEqualTo(Table.DEFAULT_AGENT_PORT);
     assertThat(table.computers().get(0).cameras()).containsExactly("it's", "say 'hi'", "ABC", "no");
     assertThat(table.computers().get(1).cameras()).isEmpty();
-    assertThat(table.computers().get(1).board()).isEqualTo(Board.ORANGEPI_5_MAX);
+    assertThat(table.computers().get(0).image()).containsExactly(Map.entry("board", "orangepi-5b"));
+    assertThat(table.computers().get(1).image()).isEmpty();
   }
 
   @Test
@@ -90,16 +102,15 @@ class TableYamlTest {
                 computers:
                   - name: Vision_Front
                     address: 300
-                    board: raspberry-pi
-                    cameras: [a/b]
+                    image: orangepi
+                    cameras: [" a"]
                   - name: ok
                     address: "12"
-                    board: orangepi-5
-                    agentPort: 5800
+                    agentPort: 80
                 """))
         .containsExactly(
             "coprocessors.yaml:2: unknown key \"adress\" in the table; known: agentPort,"
-                + " computers, team",
+                + " computers, image, team",
             "coprocessors.yaml:1: team 99999 is out of range: 0 to 25599",
             "coprocessors.yaml:4: name \"Vision_Front\" isn't a hostname: use lowercase letters,"
                 + " digits, and hyphens, starting with a letter and not ending with a hyphen, at"
@@ -107,39 +118,66 @@ class TableYamlTest {
             "coprocessors.yaml:5: address 300 is out of range: the last number of 10.TE.AM.x,"
                 + " from 6 to 19, FRC's static range for devices on the robot (11 and up by"
                 + " convention)",
-            "coprocessors.yaml:6: unknown board \"raspberry-pi\"; known: orangepi-5, orangepi-5b,"
-                + " orangepi-5-plus, orangepi-5-pro, orangepi-5-max",
-            "coprocessors.yaml:7: camera \"a/b\" has a '/'; PhotonVision publishes each camera"
-                + " under /photonvision/<camera>",
+            "coprocessors.yaml:7: camera \" a\" starts or ends with a space",
+            "coprocessors.yaml:6: image is a mapping: each setting, then its value",
             "coprocessors.yaml:9: address must be a whole number, not \"12\"",
-            "coprocessors.yaml:11: agentPort 5800 is taken: PhotonVision's page uses it");
+            "coprocessors.yaml:10: agentPort 80 is out of range: 1024 to 65535 (5801-5809 is the"
+                + " team range)");
   }
 
   @Test
-  void namesAddressesAndCamerasAreUnique() {
+  void namesAndAddressesAreUniqueAndCamerasPerComputer() {
+    String table =
+        """
+        team: 0
+        computers:
+          - name: vision
+            address: 11
+            cameras: [front]
+          - name: vision
+            address: 11
+            cameras: [back]
+          - name: other
+            address: 13
+            cameras: [back]
+        """;
+    assertThat(problems(table))
+        .containsExactly(
+            "coprocessors.yaml:6: name vision is taken (line 3)",
+            "coprocessors.yaml:6: address 11 is taken (line 3)");
+    // Two computers may each have a camera of one name: an image builder that needs them unique
+    // on the robot checks that itself.
+    assertThat(
+            parse(
+                    table.replace(
+                        "vision\n    address: 11\n    cameras: [back]",
+                        "front\n    address: 12\n    cameras: [back]"))
+                .computers())
+        .hasSize(3);
+  }
+
+  @Test
+  void imageSettingsAreCarriedAndChecked() {
     assertThat(
             problems(
                 """
                 team: 0
+                image:
+                  9x: y
                 computers:
-                  - name: vision
+                  - name: a
                     address: 11
-                    board: orangepi-5
-                    cameras: [front]
-                  - name: vision
-                    address: 11
-                    board: orangepi-5
-                    cameras: [back]
-                  - name: other
-                    address: 13
-                    board: orangepi-5
-                    cameras: [back]
+                    image:
+                      board:
+                      ok: [x]
                 """))
         .containsExactly(
-            "coprocessors.yaml:7: name vision is taken (line 3)",
-            "coprocessors.yaml:7: address 11 is taken (line 3)",
-            "coprocessors.yaml:11: camera back is already listed by the computer on line 7;"
-                + " PhotonVision camera names must be unique on the robot");
+            "coprocessors.yaml:3: image setting \"9x\" isn't a name: a letter, then letters,"
+                + " digits, '.', '_', or '-'",
+            "coprocessors.yaml:8: image setting board is a single value",
+            "coprocessors.yaml:9: image setting ok is a single value");
+    assertThatThrownBy(() -> new Table(0, 5808, List.of(), Map.of("recipe", "a\nb")))
+        .hasMessageContaining("image setting recipe must be one line of text");
   }
 
   @Test
@@ -149,8 +187,7 @@ class TableYamlTest {
             "coprocessors.yaml:1: team is missing",
             "coprocessors.yaml:1: agentPort 70000 is out of range: 1024 to 65535 (5801-5809 is"
                 + " the team range)",
-            "coprocessors.yaml:3: address is missing",
-            "coprocessors.yaml:3: board is missing");
+            "coprocessors.yaml:3: address is missing");
     assertThat(problems("team: 0\n"))
         .containsExactly("coprocessors.yaml:1: computers is missing (computers: [] for none)");
   }
@@ -166,19 +203,19 @@ class TableYamlTest {
             "coprocessors.yaml:3: each computer is a mapping: - name: ..., address: ...");
     assertThat(
             problems(
-                "team: 0\ncomputers:\n  - name: a\n    address: 11\n    board: orangepi-5\n"
+                "team: 0\ncomputers:\n  - name: a\n    address: 11\n    agentPort: 5808\n"
                     + "    cameras: front\n"))
         .containsExactly("coprocessors.yaml:6: cameras must be a list: [front-left, front-right]");
     assertThat(
             problems(
-                "team: 0\ncomputers:\n  - name: a\n    address: 11\n    board: orangepi-5\n"
+                "team: 0\ncomputers:\n  - name: a\n    address: 11\n    agentPort: 5808\n"
                     + "    cameras:\n      - [x]\n      - \"\"\n"))
         .containsExactly(
             "coprocessors.yaml:7: each camera is a name",
             "coprocessors.yaml:8: a camera's name is empty");
     assertThat(
             problems(
-                "team: 0\ncomputers:\n  - name: a\n    address: 11\n    board: orangepi-5\n"
+                "team: 0\ncomputers:\n  - name: a\n    address: 11\n    agentPort: 5808\n"
                     + "    cameras: [front, front]\n"))
         .containsExactly("coprocessors.yaml:6: camera front is listed twice");
     assertThat(problems("team:\n  nested: 1\ncomputers: []\n"))
@@ -233,8 +270,7 @@ class TableYamlTest {
     assertThat(parse(computerWith("cameras: [\"true\", '1']")).computers().get(0).cameras())
         .containsExactly("true", "1");
     assertThat(
-            problems(
-                "team: 0\ncomputers:\n  - name: null\n    address: 11\n    board: orangepi-5\n"))
+            problems("team: 0\ncomputers:\n  - name: null\n    address: 11\n    agentPort: 5808\n"))
         .containsExactly(
             "coprocessors.yaml:3: name null isn't text to YAML (it's null, true or false, or a"
                 + " number): put it in quotes");
@@ -259,10 +295,10 @@ class TableYamlTest {
         .containsExactly(
             "coprocessors.yaml:6: camera \"café\" has a character other than a letter, digit,"
                 + " space, or punctuation (printable ASCII)");
-    assertThat(problems("team: 0\nagentPort: 1183\ncomputers: []\n"))
+    assertThat(problems("team: 0\nagentPort: 80\ncomputers: []\n"))
         .containsExactly(
-            "coprocessors.yaml:2: agentPort 1183 is taken: PhotonVision's camera streams use 1181"
-                + " and up, two ports per camera");
+            "coprocessors.yaml:2: agentPort 80 is out of range: 1024 to 65535 (5801-5809 is the"
+                + " team range)");
   }
 
   @Test
@@ -276,7 +312,7 @@ class TableYamlTest {
   }
 
   private static String computerWith(String line) {
-    return "team: 0\ncomputers:\n  - name: a\n    address: 11\n    board: orangepi-5\n    "
+    return "team: 0\ncomputers:\n  - name: a\n    address: 11\n    agentPort: 5808\n    "
         + line
         + "\n";
   }
@@ -286,7 +322,7 @@ class TableYamlTest {
     Table table =
         parse(
             "\uFEFFteam: 0 # hash\r\n\"agentPort\": 5809\r\ncomputers:\r\n  - name: a\r\n"
-                + "    address: 11\r\n    board: orangepi-5-pro\r\n"
+                + "    address: 11\r\n    agentPort: 5807\r\n"
                 + "    cameras: [\"x # not a comment\", y#z, it's]\r\n");
     assertThat(table.agentPort()).isEqualTo(5809);
     assertThat(table.computers().get(0).cameras())

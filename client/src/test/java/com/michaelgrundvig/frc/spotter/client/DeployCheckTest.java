@@ -6,7 +6,6 @@ import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.client.DeployCheck.Asked;
 import com.michaelgrundvig.frc.spotter.client.DeployCheck.Finding;
 import com.michaelgrundvig.frc.spotter.client.DeployCheck.Verdict;
-import com.michaelgrundvig.frc.spotter.table.Board;
 import com.michaelgrundvig.frc.spotter.table.CompiledTable;
 import com.michaelgrundvig.frc.spotter.table.Computer;
 import com.michaelgrundvig.frc.spotter.table.Table;
@@ -28,9 +27,8 @@ import org.junit.jupiter.api.Test;
  */
 class DeployCheckTest {
   private static final Computer FRONT =
-      new Computer("vision-front", 11, Board.ORANGEPI_5, List.of("front-left"), 5808);
-  private static final Computer BACK =
-      new Computer("vision-back", 12, Board.ORANGEPI_5, List.of("back-left"), 5808);
+      new Computer("vision-front", 11, List.of("front-left"), 5808);
+  private static final Computer BACK = new Computer("vision-back", 12, List.of("back-left"), 5808);
   private static final CompiledTable TABLE =
       new CompiledTable(
           new Table(24680, 5808, List.of(FRONT, BACK)),

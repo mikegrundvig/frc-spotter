@@ -7,35 +7,35 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One coprocessor in the table: a vision computer running PhotonVision.
+ * One coprocessor in the table.
  *
  * @param name its hostname, and its name everywhere else: lowercase letters, digits, and hyphens,
  *     starting with a letter, at most 63 characters
  * @param address the last number of its address, 10.TE.AM.x: 6 to 19, FRC's static range for
  *     devices on the robot (11 and up by convention)
- * @param board the board it runs on
- * @param cameras the PhotonVision camera names it runs (its role): the names robot code gives
- *     {@code PhotonCamera}
- * @param agentPort the port its health agent serves on
+ * @param cameras the cameras it runs (its role), by the names the robot code knows them by
+ * @param agentPort the port its agent serves on
  * @param packs the packs it runs besides the built-in one, in order (docs/agent.md, "Packs")
  * @param probes the probes the table gives it besides its packs', as written
  * @param ports where each camera plugs in, by camera: its {@code /dev/v4l/by-path/} entry (with or
  *     without that folder); a camera without one has no port to check
+ * @param image what its image builder is told about it (the board it runs on, say), by name, each a
+ *     line of text: Spotter only carries it, and the builder checks it
  */
 public record Computer(
     String name,
     int address,
-    Board board,
     List<String> cameras,
     int agentPort,
     List<String> packs,
     List<Pack.Written> probes,
-    Map<String, String> ports) {
+    Map<String, String> ports,
+    Map<String, String> image) {
   /** What a computer's name may be: a hostname's single label, lowercase. */
   public static final Pattern NAME = Pattern.compile("[a-z]([a-z0-9-]{0,61}[a-z0-9])?");
 
@@ -49,21 +49,18 @@ public record Computer(
   /** The highest address a computer may have: 10.TE.AM.19. */
   public static final int LAST_ADDRESS = 19;
 
-  /**
-   * The first of PhotonVision's camera-stream ports: its streams start at 1181, two ports per
-   * camera (PhotonVision's networking docs).
-   */
-  public static final int FIRST_STREAM_PORT = 1181;
-
-  /** The last port kept for PhotonVision's camera streams: ten cameras' worth. */
-  public static final int LAST_STREAM_PORT = 1200;
-
   /** The longest a camera's name may be. */
   public static final int MAX_CAMERA_NAME = 64;
 
-  /** A computer with no packs or probes of its own. */
-  public Computer(String name, int address, Board board, List<String> cameras, int agentPort) {
-    this(name, address, board, cameras, agentPort, List.of(), List.of(), Map.of());
+  /** What an image setting's name may be. */
+  public static final Pattern IMAGE_KEY = Pattern.compile("[A-Za-z][A-Za-z0-9_.-]{0,63}");
+
+  /** The longest an image setting's value may be. */
+  public static final int MAX_IMAGE_VALUE = 256;
+
+  /** A computer with no packs, probes, ports, or image settings of its own. */
+  public Computer(String name, int address, List<String> cameras, int agentPort) {
+    this(name, address, cameras, agentPort, List.of(), List.of(), Map.of(), Map.of());
   }
 
   public Computer {
@@ -71,7 +68,9 @@ public record Computer(
     packs = List.copyOf(packs);
     probes = List.copyOf(probes);
     ports = Collections.unmodifiableMap(new LinkedHashMap<>(ports));
+    image = Collections.unmodifiableMap(new TreeMap<>(image));
     List<String> problems = new ArrayList<>();
+    image.forEach((key, value) -> addIfPresent(problems, imageProblem(key, value)));
     for (Map.Entry<String, String> port : ports.entrySet()) {
       if (!cameras.contains(port.getKey())) {
         problems.add(
@@ -161,35 +160,35 @@ public record Computer(
           + "\" has a character other than a letter, digit, space, or punctuation (printable"
           + " ASCII)";
     }
-    if (camera.indexOf('/') >= 0) {
-      return "camera \""
-          + camera
-          + "\" has a '/'; PhotonVision publishes each camera under /photonvision/<camera>";
-    }
     return null;
   }
 
   /**
-   * What's wrong with an agent's port, or null if nothing. 5800 is PhotonVision's own page, 5810
-   * NetworkTables', and 1181 to 1200 PhotonVision's camera streams.
+   * What's wrong with an agent's port, or null if nothing. An image builder may refuse more (the
+   * ports the software in its images uses).
    */
   public static @Nullable String portProblem(int port) {
     if (port < 1024 || port > 65535) {
       return "agentPort " + port + " is out of range: 1024 to 65535 (5801-5809 is the team range)";
     }
-    if (port >= FIRST_STREAM_PORT && port <= LAST_STREAM_PORT) {
-      return "agentPort "
-          + port
-          + " is taken: PhotonVision's camera streams use "
-          + FIRST_STREAM_PORT
-          + " and up, two ports per camera";
+    return null;
+  }
+
+  /** What's wrong with one of the image builder's settings, or null if nothing. */
+  public static @Nullable String imageProblem(String key, String value) {
+    if (!IMAGE_KEY.matcher(key).matches()) {
+      return "image setting \""
+          + key
+          + "\" isn't a name: a letter, then letters, digits, '.', '_', or '-'";
     }
-    if (port == 5800 || port == 5810) {
-      return "agentPort "
-          + port
-          + " is taken: "
-          + (port == 5800 ? "PhotonVision's page" : "NetworkTables")
-          + " uses it";
+    if (value.isEmpty()
+        || value.length() > MAX_IMAGE_VALUE
+        || value.chars().anyMatch(c -> c < 0x20 || c == 0x7f)) {
+      return "image setting "
+          + key
+          + " must be one line of text, at most "
+          + MAX_IMAGE_VALUE
+          + " characters";
     }
     return null;
   }
@@ -199,67 +198,48 @@ public record Computer(
     return JsonValue.Obj.builder()
         .put("name", name)
         .put("address", address)
-        .put("board", board.id())
         .put("cameras", cameras)
         .put("agentPort", agentPort)
         .put("packs", packs)
         .put("probes", JsonValue.array(probes, Pack.Written::toJson))
-        .put("ports", ports(ports))
+        .put("ports", texts(ports))
+        .put("image", texts(image))
         .build();
   }
 
-  private static JsonValue.Obj ports(Map<String, String> ports) {
+  /** Names and their text, as a JSON object. */
+  static JsonValue.Obj texts(Map<String, String> texts) {
     JsonValue.Obj.Builder json = JsonValue.Obj.builder();
-    ports.forEach(json::put);
+    texts.forEach(json::put);
     return json.build();
   }
 
   /** A computer from its JSON. */
   public static Computer fromJson(JsonValue json) {
     JsonValue.Obj object = json.asObject("computer");
-    String boardId = object.string("board", "");
-    Board board =
-        Board.byId(boardId)
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        "unknown board \"" + boardId + "\"; known: " + Board.ids()));
     return new Computer(
         object.string("name", ""),
         object.integer("address", 0),
-        board,
         object.strings("cameras"),
         object.integer("agentPort", Table.DEFAULT_AGENT_PORT),
         object.strings("packs"),
         object.list("probes", probe -> Pack.Written.fromJson(probe, Table.PATH)),
-        ports(object.objectOrEmpty("ports")));
+        texts(object.objectOrEmpty("ports")),
+        texts(object.objectOrEmpty("image")));
   }
 
-  private static Map<String, String> ports(JsonValue.Obj json) {
-    Map<String, String> ports = new LinkedHashMap<>();
-    for (String camera : json.members().keySet()) {
-      ports.put(camera, json.string(camera, ""));
+  /** A JSON object of names and their text, in its order. */
+  static Map<String, String> texts(JsonValue.Obj json) {
+    Map<String, String> texts = new LinkedHashMap<>();
+    for (String name : json.members().keySet()) {
+      texts.put(name, json.string(name, ""));
     }
-    return ports;
+    return texts;
   }
 
   private static void addIfPresent(List<String> problems, @Nullable String problem) {
     if (problem != null) {
       problems.add(problem);
     }
-  }
-
-  /** The cameras listed by more than one of these computers, each once. */
-  static Set<String> sharedCameras(List<Computer> computers) {
-    Set<String> seen = new HashSet<>();
-    Set<String> shared = new HashSet<>();
-    for (Computer computer : computers) {
-      for (String camera : computer.cameras()) {
-        if (!seen.add(camera)) {
-          shared.add(camera);
-        }
-      }
-    }
-    return shared;
   }
 }

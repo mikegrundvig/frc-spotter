@@ -14,7 +14,6 @@ import com.michaelgrundvig.frc.spotter.client.DeployCheck;
 import com.michaelgrundvig.frc.spotter.json.Json;
 import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
 import com.michaelgrundvig.frc.spotter.table.AgentConfig;
-import com.michaelgrundvig.frc.spotter.table.Board;
 import com.michaelgrundvig.frc.spotter.table.CompiledTable;
 import com.michaelgrundvig.frc.spotter.table.Computer;
 import com.michaelgrundvig.frc.spotter.table.Pack;
@@ -263,7 +262,7 @@ class AgentContainerTest {
 
   @Test
   void theDeployCheckComparesItsStampAndSeesWhatAnswers() throws Exception {
-    Computer computer = new Computer("vision-front", 11, Board.ORANGEPI_5, List.of(), 5808);
+    Computer computer = new Computer("vision-front", 11, List.of(), 5808);
     Table table = new Table(Images.TEAM, 5808, List.of(computer));
     ProbeSet probes = Packs.compile(STANDIN, packs());
     CompiledTable same =

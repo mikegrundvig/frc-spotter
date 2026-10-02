@@ -18,9 +18,17 @@ import org.junit.jupiter.api.io.TempDir;
 
 class TableTest {
   private static final Computer FRONT =
-      new Computer("vision-front", 11, Board.ORANGEPI_5, List.of("front-left"), 5808);
+      new Computer("vision-front", 11, List.of("front-left"), 5808);
   private static final Computer BACK =
-      new Computer("vision-back", 12, Board.ORANGEPI_5B, List.of("back"), 5809);
+      new Computer(
+          "vision-back",
+          12,
+          List.of("back"),
+          5809,
+          List.of(),
+          List.of(),
+          Map.of(),
+          Map.of("board", "orangepi-5b"));
 
   @Test
   void addressesAreBuiltFromTheTeamNumber() {
@@ -39,29 +47,30 @@ class TableTest {
 
   @Test
   void aTableRoundTripsThroughJson() {
-    Table table = new Table(1234, 5808, List.of(FRONT, BACK));
+    Table table = new Table(1234, 5808, List.of(FRONT, BACK), Map.of("recipe", "r"));
     assertThat(Table.fromJson(Json.parse(Json.compact(table.toJson())))).isEqualTo(table);
   }
 
   @Test
   void everyTableIsCheckedHoweverItsMade() {
-    Computer twin = new Computer("vision-front", 11, Board.ORANGEPI_5, List.of("front-left"), 5808);
+    Computer twin = new Computer("vision-front", 11, List.of("front-left"), 5808);
     assertThatThrownBy(() -> new Table(-1, 80, List.of(FRONT, twin)))
         .isInstanceOf(TableException.class)
         .hasMessageContaining("team -1 is out of range")
         .hasMessageContaining("agentPort 80 is out of range")
         .hasMessageContaining("two computers are named vision-front")
-        .hasMessageContaining("two computers have address 11")
-        .hasMessageContaining("cameras listed by two computers: front-left");
-    assertThatThrownBy(() -> new Computer("x", 11, Board.ORANGEPI_5, List.of("a", "a"), 5810))
+        .hasMessageContaining("two computers have address 11");
+    assertThatThrownBy(() -> new Computer("x", 11, List.of("a", "a"), 70000))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("lists a camera twice")
-        .hasMessageContaining("NetworkTables uses it");
+        .hasMessageContaining("agentPort 70000 is out of range");
     assertThat(Computer.cameraProblem(" padded")).contains("starts or ends with a space");
     assertThat(Computer.cameraProblem("x".repeat(65))).contains("longer than 64");
     assertThatThrownBy(
-            () -> Computer.fromJson(Json.parse("{\"name\":\"a\",\"address\":11,\"board\":\"pi\"}")))
-        .hasMessageContaining("unknown board \"pi\"");
+            () ->
+                Computer.fromJson(
+                    Json.parse("{\"name\":\"a\",\"address\":11,\"image\":{\"b\":\"\"}}")))
+        .hasMessageContaining("image setting b must be one line of text");
   }
 
   @Test
@@ -69,13 +78,6 @@ class TableTest {
     Path file = dir.resolve("coprocessors.yaml");
     Files.writeString(file, "team: 0\ncomputers: []\n");
     assertThat(Table.readYaml(file)).isEqualTo(new Table(0, 5808, List.of()));
-  }
-
-  @Test
-  void boardsAreKnownByTheirNames() {
-    assertThat(Board.byId("orangepi-5-plus")).contains(Board.ORANGEPI_5_PLUS);
-    assertThat(Board.byId("orangepi-6")).isEmpty();
-    assertThat(Board.ORANGEPI_5B).hasToString("orangepi-5b");
   }
 
   @Test

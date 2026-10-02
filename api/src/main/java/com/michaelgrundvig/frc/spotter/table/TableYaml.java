@@ -19,9 +19,9 @@ import org.jspecify.annotations.Nullable;
  * and line, so one run of the build lists everything to fix.
  */
 final class TableYaml {
-  private static final Set<String> TABLE_KEYS = Set.of("team", "agentPort", "computers");
+  private static final Set<String> TABLE_KEYS = Set.of("team", "agentPort", "computers", "image");
   private static final Set<String> COMPUTER_KEYS =
-      Set.of("name", "address", "board", "cameras", "agentPort", "packs", "probes", "ports");
+      Set.of("name", "address", "cameras", "agentPort", "packs", "probes", "ports", "image");
 
   /** A whole number as the table writes one: no leading zeros, no sign but minus. */
   private static final Pattern INTEGER = Pattern.compile("-?(0|[1-9][0-9]{0,8})");
@@ -71,7 +71,7 @@ final class TableYaml {
     List<Computer> computers = new ArrayList<>();
     Map<String, Integer> nameLines = new HashMap<>();
     Map<Integer, Integer> addressLines = new HashMap<>();
-    Map<String, Integer> cameraLines = new HashMap<>();
+    Map<String, String> image = image(mapping);
     Entry list = mapping.entries().get("computers");
     if (list == null) {
       problems.add(at(mapping.line(), "computers is missing (computers: [] for none)"));
@@ -94,19 +94,6 @@ final class TableYaml {
                   fields.line(),
                   "address " + computer.address() + " is taken (line " + earlier + ")"));
         }
-        for (String camera : computer.cameras()) {
-          earlier = cameraLines.putIfAbsent(camera, fields.line());
-          if (earlier != null) {
-            problems.add(
-                at(
-                    fields.line(),
-                    "camera "
-                        + camera
-                        + " is already listed by the computer on line "
-                        + earlier
-                        + "; PhotonVision camera names must be unique on the robot"));
-          }
-        }
         computers.add(computer);
       }
     } else if (!(list.value() instanceof Scalar scalar && scalar.empty())) {
@@ -115,7 +102,7 @@ final class TableYaml {
     if (!problems.isEmpty() || team == null || agentPort == null) {
       throw new TableException(problems);
     }
-    return new Table(team, agentPort, computers);
+    return new Table(team, agentPort, computers, image);
   }
 
   private @Nullable Computer computer(Node item, int defaultPort) {
@@ -133,17 +120,6 @@ final class TableYaml {
     if (address != null) {
       check(mapping.entries().get("address"), Computer.addressProblem(address));
     }
-    Board board = null;
-    String boardId = name(mapping, "board");
-    if (boardId != null) {
-      board = Board.byId(boardId).orElse(null);
-      if (board == null) {
-        problems.add(
-            at(
-                lineOf(mapping, "board"),
-                "unknown board \"" + boardId + "\"; known: " + Board.ids()));
-      }
-    }
     List<String> cameras = cameras(mapping);
     Integer port = integer(mapping, "agentPort", defaultPort);
     if (port != null && mapping.entries().containsKey("agentPort")) {
@@ -154,14 +130,41 @@ final class TableYaml {
     Entry probesEntry = mapping.entries().get("probes");
     List<Pack.Written> probes =
         probesEntry == null ? List.of() : PackYaml.tableProbes(probesEntry, source, problems);
-    if (problems.size() > before
-        || name == null
-        || address == null
-        || board == null
-        || port == null) {
+    Map<String, String> image = image(mapping);
+    if (problems.size() > before || name == null || address == null || port == null) {
       return null;
     }
-    return new Computer(name, address, board, cameras, port, packs, probes, ports);
+    return new Computer(name, address, cameras, port, packs, probes, ports, image);
+  }
+
+  /**
+   * What the image builder is told: a mapping of names to single values, which Spotter only carries
+   * (the builder checks them).
+   */
+  private Map<String, String> image(Mapping mapping) {
+    Entry entry = mapping.entries().get("image");
+    if (entry == null || entry.value() instanceof Scalar scalar && scalar.empty()) {
+      return Map.of();
+    }
+    if (!(entry.value() instanceof Mapping settings)) {
+      problems.add(at(entry.line(), "image is a mapping: each setting, then its value"));
+      return Map.of();
+    }
+    Map<String, String> found = new java.util.TreeMap<>();
+    for (Map.Entry<String, Entry> setting : settings.entries().entrySet()) {
+      int line = setting.getValue().line();
+      if (!(setting.getValue().value() instanceof Scalar value) || value.empty()) {
+        problems.add(at(line, "image setting " + setting.getKey() + " is a single value"));
+        continue;
+      }
+      String problem = Computer.imageProblem(setting.getKey(), value.text());
+      if (problem != null) {
+        problems.add(at(line, problem));
+      } else {
+        found.put(setting.getKey(), value.text());
+      }
+    }
+    return found;
   }
 
   /** Where each camera plugs in: a mapping of camera to its by-path entry. */
@@ -202,7 +205,7 @@ final class TableYaml {
       return List.of();
     }
     if (!(entry.value() instanceof Sequence sequence)) {
-      problems.add(at(entry.line(), "packs must be a list: [photonvision]"));
+      problems.add(at(entry.line(), "packs must be a list: [my-pack]"));
       return List.of();
     }
     List<String> packs = new ArrayList<>();
@@ -326,11 +329,6 @@ final class TableYaml {
     if (problem != null) {
       problems.add(at(Optional.ofNullable(entry).map(Entry::line).orElse(1), problem));
     }
-  }
-
-  private static int lineOf(Mapping mapping, String key) {
-    Entry entry = mapping.entries().get(key);
-    return entry == null ? mapping.line() : entry.line();
   }
 
   private String at(int line, String message) {

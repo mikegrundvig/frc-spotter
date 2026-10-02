@@ -6,24 +6,28 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeSet;
+import java.util.TreeMap;
 import org.jspecify.annotations.Nullable;
 
 /**
  * A team's coprocessors: {@code coprocessors/coprocessors.yaml}, the one place they're described.
- * Each image's identity, the robot program's list of what to watch, and Pitwall's links all come
- * from it. Every table is checked when it's made, however it's made: names, addresses, and camera
- * names are unique, and each value is in range.
+ * Each computer's agent configuration, the robot program's list of what to watch, and what an image
+ * builder makes all come from it. Every table is checked when it's made, however it's made: names
+ * and addresses are unique, and each value is in range. An image builder checks its own settings
+ * ({@link #image}, {@link Computer#image}) on top.
  *
  * @param team the team number; computers are at 10.TE.AM.x
- * @param agentPort the port the health agents serve on, unless a computer says otherwise
+ * @param agentPort the port the agents serve on, unless a computer says otherwise
  * @param computers the coprocessors, in the order the file lists them
+ * @param image what the image builder is told for every computer (which recipe, say), by name
  */
-public record Table(int team, int agentPort, List<Computer> computers) {
+public record Table(int team, int agentPort, List<Computer> computers, Map<String, String> image) {
   /** The agents' port unless the table says otherwise: in FRC's team range, 5800-5810. */
   public static final int DEFAULT_AGENT_PORT = 5808;
 
@@ -33,9 +37,22 @@ public record Table(int team, int agentPort, List<Computer> computers) {
   /** Where a team's repository keeps its table, from the repository's root. */
   public static final String PATH = "coprocessors/coprocessors.yaml";
 
+  /** A table with no image settings of its own. */
+  public Table(int team, int agentPort, List<Computer> computers) {
+    this(team, agentPort, computers, Map.of());
+  }
+
   public Table {
     computers = List.copyOf(computers);
+    image = Collections.unmodifiableMap(new TreeMap<>(image));
     List<String> problems = new ArrayList<>();
+    image.forEach(
+        (key, value) -> {
+          String problem = Computer.imageProblem(key, value);
+          if (problem != null) {
+            problems.add(problem);
+          }
+        });
     String teamProblem = teamProblem(team);
     if (teamProblem != null) {
       problems.add(teamProblem);
@@ -53,10 +70,6 @@ public record Table(int team, int agentPort, List<Computer> computers) {
       if (!addresses.add(computer.address())) {
         problems.add("two computers have address " + computer.address());
       }
-    }
-    Set<String> shared = new TreeSet<>(Computer.sharedCameras(computers));
-    if (!shared.isEmpty()) {
-      problems.add("cameras listed by two computers: " + String.join(", ", shared));
     }
     if (!problems.isEmpty()) {
       throw new TableException(problems);
@@ -102,6 +115,7 @@ public record Table(int team, int agentPort, List<Computer> computers) {
         .put("team", team)
         .put("agentPort", agentPort)
         .put("computers", JsonValue.array(computers, Computer::toJson))
+        .put("image", Computer.texts(image))
         .build();
   }
 
@@ -111,6 +125,7 @@ public record Table(int team, int agentPort, List<Computer> computers) {
     return new Table(
         object.integer("team", 0),
         object.integer("agentPort", DEFAULT_AGENT_PORT),
-        object.list("computers", Computer::fromJson));
+        object.list("computers", Computer::fromJson),
+        Computer.texts(object.objectOrEmpty("image")));
   }
 }
