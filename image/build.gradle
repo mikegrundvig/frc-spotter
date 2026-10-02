@@ -1,0 +1,65 @@
+// The coprocessor image builder's scripts (image/) are shell, so their tests are too
+// (image/test/run.sh). They need bash and yq (mikefarah's, version 4): Linux CI has both, and a
+// Windows laptop rarely does. So ci runs them wherever bash and yq are found, says so when it skips
+// them, and in CI on Linux (CI=true) runs every one or fails: no test may skip there.
+
+def imageTests = tasks.register("imageTest") {
+    group = "verification"
+    description = "Run the coprocessor image scripts' tests, where bash and yq are installed."
+    def root = rootDir
+    def imageDir = projectDir
+    inputs.files(fileTree(imageDir) { exclude "build/**" }).withPathSensitivity(PathSensitivity.RELATIVE)
+    def marker = layout.buildDirectory.file("image-test/passed")
+    outputs.file(marker)
+    def os = System.getProperty("os.name").toLowerCase()
+    def windows = os.contains("windows")
+    def requireTools = System.getenv("CI") != null && os.contains("linux")
+    doLast {
+        def passed = marker.get().asFile
+        passed.delete()
+        if (windows) {
+            logger.lifecycle("Coprocessor image tests skipped: they run on Linux and macOS (bash and yq), and in CI.")
+            return
+        }
+        // yq's version, through bash: null when either is missing.
+        def yqVersion = null
+        try {
+            def check = new ProcessBuilder("bash", "-c", "yq --version 2>&1").redirectErrorStream(true).start()
+            def text = check.inputStream.text
+            if (check.waitFor() == 0) {
+                yqVersion = text.trim()
+            }
+        } catch (IOException ignored) {
+            // No bash.
+        }
+        def usable = yqVersion != null && yqVersion.contains("mikefarah") &&
+                (yqVersion.contains(" v4.") || yqVersion.contains(" version 4."))
+        if (!usable) {
+            def why = yqVersion == null ? "bash or yq isn't installed" : "yq isn't mikefarah's version 4 (${yqVersion})"
+            if (requireTools) {
+                throw new GradleException("Coprocessor image tests can't run in CI: ${why}.")
+            }
+            logger.lifecycle("Coprocessor image tests skipped: ${why} (https://github.com/mikefarah/yq). CI runs them.")
+            return
+        }
+        def builder = new ProcessBuilder("bash", "image/test/run.sh").directory(root).redirectErrorStream(true)
+        if (requireTools) {
+            // In CI on Linux, a test skipped for a missing tool fails the run: all of them run there.
+            builder.environment().put("COPROC_TESTS_STRICT", "1")
+        }
+        def run = builder.start()
+        def output = run.inputStream.text
+        if (run.waitFor() != 0) {
+            throw new GradleException("Coprocessor image tests failed:\n" + output)
+        }
+        logger.lifecycle(output.readLines().last())
+        passed.parentFile.mkdirs()
+        passed.text = output
+    }
+}
+
+tasks.register("ci") {
+    group = "verification"
+    description = "Run the image scripts' tests, as CI does."
+    dependsOn imageTests
+}

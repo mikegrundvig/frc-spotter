@@ -1,0 +1,21 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    // Downloads the JDK the build asks for (java.toolchain), so ./gradlew works on any machine with
+    // any Java installed.
+    id "org.gradle.toolchains.foojay-resolver-convention" version "1.0.0"
+}
+
+rootProject.name = "frc-spotter"
+
+// What the agent and the robot share: the agent's API records, the coprocessor table, PhotonVision's
+// settings in their canonical form, and the JSON they're written in.
+include "api"
+// The agent each coprocessor runs.
+include "agent"
+// The coprocessor image builder (shell): its tests, run by Gradle.
+include "image"

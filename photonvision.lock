@@ -1,0 +1,29 @@
+{
+  "version": "dev-v2027.0.0-alpha-2-69-g71416112",
+  "jar": {
+    "url": "PLACEHOLDER: archive this version's linuxarm64 jar in a release of this repository; PhotonVision's rolling Dev release no longer holds it",
+    "sha256": "PLACEHOLDER: the archived jar's SHA-256"
+  },
+  "images": {
+    "orangepi-5": {
+      "url": "https://github.com/PhotonVision/photon-image-modifier/releases/download/v2027.2.3/photonvision_opi5.img.xz",
+      "sha256": "edf2bda3032579d759de46aab0e8094cfd3de3586ba764b663470d2b80351cb7"
+    },
+    "orangepi-5b": {
+      "url": "https://github.com/PhotonVision/photon-image-modifier/releases/download/v2027.2.3/photonvision_opi5b.img.xz",
+      "sha256": "a425f3c7872d284039830da432f87399acf9f13daa81f620a3a5d3e49848fec5"
+    },
+    "orangepi-5-plus": {
+      "url": "https://github.com/PhotonVision/photon-image-modifier/releases/download/v2027.2.3/photonvision_opi5plus.img.xz",
+      "sha256": "8fd9ae7f2056a47452ab1600c118ff1d873ea48cfccef548031eca1f682afd88"
+    },
+    "orangepi-5-pro": {
+      "url": "https://github.com/PhotonVision/photon-image-modifier/releases/download/v2027.2.3/photonvision_opi5pro.img.xz",
+      "sha256": "2256d91b73bf303e8174c042a69bcc50edace2640a2721f16039ed1bde6b5064"
+    },
+    "orangepi-5-max": {
+      "url": "https://github.com/PhotonVision/photon-image-modifier/releases/download/v2027.2.3/photonvision_opi5max.img.xz",
+      "sha256": "3d47346230038f7f99cbc98116c3054094f8b68f334bd6f7742939f247b03c2c"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+// Written by coprocessor/image/provision.sh: soft-off, the health agent's one power
+// (coprocessor/README.md). The agent's account may stop PhotonVision's unit and power the board
+// off, also while someone is logged in over SSH; polkit refuses it everything else. (Its POST
+// /v1/shutdown takes requests from the robot controller only.)
+(function () {
+  var agentUser = "@AGENT_USER@";
+
+  polkit.addRule(function (action, subject) {
+    if (subject.user !== agentUser) {
+      return polkit.Result.NOT_HANDLED;
+    }
+    if (action.id === "org.freedesktop.login1.power-off" ||
+        action.id === "org.freedesktop.login1.power-off-multiple-sessions") {
+      return polkit.Result.YES;
+    }
+    if (action.id === "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") === "photonvision.service" &&
+        action.lookup("verb") === "stop") {
+      return polkit.Result.YES;
+    }
+    return polkit.Result.NO;
+  });
+})();

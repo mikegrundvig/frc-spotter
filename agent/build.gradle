@@ -1,0 +1,95 @@
+// The coprocessor agent: a small, read-only web service each vision coprocessor runs, which the
+// robot polls for what PhotonVision can't report about the computer it runs on (coprocessor/README.md).
+// One runnable jar, coprocessor-agent.jar, which the image installs with its systemd unit
+// (coprocessor-agent.service, beside this file).
+
+plugins {
+    id "java"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(":api")
+    // PhotonVision's settings database is SQLite.
+    implementation libs.sqlite.jdbc
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    // PhotonVision's settings database, made from its schema, for the tests.
+    testImplementation testFixtures(project(":api"))
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+    testImplementation libs.archunit
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+    jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
+}
+
+// coprocessor-agent.jar: the agent with everything it needs, run with `java -jar`. sqlite-jdbc's
+// native libraries are kept for 64-bit ARM Linux (the coprocessors) and x86-64 Linux (CI, where
+// images are stamped), and no others: a fifth of the size.
+def keptNatives = [
+    "org/sqlite/native/Linux/aarch64",
+    "org/sqlite/native/Linux/x86_64"
+]
+tasks.named("jar") {
+    archiveFileName = "coprocessor-agent.jar"
+    manifest {
+        attributes(
+                "Main-Class": "com.michaelgrundvig.frc.spotter.agent.AgentMain",
+                "Enable-Native-Access": "ALL-UNNAMED")
+    }
+    dependsOn configurations.runtimeClasspath
+    from({
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }) {
+        exclude "META-INF/MANIFEST.MF", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"
+        exclude { element ->
+            def path = element.relativePath.pathString
+            path.startsWith("org/sqlite/native/") && !keptNatives.any { path.startsWith(it) || it.startsWith(path) }
+        }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// The libraries the agent runs with, group:name:version one to a line, for the recipe hash
+// (coprocessor/README.md): a new sqlite-jdbc is a new image; a new WPILib, which the agent doesn't
+// run, isn't.
+tasks.register("runtimeLibraries") {
+    description = "List the agent's runtime libraries, for the coprocessor recipe hash."
+    def classpath = configurations.runtimeClasspath
+    def out = layout.buildDirectory.file("coprocessor/runtime-libraries.txt")
+    inputs.files(classpath)
+    outputs.file(out)
+    doLast {
+        def libraries = new TreeSet<String>()
+        classpath.incoming.resolutionResult.allComponents.each { component ->
+            def id = component.id
+            if (id instanceof ModuleComponentIdentifier) {
+                libraries << "${id.group}:${id.module}:${id.version}".toString()
+            }
+        }
+        out.get().asFile.parentFile.mkdirs()
+        out.get().asFile.text = libraries.collect { it + "\n" }.join("")
+    }
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
+apply from: rootProject.file("gradle/quality.gradle")

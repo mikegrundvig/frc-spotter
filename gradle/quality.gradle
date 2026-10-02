@@ -1,0 +1,224 @@
+// Quality gates for each Java project: everything here runs on every build, locally and in CI, and
+// fails the build when a rule is broken. Each rule is one that catches real bugs; none are style
+// preferences.
+//
+//   ./gradlew ci                               every check CI runs; run it before pushing
+//   ./gradlew test -Pquick --continuous        fast edit-test loop (skips the CI-only work)
+
+// Quick mode skips the work only CI needs (static analysis, auto-formatting, the coverage report),
+// which costs seconds on every save, and the container tests (@ContainerTest) unless --tests names
+// what to run. `ci` still enforces all of it, and refuses to run in quick mode.
+def quick = project.hasProperty("quick")
+def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
+
+// NullAway checks Spotter's own packages.
+def nullSafePackages = project.findProperty("nullSafePackages") ?: "com.michaelgrundvig.frc.spotter"
+gradle.taskGraph.whenReady { graph ->
+    if (quick && graph.allTasks.any { it.name == "ci" }) {
+        throw new GradleException("-Pquick skips quality gates; run ci without it")
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    // A small set of compiler warnings promoted to errors; each is almost always a real bug.
+    // Deprecation is left out, or every library update with a deprecation would fail builds.
+    options.compilerArgs.addAll([
+        "-Xlint:cast,divzero,empty,fallthrough,finally,overrides,rawtypes,unchecked",
+        "-Werror",
+    ])
+    // Error Prone (Google's bug finder) at error level only: its warnings are style advice, worth
+    // reading in review, never worth failing a build over. NullAway (Uber's null checker) proves at
+    // compile time that nothing can be null unless it is annotated @Nullable (org.jspecify).
+    options.errorprone {
+        enabled = !quick
+        disableAllWarnings = true
+        disableWarningsInGeneratedCode = true
+        excludedPaths = ".*/build/.*"
+        errorproneArgs.addAll([
+            "-Xep:NullAway:ERROR",
+            "-XepOpt:NullAway:AnnotatedPackages=" + nullSafePackages,
+            "-XepOpt:NullAway:TreatGeneratedAsUnannotated=true",
+        ])
+    }
+}
+
+// Tests produce a coverage report (JaCoCo), except in quick mode. None may run past two minutes
+// (JUnit's default timeout; a test that needs longer says so with @Timeout): a hung test fails
+// instead of hanging the build.
+//
+// Each project's tests may use up to 1.5 GB of memory, on every computer. Left to itself, Java
+// takes up to a quarter of the computer's memory, so a runaway test could take 2 GB on one laptop
+// and 8 GB on another. The cap guards against a runaway; it isn't what the tests need.
+tasks.named("test") {
+    maxHeapSize = "1536m"
+    systemProperty "junit.jupiter.execution.timeout.default", "2 m"
+    if (quick && !testsNamed) {
+        useJUnitPlatform {
+            excludeTags "container"
+        }
+    }
+    if (!quick) {
+        finalizedBy "jacocoTestReport"
+    }
+}
+
+// --tests names tests by class or pattern, wherever they are: `./gradlew test --tests '*Probe*'`
+// runs them in whichever project has them. A project with none of them passes, rather than failing
+// the build as Gradle would; but if no project ran a test at all, the build fails, so a misspelled
+// name can't pass quietly (testsMatched, in the root build).
+if (testsNamed) {
+    tasks.withType(Test).configureEach {
+        filter.failOnNoMatchingTests = false
+        finalizedBy ":testsMatched"
+    }
+}
+jacoco {
+    toolVersion = "0.8.15"
+}
+tasks.named("jacocoTestReport") {
+    dependsOn "test"
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    // Generated code is not ours to test.
+    classDirectories.setFrom(files(classDirectories.files.collect {
+        fileTree(dir: it, exclude: [
+            "**/BuildConstants*",
+            "**/*AutoLogged*"
+        ])
+    }))
+}
+
+// Coverage floor: the build fails if coverage drops below the floors in coverage-floor.properties.
+// Keys are "line" and "branch" for everything, or "<package/path>.line" and ".branch" for one
+// package tree. "file.line" is a floor for every source file on its own, so a file with no tests
+// fails even while the rest carries the total; "file.exempt" lists files it leaves out.
+def coverageCheck = tasks.register("coverageCheck") {
+    group = "verification"
+    description = "Fail if test coverage drops below coverage-floor.properties."
+    dependsOn "jacocoTestReport"
+    def report = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
+    def floorFile = file("coverage-floor.properties")
+    inputs.file(floorFile)
+    inputs.files(report).optional()
+    doLast {
+        def floors = new Properties()
+        floorFile.withInputStream { floors.load(it) }
+        def reportFile = report.get().asFile
+        def xml = null
+        if (reportFile.exists()) {
+            def parser = new groovy.xml.XmlSlurper(false, false)
+            // JaCoCo's report declares a DOCTYPE; allow the declaration, never fetch the DTD.
+            parser.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false)
+            parser.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            xml = parser.parse(reportFile)
+        }
+        def coverage = { packages, String type ->
+            double missed = 0, covered = 0
+            packages.each { pkg ->
+                def c = pkg.counter.find { it.@type == type }
+                if (c.size() > 0) {
+                    missed += c.@missed.toDouble()
+                    covered += c.@covered.toDouble()
+                }
+            }
+            return missed + covered > 0 ? 100.0 * covered / (missed + covered) : null
+        }
+        def scopes = floors.stringPropertyNames().findAll { !it.startsWith("file.") }.collect {
+            it.contains(".") ? it.substring(0, it.lastIndexOf(".")) : ""
+        }.unique().sort()
+        def failures = []
+        def fileFloorText = floors.getProperty("file.line")
+        if (fileFloorText != null && xml != null) {
+            double fileFloor = fileFloorText.toDouble()
+            def exempt = (floors.getProperty("file.exempt") ?: "").split(",")*.trim().findAll { it }
+            def lowest = null
+            xml.package.each { pkg ->
+                pkg.sourcefile.each { source ->
+                    def path = "${pkg.@name}/${source.@name}".toString()
+                    def lines = source.counter.find { it.@type == "LINE" }
+                    if (lines.size() == 0 || path in exempt) {
+                        return
+                    }
+                    double missed = lines.@missed.toDouble()
+                    double covered = lines.@covered.toDouble()
+                    double actual = 100.0 * covered / (missed + covered)
+                    if (lowest == null || actual < lowest[1]) {
+                        lowest = [path, actual]
+                    }
+                    if (actual < fileFloor) {
+                        failures << String.format("%s line coverage %.1f%% is below the per-file floor %.1f%%", path, actual, fileFloor)
+                    }
+                }
+            }
+            if (lowest != null) {
+                println String.format("Coverage %-20s %-6s %5.1f%% (floor %5.1f%%), lowest: %s", "each file", "line", lowest[1], fileFloor, lowest[0])
+            }
+        }
+        scopes.each { scope ->
+            def packages = xml == null ? [] : (scope
+            ? xml.package.findAll {
+                it.@name == scope || it.@name.text().startsWith(scope + "/")
+            }
+            : xml.package)
+            def label = scope ?: "all"
+            [line: "LINE", branch: "BRANCH"].each { key, type ->
+                def floorText = floors.getProperty(scope ? "${scope}.${key}" : key)
+                if (floorText == null) {
+                    return
+                }
+                double floor = floorText.toDouble()
+                def actual = coverage(packages, type)
+                if (actual == null) {
+                    println String.format("Coverage %-20s %-6s   no code yet (floor %5.1f%%)", label, key, floor)
+                    return
+                }
+                println String.format("Coverage %-20s %-6s %5.1f%% (floor %5.1f%%)", label, key, actual, floor)
+                if (actual < floor) {
+                    failures << String.format("%s %s coverage %.1f%% is below the floor %.1f%%", label, key, actual, floor)
+                }
+            }
+        }
+        if (failures) {
+            throw new GradleException(failures.join("; ") + ". Add tests for the new code.")
+        }
+    }
+}
+tasks.named("check") {
+    dependsOn coverageCheck
+}
+
+// Formatting (google-java-format): local builds fix it automatically, so the careful path is the
+// quick path; CI sets CI=true and only checks, so unformatted code fails there. LF on every OS.
+if (System.getenv("CI") == null && !quick) {
+    tasks.named("compileJava") {
+        dependsOn "spotlessApply"
+    }
+}
+spotless {
+    lineEndings = "UNIX"
+    java {
+        target "src/**/*.java", "build-logic/src/**/*.java"
+        toggleOffOn()
+        googleJavaFormat()
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+    groovyGradle {
+        target "*.gradle", "gradle/*.gradle", "build-logic/*.gradle"
+        greclipse()
+        leadingTabsToSpaces(4)
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+}
+
+// Everything CI checks of this project. Run the root's ci before pushing.
+tasks.register("ci") {
+    group = "verification"
+    description = "Run every check CI runs: formatting, the gated build and tests, coverage."
+    dependsOn "spotlessCheck", "build"
+}

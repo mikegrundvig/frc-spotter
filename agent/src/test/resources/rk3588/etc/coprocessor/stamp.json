@@ -1,0 +1,12 @@
+{
+  "name": "vision-front",
+  "team": 1234,
+  "address": "10.12.34.11",
+  "board": "orangepi-5",
+  "cameras": ["front-left", "front-right"],
+  "release": "coprocessors-2027.1",
+  "recipeHash": "57a959441e435aa8165a690211f802f850fa0866e9582ec30ee69e629550224c",
+  "photonvisionVersion": "dev-v2027.0.0-alpha-2-69-g71416112",
+  "settingsHash": "",
+  "agentPort": 5808
+}
