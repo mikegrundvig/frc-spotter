@@ -1,0 +1,13 @@
+       Server: 10.12.34.2 (10.12.34.2)
+Poll interval: 32s (min: 32s; max 34min 8s)
+         Leap: normal
+      Version: 4
+      Stratum: 2
+    Reference: C0A80101
+    Precision: 1us (-25)
+Root distance: 1.231ms (max: 5s)
+       Offset: -1.523ms
+        Delay: 412us
+       Jitter: 108us
+ Packet count: 17
+    Frequency: +12.345ppm

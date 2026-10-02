@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.spotter.agent;
 
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
 import com.michaelgrundvig.frc.spotter.api.Boot;
+import com.michaelgrundvig.frc.spotter.api.ClockSync;
 import com.michaelgrundvig.frc.spotter.api.Cpu;
 import com.michaelgrundvig.frc.spotter.api.Disk;
 import com.michaelgrundvig.frc.spotter.api.Drive;
@@ -9,9 +10,11 @@ import com.michaelgrundvig.frc.spotter.api.Health;
 import com.michaelgrundvig.frc.spotter.api.JournalPage;
 import com.michaelgrundvig.frc.spotter.api.JournalSummary;
 import com.michaelgrundvig.frc.spotter.api.Memory;
+import com.michaelgrundvig.frc.spotter.api.NetworkLink;
 import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.api.ThermalZone;
+import com.michaelgrundvig.frc.spotter.api.UsbDevice;
 import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
 import java.io.IOException;
 import java.time.Duration;
@@ -30,10 +33,10 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What the agent knows, assembled from its sources: the answers to the API's requests. It knows the
- * computer (load, heat, memory, disks, the journal, the drive, what booted) and nothing of the
- * software on it: that's its packs' probes (docs/agent.md, "Packs"). A source that fails costs only
- * its part, which reads as unknown, with the failure in the health's problems; nothing one source
- * does stops the others.
+ * computer (load, heat, memory, disks, the journal, the drive, what booted, its network link, its
+ * USB devices, its clock) and nothing of the software on it: that's its packs' probes
+ * (docs/agent.md, "Packs"). A source that fails costs only its part, which reads as unknown, with
+ * the failure in the health's problems; nothing one source does stops the others.
  */
 final class Agent implements AutoCloseable {
   /** Health asked for again within this long is answered from the last reading. */
@@ -56,6 +59,9 @@ final class Agent implements AutoCloseable {
   private final DiskSource disks;
   private final JournalSource journal;
   private final DriveSource drive;
+  private final NetworkSource network;
+  private final UsbSource usb;
+  private final ClockSource clock;
   private final Probes probes;
   private final Shutdown shutdown;
   private final @Nullable String controllerOverride;
@@ -96,6 +102,9 @@ final class Agent implements AutoCloseable {
     this.memory = new MemorySource(host);
     this.disks = new DiskSource(host);
     this.drive = new DriveSource(host);
+    this.network = new NetworkSource(host);
+    this.usb = new UsbSource(host);
+    this.clock = new ClockSource(host, timeout);
     this.probes =
         new Probes(
             host, configuration.probes(), new ProbeRunner(host, () -> Measurements.of(health())));
@@ -180,6 +189,10 @@ final class Agent implements AutoCloseable {
     JournalSummary trouble =
         part("journal", () -> journal.summary(stamped.bootId()), JournalSummary.EMPTY, problems);
     Optional<Drive> nvme = part("drive", drive::read, Optional.empty(), problems);
+    List<NetworkLink> links = part("network", network::read, List.of(), problems);
+    List<UsbDevice> devices =
+        part("usb", () -> usb.read(journal.disconnects()), List.of(), problems);
+    ClockSync time = part("clock", clock::read, ClockSync.UNKNOWN, problems);
     problems.addAll(configuration.problems());
     Controller controller = part("controller", this::controller, Controller.NONE, problems);
     if (controller.address().isEmpty() && !controller.why().isEmpty()) {
@@ -202,7 +215,10 @@ final class Agent implements AutoCloseable {
             problems.subList(0, Math.min(problems.size(), MAX_PROBLEMS)),
             memoryNow,
             space,
-            results);
+            results,
+            links,
+            devices,
+            time);
     lastHealthMicros = now;
     lastHealth = health;
     return health;

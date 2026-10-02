@@ -20,10 +20,11 @@ import java.util.stream.Stream;
 
 /**
  * An RK3588 coprocessor for tests: a copy of the fixture tree in {@code src/test/resources/rk3588}
- * (eight cores in three clusters, seven thermal zones, two USB cameras, an NVMe drive, its hostname
- * and os-release), at 10.12.34.11, with no packs and nothing configured; its files root's and
- * written by root alone unless a test says otherwise; canned command output, a clock the test
- * moves, and the log the agent writes.
+ * (eight cores in three clusters, seven thermal zones, two USB cameras, an NVMe drive, its wired
+ * link and a bridge, its hostname and os-release), at 10.12.34.11, its clock kept by
+ * systemd-timesyncd, with no packs and nothing configured; its files root's and written by root
+ * alone unless a test says otherwise; canned command output, a clock the test moves, and the log
+ * the agent writes.
  */
 final class Fixture {
   /** Spotter's own repository, whose catalog of packs the tests read. */
@@ -78,6 +79,10 @@ final class Fixture {
     copy(resource("rk3588"), root);
     host = host(root);
     commands.answer(List.of("systemctl", "show"), Fixture.lines("systemctl-show.txt"));
+    commands.answer(List.of("timedatectl", "show"), List.of("yes"));
+    commands.answer(
+        List.of("timedatectl", "timesync-status"),
+        Fixture.lines("timedatectl-timesync-status.txt"));
   }
 
   /** A pack of Spotter's catalog, as written there. */

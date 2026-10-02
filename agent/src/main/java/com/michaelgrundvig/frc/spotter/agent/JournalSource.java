@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
@@ -46,12 +47,19 @@ final class JournalSource {
   /** A cursor a request may give: journald's own characters only. */
   static final Pattern CURSOR = Pattern.compile("[A-Za-z0-9=;_+/.:-]{1,512}");
 
+  /** The kernel's line for a USB device unplugged: {@code usb 7-1: USB disconnect, ...}. */
+  static final Pattern USB_DISCONNECT = Pattern.compile("^usb ([0-9]+-[0-9.]+): USB disconnect");
+
+  /** The most ports whose disconnects are counted. */
+  static final int MAX_PORTS = 64;
+
   private final Host host;
   private final Duration timeout;
 
   // The count so far, this boot.
   private String countedCursor = "";
   private final Map<String, Integer> counts = new LinkedHashMap<>();
+  private final Map<String, Integer> disconnects = new LinkedHashMap<>();
   private final Deque<JournalEntry> latest = new ArrayDeque<>();
   private boolean previousBootRead;
   private @Nullable Boolean previousBootClean;
@@ -94,6 +102,7 @@ final class JournalSource {
           && !entry.bootId().replace("-", "").equals(bootId.replace("-", ""))) {
         continue;
       }
+      countDisconnect(entry);
       if (entry.category().isEmpty()) {
         continue;
       }
@@ -108,6 +117,26 @@ final class JournalSource {
       all.put(category, counts.getOrDefault(category, 0));
     }
     return new JournalSummary(all, List.copyOf(latest));
+  }
+
+  /** A USB device unplugged, by its port, counted: the kernel's own line, this boot. */
+  private void countDisconnect(JournalEntry entry) {
+    if (!entry.identifier().equals("kernel")) {
+      return;
+    }
+    Matcher matcher = USB_DISCONNECT.matcher(entry.message());
+    if (matcher.find()
+        && (disconnects.containsKey(matcher.group(1)) || disconnects.size() < MAX_PORTS)) {
+      disconnects.merge(matcher.group(1), 1, Integer::sum);
+    }
+  }
+
+  /**
+   * How often a USB device was unplugged from each port this boot, as far as {@link #summary} has
+   * read.
+   */
+  synchronized Map<String, Integer> disconnects() {
+    return Map.copyOf(disconnects);
   }
 
   /**

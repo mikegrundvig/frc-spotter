@@ -79,7 +79,12 @@ class ApiRecordsTest {
                 "",
                 "exit 1: missing /dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0",
                 1_234_000_000L,
-                412)));
+                412)),
+        List.of(new NetworkLink("end0", true, "up", 1000, 4, 0, 2)),
+        List.of(
+            new UsbDevice("7-1", true, "0c45", "6366", "Arducam OV9281 USB Camera", 5000, 1),
+            new UsbDevice("3-1", false, "", "", "", 0, 2)),
+        new ClockSync(true, "chrony", 0.4125));
   }
 
   @Test
@@ -111,7 +116,7 @@ class ApiRecordsTest {
     assertThat(Health.parse(json)).isEqualTo(health);
     // Each probe adds about 150 bytes: a computer's 64 at most keep it well under the robot's
     // 64 KB.
-    assertThat(json.getBytes(StandardCharsets.UTF_8).length).isBetween(1500, 4000);
+    assertThat(json.getBytes(StandardCharsets.UTF_8).length).isBetween(1500, 4500);
   }
 
   @Test
@@ -133,6 +138,20 @@ class ApiRecordsTest {
   }
 
   @Test
+  void theLinkUsbAndClockReadBack() {
+    Health health = health();
+    assertThat(health.network().get(0).up()).isTrue();
+    assertThat(new NetworkLink("eth0", false, "down", -1, 0, 0, 0).up()).isFalse();
+    assertThat(health.usb().get(1).present()).isFalse();
+    assertThat(health.clock().synced()).isTrue();
+    assertThat(NetworkLink.fromJson(Json.parse("{}")))
+        .isEqualTo(new NetworkLink("", false, "unknown", -1, 0, 0, 0));
+    assertThat(UsbDevice.fromJson(Json.parse("{}")))
+        .isEqualTo(new UsbDevice("", false, "", "", "", 0, 0));
+    assertThat(ClockSync.fromJson(Json.parse("{}"))).isEqualTo(ClockSync.UNKNOWN);
+  }
+
+  @Test
   void healthWithoutADriveOrAnythingElseStillReads() {
     Health empty = Health.parse("{\"drive\":null}");
     assertThat(empty.drive()).isNull();
@@ -141,6 +160,9 @@ class ApiRecordsTest {
     assertThat(empty.journal()).isEqualTo(JournalSummary.EMPTY);
     assertThat(empty.boot().lastShutdownClean()).isNull();
     assertThat(empty.hottest()).isEmpty();
+    assertThat(empty.network()).isEmpty();
+    assertThat(empty.usb()).isEmpty();
+    assertThat(empty.clock()).isEqualTo(ClockSync.UNKNOWN);
     Health same = Health.parse(Json.compact(empty.toJson()));
     assertThat(same).isEqualTo(empty);
   }

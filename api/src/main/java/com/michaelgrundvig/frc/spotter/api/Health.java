@@ -8,8 +8,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * A coprocessor's health: {@code GET /v1/health}. The computer's, whatever runs on it: how busy and
- * hot it is, its memory and disks, how it booted, its journal's trouble, its drive, and each
- * probe's latest result, which is where what runs on it is checked.
+ * hot it is, its memory and disks, how it booted, its journal's trouble, its drive, its network
+ * link, its USB devices, its clock, and each probe's latest result, which is where what runs on it
+ * is checked.
  *
  * @param stamp which computer this is: its hostname, addresses, MAC, boot, and os-release
  * @param boot this boot, and what booted
@@ -22,6 +23,9 @@ import org.jspecify.annotations.Nullable;
  * @param memory the computer's memory
  * @param disks the root's and {@code /data}'s space, for those mounted
  * @param probes each probe the agent runs, with its latest result, in its packs' order
+ * @param network each network interface's link but loopback's
+ * @param usb every USB device by its port, and each port a device was unplugged from this boot
+ * @param clock whether the clock is synchronized, and its offset
  */
 public record Health(
     Stamp stamp,
@@ -33,12 +37,17 @@ public record Health(
     List<String> problems,
     Memory memory,
     List<Disk> disks,
-    List<ProbeResult> probes) {
+    List<ProbeResult> probes,
+    List<NetworkLink> network,
+    List<UsbDevice> usb,
+    ClockSync clock) {
   public Health {
     thermal = List.copyOf(thermal);
     problems = List.copyOf(problems);
     disks = List.copyOf(disks);
     probes = List.copyOf(probes);
+    network = List.copyOf(network);
+    usb = List.copyOf(usb);
   }
 
   /** A probe's latest result, if the computer's packs define it. */
@@ -65,6 +74,9 @@ public record Health(
         .put("memory", memory.toJson())
         .put("disks", JsonValue.array(disks, Disk::toJson))
         .put("probes", JsonValue.array(probes, ProbeResult::toJson))
+        .put("network", JsonValue.array(network, NetworkLink::toJson))
+        .put("usb", JsonValue.array(usb, UsbDevice::toJson))
+        .put("clock", clock.toJson())
         .build();
   }
 
@@ -82,7 +94,10 @@ public record Health(
         o.strings("problems"),
         Memory.fromJson(o.objectOrEmpty("memory")),
         o.list("disks", Disk::fromJson),
-        o.list("probes", ProbeResult::fromJson));
+        o.list("probes", ProbeResult::fromJson),
+        o.list("network", NetworkLink::fromJson),
+        o.list("usb", UsbDevice::fromJson),
+        ClockSync.fromJson(o.objectOrEmpty("clock")));
   }
 
   /** Health from JSON text: {@code /v1/health}'s answer. */

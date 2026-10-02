@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
 import com.michaelgrundvig.frc.spotter.api.Boot;
+import com.michaelgrundvig.frc.spotter.api.ClockSync;
 import com.michaelgrundvig.frc.spotter.api.Cpu;
 import com.michaelgrundvig.frc.spotter.api.Health;
 import com.michaelgrundvig.frc.spotter.api.JournalSummary;
@@ -50,7 +51,10 @@ class AgentClientTest {
         List.of(),
         new Memory(8000, 6000),
         List.of(),
-        List.of(VERSION));
+        List.of(VERSION),
+        List.of(),
+        List.of(),
+        ClockSync.UNKNOWN);
   }
 
   final AtomicLong robot = new AtomicLong();
