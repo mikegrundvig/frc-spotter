@@ -1,7 +1,6 @@
 // The container tests (@ContainerTest, tagged "container"): the agent installed from its .deb in a
 // plain Debian 13 container under systemd, with no Java of its own, its root read-only and /data
-// writable as on a board; PhotonVision's pack against the real PhotonVision; the -all.jar on a stock
-// Java 17. The tests play the robot with Spotter's own client. They need Docker or Podman running
+// writable as on a board; the -all.jar on a stock Java 17. The tests play the robot with Spotter's own client. They need Docker or Podman running
 // Linux containers, and skip themselves without (as on a Windows laptop); in CI on Linux they must
 // run. `test -Pquick` leaves them out unless --tests names them.
 
@@ -34,24 +33,16 @@ configurations {
         canBeConsumed = false
         canBeResolved = true
     }
-    // PhotonVision's pack as installed.
-    photonVisionPack {
-        canBeConsumed = false
-        canBeResolved = true
-    }
 }
 
 dependencies {
     agentJar project(path: ":agent", configuration: "agentJarRelease")
     agentPackage project(path: ":agent", configuration: "agentPackage")
-    photonVisionPack project(path: ":photonvision-pack", configuration: "packFolder")
 
     errorprone libs.errorprone.core
     errorprone libs.nullaway
 
     testImplementation project(":client")
-    // PhotonVision's settings database, made from its schema, to hash on both sides.
-    testImplementation testFixtures(project(":api"))
     testImplementation platform(libs.testcontainers.bom)
     testImplementation libs.testcontainers.core
     testImplementation libs.testcontainers.toxiproxy
@@ -63,21 +54,14 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
-    jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
     def agentJar = configurations.agentJar
     def agentPackage = configurations.agentPackage
-    def photonVisionPack = configurations.photonVisionPack
     inputs.files(agentJar).withPropertyName("agentJar").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(agentPackage).withPropertyName("agentPackage").withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(photonVisionPack).withPropertyName("photonVisionPack").withPathSensitivity(PathSensitivity.RELATIVE)
     doFirst {
         systemProperty "spotter.agentJar", agentJar.singleFile.absolutePath
         systemProperty "spotter.agentPackage", agentPackage.singleFile.absolutePath
-        systemProperty "spotter.photonVisionPack", photonVisionPack.singleFile.absolutePath
     }
-    // Downloads the tests need (PhotonVision's jar), kept beside Gradle's own caches so a clean
-    // build doesn't fetch them again.
-    systemProperty "spotter.downloadCache", new File(gradle.gradleUserHomeDir, "caches/frc-spotter").absolutePath
     // In CI on Linux, Docker is there: a container test that can't run fails rather than skips.
     def os = System.getProperty("os.name").toLowerCase()
     systemProperty "spotter.requireContainers", (System.getenv("CI") != null && os.contains("linux")).toString()
@@ -95,7 +79,7 @@ tasks.named("test") {
 ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
 apply from: rootProject.file("gradle/quality.gradle")
 
-// Images build, and PhotonVision starts, within minutes: no test may hang past ten (quality.gradle's
+// Images build within minutes: no test may hang past ten (quality.gradle's
 // two minutes are for unit tests).
 tasks.named("test") {
     systemProperty "junit.jupiter.execution.timeout.default", "10 m"

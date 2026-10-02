@@ -7,14 +7,9 @@ import com.michaelgrundvig.frc.spotter.table.Pack;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -35,8 +30,7 @@ import org.testcontainers.images.builder.ImageFromDockerfile;
  *       a board's image build would (the package's maintainer scripts run with no systemd running,
  *       as in a chroot), and the test packs, a stand-in for the software it watches, and a fixture
  *       tree of USB devices;
- *   <li>{@link #photonVision}: the same with PhotonVision itself (on a Java of its own, as its
- *       image has) and PhotonVision's pack.
+ *   <li>{@link #agentOnJava17}: a stock Java 17 with the agent installed from its -all.jar.
  * </ul>
  *
  * <p>Built images are kept (named {@code localhost/spotter-test-*}); a runtime's own prune removes
@@ -47,10 +41,7 @@ final class Images {
   static final String DEBIAN =
       "docker.io/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a";
 
-  /** The Java PhotonVision runs on in its image: 25, as its 2027 builds need. */
-  static final String PHOTONVISION_JAVA = "docker.io/library/eclipse-temurin:25.0.4.1_1-jre-noble";
-
-  /** A stock Java 17, as PhotonVision's 2026 images carry, for the -all.jar. */
+  /** A stock Java 17, for the -all.jar. */
   static final String JAVA_17 = "docker.io/library/eclipse-temurin:17.0.19_10-jre-noble";
 
   /** The team number the tests' computers are on: 10.99.71.x, unlikely on any test machine. */
@@ -104,7 +95,7 @@ final class Images {
         COPY standin.json /usr/lib/frc-coprocessor/packs/standin/pack.json
         COPY kinds.json /usr/lib/frc-coprocessor/packs/kinds/pack.json
         COPY 61-standin.rules /usr/share/polkit-1/rules.d/61-frc-coprocessor-standin.rules
-        # The software the stand-in pack watches: a web server on 5800, as PhotonVision's page is.
+        # The software the stand-in pack watches: a web server on 5800, as a vision program's page is.
         COPY vision.service broken.service /etc/systemd/system/
         RUN mkdir -p /srv/vision/api \\
          && printf '{"status": "up"}' > /srv/vision/api/status.json \\
@@ -134,16 +125,11 @@ final class Images {
   /**
    * The -all.jar's image: a stock Java 17 (Temurin's, on Ubuntu 24.04) under systemd, its java on
    * the path as a system Java's is, and nothing else of Java; the agent installed from the -all.jar
-   * and its install script, PhotonVision's pack from its own, and a settings database where
-   * PhotonVision keeps it (on /data), for the pack's helper to read.
-   *
-   * @param database PhotonVision's settings database, made by the test
+   * and its install script.
    */
-  static String agentOnJava17(Path database) {
+  static String agentOnJava17() {
     Map<String, Object> context = new LinkedHashMap<>();
     context.put("jar", property("spotter.agentJar"));
-    context.put("pack", property("spotter.photonVisionPack"));
-    context.put("photon.sqlite", database);
     context.put("stamp.json", stamp("vision-front", 21, ""));
     return build(
         "java17",
@@ -163,12 +149,8 @@ final class Images {
         COPY jar /tmp/agent
         RUN sh /tmp/agent/install.sh && rm -rf /tmp/agent \\
          && test ! -e /usr/lib/frc-coprocessor-agent/runtime
-        COPY pack /tmp/pack
-        RUN sh /tmp/pack/install.sh && rm -rf /tmp/pack
-        COPY photon.sqlite /data/photonvision_config/photon.sqlite
-        RUN mkdir -p /opt/photonvision /data/frc-coprocessor \\
-         && ln -s /data/photonvision_config /opt/photonvision/photonvision_config
         COPY stamp.json /etc/coprocessor/stamp.json
+        RUN mkdir -p /data/frc-coprocessor
         VOLUME /data
         STOPSIGNAL SIGRTMIN+3
         ENTRYPOINT ["/sbin/init"]
@@ -188,45 +170,6 @@ final class Images {
        && rm -rf /tmp/frc-coprocessor-agent /tmp/frc-coprocessor-agent.deb \\
        && ! command -v java
       """;
-
-  /**
-   * PhotonVision's image: the base, the agent from its .deb, PhotonVision's jar on a Java of its
-   * own (its smoke test run, so its native libraries are in place on the read-only root), its unit
-   * with {@code -n} (the network is the image's), its settings on /data, and PhotonVision's pack.
-   */
-  static String photonVision() {
-    Map<String, Object> context = new LinkedHashMap<>();
-    context.put("package", property("spotter.agentPackage"));
-    context.put("pack", property("spotter.photonVisionPack"));
-    context.put("photonvision.jar", PhotonVisionJar.path());
-    context.put("photonvision.service", resource("photonvision.service"));
-    context.put("stamp.json", stamp("vision-front", 11, PhotonVisionJar.version()));
-    return build(
-        "photonvision",
-        """
-        FROM %s AS java
-        FROM %s
-        %s
-        COPY --from=java /opt/java/openjdk /opt/photonvision/jre
-        COPY photonvision.jar /opt/photonvision/photonvision.jar
-        # Its smoke test makes its empty settings and unpacks its native libraries under root's
-        # home, where they must be before the root goes read-only.
-        RUN mkdir -p /tmp/smoke && cd /tmp/smoke \\
-         && /opt/photonvision/jre/bin/java -jar /opt/photonvision/photonvision.jar --smoketest -n \\
-         && rm -rf /tmp/smoke
-        COPY photonvision.service /etc/systemd/system/
-        RUN mkdir -p /data/photonvision_config \\
-         && ln -s /data/photonvision_config /opt/photonvision/photonvision_config \\
-         && systemctl enable photonvision.service
-        COPY pack /tmp/pack
-        RUN sh /tmp/pack/install.sh && rm -rf /tmp/pack
-        COPY stamp.json /etc/coprocessor/stamp.json
-        RUN mkdir -p /data/frc-coprocessor
-        VOLUME /data
-        """
-            .formatted(PHOTONVISION_JAVA, base(), INSTALL_AGENT),
-        context);
-  }
 
   /** A stamp, as the image's stamping writes it. */
   static String stamp(String name, int address, String photonVisionVersion) {
@@ -333,7 +276,7 @@ final class Images {
           } else if (Files.size(path) < (1 << 22)) {
             digest.update(Files.readAllBytes(path));
           } else {
-            // A large file (PhotonVision's jar) is known by its size and time: it's pinned anyway.
+            // A large file is known by its size and time.
             digest.update(
                 (Files.size(path) + "@" + Files.getLastModifiedTime(path))
                     .getBytes(StandardCharsets.UTF_8));
@@ -347,70 +290,6 @@ final class Images {
       throw new UncheckedIOException(e);
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException(e);
-    }
-  }
-
-  /**
-   * The PhotonVision jar the tests run, for x86 Linux: pinned by its SHA-256 in {@code
-   * harness/photonvision-x86.json}, downloaded once into Gradle's caches and checked.
-   */
-  static final class PhotonVisionJar {
-    private PhotonVisionJar() {}
-
-    private static JsonValue.Obj pin() {
-      return Json.parse(resource("photonvision-x86.json")).asObject("photonvision-x86.json");
-    }
-
-    /** The pinned version. */
-    static String version() {
-      return pin().string("version", "");
-    }
-
-    /** The jar, downloaded if it isn't cached yet, and checked against its pin. */
-    static synchronized Path path() {
-      JsonValue.Obj pin = pin();
-      String sha256 = pin.string("sha256", "");
-      Path jar = property("spotter.downloadCache").resolve("photonvision").resolve(sha256 + ".jar");
-      try {
-        if (!Files.isRegularFile(jar)) {
-          Files.createDirectories(jar.getParent());
-          Path part = jar.resolveSibling(sha256 + ".part");
-          HttpClient client =
-              HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
-          HttpResponse<Path> got =
-              client.send(
-                  HttpRequest.newBuilder(URI.create(pin.string("url", ""))).build(),
-                  HttpResponse.BodyHandlers.ofFile(part));
-          if (got.statusCode() != 200) {
-            throw new IOException("downloading PhotonVision's jar answered " + got.statusCode());
-          }
-          if (!sha256(part).equals(sha256)) {
-            Files.delete(part);
-            throw new IOException("PhotonVision's jar isn't the one pinned (its SHA-256 differs)");
-          }
-          Files.move(part, jar, StandardCopyOption.ATOMIC_MOVE);
-        }
-        return jar;
-      } catch (IOException e) {
-        throw new UncheckedIOException(e);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new IllegalStateException(e);
-      }
-    }
-
-    private static String sha256(Path file) throws IOException {
-      try (InputStream in = Files.newInputStream(file)) {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] chunk = new byte[1 << 16];
-        int read;
-        while ((read = in.read(chunk)) != -1) {
-          digest.update(chunk, 0, read);
-        }
-        return HexFormat.of().formatHex(digest.digest());
-      } catch (NoSuchAlgorithmException e) {
-        throw new IllegalStateException(e);
-      }
     }
   }
 }

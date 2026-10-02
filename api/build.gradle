@@ -1,11 +1,10 @@
 // What the coprocessors and the robot program share: the coprocessor table, the agent's API records,
-// PhotonVision's settings in their canonical form, and the JSON they're written in. Plain Java with
+// the probes and packs, and the JSON they're written in. Plain Java with
 // no dependencies, so the agent stays small and the robot program gets nothing it doesn't already
 // have; and free of WPILib, which the coprocessors don't run.
 
 plugins {
     id "java-library"
-    id "java-test-fixtures"
     id "jacoco"
     id "com.diffplug.spotless"
     id "net.ltgt.errorprone"
@@ -39,11 +38,6 @@ dependencies {
     errorprone libs.errorprone.core
     errorprone libs.nullaway
 
-    // PhotonVision's settings database for tests (src/testFixtures): this project's, and the
-    // agent's. Settings go in and out of the database through JDBC's own API (java.sql), so only
-    // the tests need a driver; the agent brings its own.
-    testFixturesRuntimeOnly libs.sqlite.jdbc
-
     testImplementation platform(libs.junit.bom)
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
@@ -53,7 +47,6 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
-    jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
     // Spotter's own packs, which the build tool's tests compile.
     systemProperty "frc.projectDir", rootProject.projectDir.absolutePath
     inputs.files(rootProject.fileTree("packs") { include "*/pack.yaml" })

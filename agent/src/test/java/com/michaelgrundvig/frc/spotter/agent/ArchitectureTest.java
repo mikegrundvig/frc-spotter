@@ -46,11 +46,10 @@ class ArchitectureTest {
     noClasses()
         .should()
         .dependOnClassesThat()
-        .resideInAnyPackage(
-            "com.michaelgrundvig.frc.spotter.settings..", "java.sql..", "org.sqlite..")
+        .resideInAnyPackage("java.sql..", "org.sqlite..")
         .because(
-            "what the agent knows of a computer's software (PhotonVision's settings, its database)"
-                + " is a pack's, run as a probe: the agent itself serves any computer")
+            "what the agent knows of a computer's software (its settings, its database) is a"
+                + " pack's, run as a probe: the agent itself serves any computer")
         .check(AGENT);
   }
 
