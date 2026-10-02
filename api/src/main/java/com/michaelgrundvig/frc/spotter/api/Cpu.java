@@ -4,8 +4,8 @@ import com.michaelgrundvig.frc.spotter.json.JsonValue;
 import java.util.List;
 
 /**
- * How busy each core is, and how fast each cluster runs. Per core, because PhotonVision runs on the
- * four big cores: those at 100% hide inside a 50% total.
+ * How busy each core is, and how fast each cluster runs. Per core, because vision software often
+ * runs on the big cores alone: four at 100% hide inside a 50% total.
  *
  * @param windowSeconds the time the busy percentages are measured over: since the previous answer
  *     (or since boot, for the first)

@@ -53,7 +53,7 @@ public record AgentConfig(
   /**
    * A camera, by its name and port.
    *
-   * @param name its name (PhotonVision's, for a PhotonVision camera)
+   * @param name its name, as the robot code and the vision software know it
    * @param port its {@code /dev/v4l/by-path/} entry, which names the USB port it's plugged into;
    *     empty when the table doesn't say
    */

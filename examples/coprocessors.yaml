@@ -1,21 +1,22 @@
-# The robot's vision coprocessors: the one place they're described. Each one's image, the robot
-# program's list of what to watch, and Pitwall's links all come from here. What each key may be:
-# docs/agent.md.
+# The robot's coprocessors: the one place they're described. Each computer's agent configuration,
+# the robot program's list of what to watch, and what an image builder makes all come from here.
+# What each key may be: docs/agent.md.
 #
-# An example: set your team number, and list your computers. The image workflow builds nothing
-# until the team number is set and there's at least one computer.
+# An example: set your team number, and list your computers.
 team: 0
-agentPort: 5808            # the health agent's port (FRC's team range is 5800-5810)
+agentPort: 5808            # the agents' port (FRC's team range is 5800-5810)
 computers:
   - name: vision-front     # its hostname
     address: 11            # 10.TE.AM.11; FRC's static range for robot devices is .6 to .19
-    board: orangepi-5      # orangepi-5, orangepi-5b, orangepi-5-plus, orangepi-5-pro, orangepi-5-max
-    cameras: [front-left, front-right]  # the PhotonVision camera names it runs
-    packs: [photonvision]  # what it runs besides the agent: PhotonVision's checks and soft-off
+    cameras: [front-left, front-right]  # the cameras it runs, by the names the robot code uses
+    packs: [vision]        # what's checked besides the computer itself: a pack per program it runs
+    ports:                 # where each camera plugs in, for the built-in pack's camera probes
+      front-left: platform-fc800000.usb-usb-0:1:1.0-video-index0
+    image:                 # what an image builder is told about it; the builder checks it
+      board: orangepi-5
 
-  # About two AprilTag cameras per board: a second computer for the back cameras.
+  # A second computer for the back cameras.
   # - name: vision-back
   #   address: 12
-  #   board: orangepi-5
   #   cameras: [back-left, back-right]
-  #   packs: [photonvision]
+  #   packs: [vision]

@@ -43,7 +43,7 @@ public final class AgentClient implements AutoCloseable {
    * @param name the coprocessor's name, for its threads and messages
    * @param address its address, such as {@code 10.12.34.11}
    * @param agentPort its agent's port
-   * @param softwarePort the port its software answers on (PhotonVision's page, 5800), which must
+   * @param softwarePort the port its software answers on (a vision program's page), which must
    *     close too before it counts as powered down
    * @param settings how often to ask, and how long to wait
    * @param robotNanos the robot's clock, in nanoseconds: what an answer's age is measured on
@@ -160,7 +160,7 @@ public final class AgentClient implements AutoCloseable {
 
   /**
    * A page of its journal ({@code /v1/journal}), with the query as the API takes it: {@code
-   * priority=3&unit=photonvision.service}, say. Fetched now, on the caller's thread.
+   * priority=3&unit=vision.service}, say. Fetched now, on the caller's thread.
    */
   public JournalPage journal(String query) throws IOException {
     AgentHttp journals =

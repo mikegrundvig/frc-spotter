@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * The agent's one action: a soft power-off, so a coprocessor kept powered after the robot is
  * switched off (by a battery pack, say) shuts down cleanly rather than losing power mid-write. It
- * runs the steps the computer's packs define first (PhotonVision's pack stops PhotonVision, so its
+ * runs the steps the computer's packs define first (a pack stops the software it watches, so its
  * settings are saved), each within its own time, then powers the computer off, whether the steps
  * succeeded or not. It happens once: asking again while it's under way does nothing more.
  *

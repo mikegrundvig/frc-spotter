@@ -4,8 +4,9 @@ import com.michaelgrundvig.frc.spotter.json.Json;
 import com.michaelgrundvig.frc.spotter.json.JsonValue;
 
 /**
- * The answer to {@code POST /v1/shutdown} (status 202): the computer is shutting down. It stops
- * PhotonVision, then powers off; the agent stops answering once it's down.
+ * The answer to {@code POST /v1/shutdown} (status 202): the computer is shutting down. It runs its
+ * packs' steps (stopping the software they watch), then powers off; the agent stops answering once
+ * it's down.
  *
  * @param alreadyRequested whether a shutdown was already under way, so this request changed nothing
  */

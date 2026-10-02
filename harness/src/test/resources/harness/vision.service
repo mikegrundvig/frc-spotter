@@ -1,4 +1,4 @@
-# The stand-in for the software a coprocessor runs: a web server on 5800, as PhotonVision's page is.
+# The stand-in for the software a coprocessor runs: a web server on 5800, as a vision program's page is.
 [Unit]
 Description=Vision software stand-in
 

@@ -4,7 +4,7 @@
 #
 # It stays out of the way of what it watches: a lower priority, a 64 MB heap with the serial
 # collector and the quick compiler only (in its launcher), and on an RK3588 the small cores (0-3:
-# PhotonVision runs on the big ones, 4-7; a board with fewer cores runs it on those it has).
+# vision software runs on the big ones, 4-7; a board with fewer cores runs it on those it has).
 
 [Unit]
 Description=FRC coprocessor agent
@@ -14,7 +14,7 @@ After=network.target
 Type=simple
 # Its own system user (its package makes it, with systemd-sysusers), in systemd-journal to read the
 # journal. Its one privilege, by its package's polkit rule, is powering off; each pack's rule adds
-# what that pack's steps need (PhotonVision's: stopping and restarting its unit).
+# what that pack's steps need (stopping and restarting its software's unit, say).
 User=frc-coprocessor-agent
 Group=frc-coprocessor-agent
 SupplementaryGroups=systemd-journal

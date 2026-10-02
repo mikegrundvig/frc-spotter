@@ -1,5 +1,5 @@
 # The container tests' stand-in for the software a coprocessor runs: a web server on 5800, as
-# PhotonVision's page is, watched, stopped before a power-off, and backed up, as a real pack would.
+# a vision program's page is, watched, stopped before a power-off, and backed up, as a real pack would.
 pack: standin
 journalUnits: [vision.service]
 probes:

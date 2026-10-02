@@ -272,7 +272,7 @@ public sealed interface Check {
   /**
    * A systemd unit's state, as {@code systemctl show} reads it.
    *
-   * @param unit the unit, such as {@code photonvision.service}
+   * @param unit the unit, such as {@code vision.service}
    * @param state the active state it passes in: {@code active} unless the definition says
    */
   record Unit(String unit, String state) implements Check {

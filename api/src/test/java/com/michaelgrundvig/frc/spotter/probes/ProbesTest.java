@@ -15,17 +15,12 @@ import org.junit.jupiter.api.Test;
 class ProbesTest {
   static final Probe UNIT =
       new Probe(
-          "photonvision.unit",
-          "photonvision",
-          new Check.Unit("photonvision.service", "active"),
-          2,
-          2,
-          List.of());
+          "vision.unit", "vision", new Check.Unit("vision.service", "active"), 2, 2, List.of());
 
   static final Probe COMMAND =
       new Probe(
-          "photonvision.version",
-          "photonvision",
+          "vision.version",
+          "vision",
           new Check.Command(List.of("/opt/x/bin/helper", "version", "/opt/x.jar"), 0, "^(\\S+)$"),
           60,
           20,
@@ -34,13 +29,13 @@ class ProbesTest {
   static ProbeSet set() {
     return new ProbeSet(
         "vision-front",
-        List.of("builtin", "photonvision"),
+        List.of("builtin", "vision"),
         List.of(
             UNIT,
             COMMAND,
             new Probe(
                 "status",
-                "photonvision",
+                "vision",
                 new Check.Http("http://localhost:5800/api/status", 200, "", ""),
                 5,
                 2,
@@ -74,10 +69,8 @@ class ProbesTest {
                 5,
                 2,
                 List.of())),
-        List.of(
-            new Step(
-                "photonvision.stop", List.of("systemctl", "stop", "photonvision.service"), 120)),
-        List.of("photonvision.service"),
+        List.of(new Step("vision.stop", List.of("systemctl", "stop", "vision.service"), 120)),
+        List.of("vision.service"),
         List.of(
             new Download(
                 "settings.zip",
@@ -187,7 +180,7 @@ class ProbesTest {
 
   @Test
   void unitsUsbAndThresholdsAreCheckedToo() {
-    assertThatThrownBy(() -> new Check.Unit("photonvision", "active"))
+    assertThatThrownBy(() -> new Check.Unit("vision", "active"))
         .hasMessageContaining("isn't a systemd unit");
     assertThatThrownBy(() -> new Check.Unit("x.service", "running"))
         .hasMessageContaining("isn't one of");
@@ -231,7 +224,7 @@ class ProbesTest {
     assertThatThrownBy(
             () ->
                 new ProbeSet("c", List.of(), List.of(UNIT, UNIT), List.of(), List.of(), List.of()))
-        .hasMessageContaining("two of its probes are named photonvision.unit");
+        .hasMessageContaining("two of its probes are named vision.unit");
     List<Probe> many =
         java.util.stream.IntStream.range(0, 65)
             .mapToObj(i -> new Probe("p" + i, "x", UNIT.check(), 1, 1, List.of()))

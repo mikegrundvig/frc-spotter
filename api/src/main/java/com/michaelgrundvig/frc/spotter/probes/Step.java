@@ -5,7 +5,7 @@ import java.util.List;
 
 /**
  * Something to run before the computer powers off, named and fixed by the image: a pack's way to
- * let its software save and stop first (PhotonVision's pack stops PhotonVision, so its settings are
+ * let its software save and stop first (a vision program's pack stops it, so its settings are
  * written). Steps run in order; one that fails or times out is logged, and the power-off goes on,
  * since an unclean stop beats none.
  *

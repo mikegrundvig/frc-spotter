@@ -180,26 +180,26 @@ class ProbeRunnerTest {
   @Test
   void aUnitProbeReadsItsStateAndRestarts() {
     fixture.commands.answer(
-        List.of("systemctl", "show", "photonvision.service"),
+        List.of("systemctl", "show", "vision.service"),
         List.of(
             "LoadState=loaded",
             "ActiveState=active",
             "SubState=running",
             "Result=success",
             "NRestarts=2"));
-    assertThat(said(run(new Check.Unit("photonvision.service", "active"))))
+    assertThat(said(run(new Check.Unit("vision.service", "active"))))
         .isEqualTo("pass [active/running, restarts 2] ");
     fixture.commands.answer(
-        List.of("systemctl", "show", "photonvision.service"),
+        List.of("systemctl", "show", "vision.service"),
         List.of(
             "LoadState=loaded",
             "ActiveState=failed",
             "SubState=failed",
             "Result=exit-code",
             "NRestarts=5"));
-    assertThat(said(run(new Check.Unit("photonvision.service", "active"))))
+    assertThat(said(run(new Check.Unit("vision.service", "active"))))
         .isEqualTo(
-            "fail [failed/failed, restarts 5] photonvision.service is failed, not active (exit-code)");
+            "fail [failed/failed, restarts 5] vision.service is failed, not active (exit-code)");
     fixture.commands.answer(
         List.of("systemctl", "show", "lidar.service"),
         List.of("LoadState=not-found", "ActiveState=inactive"));

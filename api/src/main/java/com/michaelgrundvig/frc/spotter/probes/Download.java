@@ -6,8 +6,8 @@ import java.util.regex.Pattern;
 
 /**
  * A file the agent serves, made by a program the image fixes: what the program prints is the file
- * ({@code GET /v1/downloads/<name>}), streamed and cut off at {@code maxBytes}. PhotonVision's pack
- * serves its settings backup this way.
+ * ({@code GET /v1/downloads/<name>}), streamed and cut off at {@code maxBytes}. A pack serves a
+ * backup of its software's settings this way.
  *
  * @param name its name, which is also the file's: letters, digits, {@code .}, {@code _}, {@code -}
  * @param argv the program and its arguments, run directly as the agent's user

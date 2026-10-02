@@ -62,7 +62,7 @@ public final class DeployCheck {
      * as an image builder's asker checks (the software it runs, on its own port): the agent isn't
      * running, or this isn't the image this build expects.
      *
-     * @param what what answered, for people: "PhotonVision"
+     * @param what what answered, for people: "Its vision page"
      * @param why why the agent didn't
      */
     record AgentMissing(String what, String why) implements Asked {}

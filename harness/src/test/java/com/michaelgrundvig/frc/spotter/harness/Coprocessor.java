@@ -27,7 +27,7 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
   /** The agent's port. */
   static final int AGENT = 5808;
 
-  /** The software's port: PhotonVision's page, or the stand-in's. */
+  /** The software's port: the stand-in's page. */
   static final int SOFTWARE = 5800;
 
   /** What's written while it runs, in RAM, as on a board's image (its fstab's tmpfs). */

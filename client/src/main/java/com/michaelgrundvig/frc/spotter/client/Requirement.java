@@ -2,9 +2,9 @@ package com.michaelgrundvig.frc.spotter.client;
 
 /**
  * Something the robot needs of a coprocessor, as one of its probes reports it: that the probe
- * passes, or that its value is what the robot expects (PhotonVision's version equals PhotonLib's,
- * say, or the layout's fingerprint the one the robot uses). The robot declares them; the agent only
- * reports, and knows nothing of what the robot needs.
+ * passes, or that its value is what the robot expects (the vision software's version equals the one
+ * the robot code was built against, say). The robot declares them; the agent only reports, and
+ * knows nothing of what the robot needs.
  *
  * @param probe the probe's id, as the computer's packs define it
  * @param equals the value it must report; empty when passing is all that's needed

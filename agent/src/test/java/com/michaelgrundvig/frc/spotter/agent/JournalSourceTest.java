@@ -71,14 +71,10 @@ class JournalSourceTest {
   void aPageIsTheLatestOrWhatComesAfterACursor() throws IOException {
     fixture.commands.answer(List.of("journalctl", "-o"), Fixture.lines("journal-this-boot.json"));
     JournalPage latest =
-        journal.page(JournalSource.Position.LATEST, 3, List.of("photonvision.service"), 3);
+        journal.page(JournalSource.Position.LATEST, 3, List.of("vision.service"), 3);
     assertThat(fixture.commands.ran().get(0))
         .contains(
-            "--priority=3",
-            "--lines=3",
-            "_SYSTEMD_UNIT=photonvision.service",
-            "+",
-            "UNIT=photonvision.service")
+            "--priority=3", "--lines=3", "_SYSTEMD_UNIT=vision.service", "+", "UNIT=vision.service")
         .doesNotContain("--after-cursor=", "_TRANSPORT=kernel");
     assertThat(latest.entries()).hasSize(3);
     assertThat(latest.more()).isTrue();
@@ -213,13 +209,9 @@ class JournalSourceTest {
   void requestsAreCheckedBeforeTheyReachJournalctl() {
     assertThat(JournalSource.CURSOR.matcher("s=0f;i=1a2;b=3c;m=4d;t=5e;x=6f").matches()).isTrue();
     assertThat(JournalSource.CURSOR.matcher("s=1 --since=x").matches()).isFalse();
-    assertThat(JournalSource.matches(List.of("kernel", "photonvision.service")))
+    assertThat(JournalSource.matches(List.of("kernel", "vision.service")))
         .containsExactly(
-            "_TRANSPORT=kernel",
-            "+",
-            "_SYSTEMD_UNIT=photonvision.service",
-            "+",
-            "UNIT=photonvision.service");
+            "_TRANSPORT=kernel", "+", "_SYSTEMD_UNIT=vision.service", "+", "UNIT=vision.service");
     // Which units are served is the server's to check; a name that isn't a unit's never reaches
     // journalctl.
     assertThatThrownBy(() -> JournalSource.matches(List.of("--since=x")))
