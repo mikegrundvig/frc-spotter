@@ -14,12 +14,12 @@ Armbian, PhotonVision's images):
 
 ```sh
 # 1. Install the agent. It brings its own Java, and needs nothing configured.
-curl -fsSLO https://github.com/mikegrundvig/frc-spotter/releases/download/v0.3.0/frc-spotter_0.3.0_arm64.deb
-sudo apt install ./frc-spotter_0.3.0_arm64.deb
+curl -fsSLO https://github.com/mikegrundvig/frc-spotter/releases/download/v0.3.1/frc-spotter_0.3.1_arm64.deb
+sudo apt install ./frc-spotter_0.3.1_arm64.deb
 
 # 2. Copy in the packs you want from the catalog (packs/), and restart the agent to read them.
-curl -fsSLO https://raw.githubusercontent.com/mikegrundvig/frc-spotter/v0.3.0/packs/photonvision.yaml
-curl -fsSLO https://raw.githubusercontent.com/mikegrundvig/frc-spotter/v0.3.0/packs/health.yaml
+curl -fsSLO https://raw.githubusercontent.com/mikegrundvig/frc-spotter/v0.3.1/packs/photonvision.yaml
+curl -fsSLO https://raw.githubusercontent.com/mikegrundvig/frc-spotter/v0.3.1/packs/health.yaml
 sudo install -o root -g root -m 0644 photonvision.yaml health.yaml /etc/frc-spotter/packs/
 sudo systemctl restart frc-spotter
 
@@ -47,7 +47,7 @@ agent's own reader.
 | `photonvision.yaml` | PhotonVision's service, its web server, and a cheap signal that its settings changed |
 | `health.yaml` | The computer's own measurements held to limits, so the robot can require them: thermal margin, CPU capped, memory, root disk free |
 | `orangepi-rk3588.yaml` | An Orange Pi 5-family board's GPU load and NPU clock, and what can't be read unprivileged |
-| `raspberry-pi.yaml` | A Raspberry Pi's supply dropping below its under-voltage threshold |
+| `raspberry-pi.yaml` | A Raspberry Pi's under-voltage: how often since boot and when last, from the kernel's log, and whether it's under now |
 | `my-program.yaml` | A template for your team's own program: its systemd service, and its health page if it has one |
 
 A pack of your own is one YAML file of probes: a systemd unit, a page on `localhost`, a file, a
@@ -77,15 +77,15 @@ and javadoc, at `https://mikegrundvig.github.io/frc-spotter/maven`:
 
 | Coordinates | What |
 |---|---|
-| `com.michaelgrundvig.frc:spotter-client:0.3.0` | The robot's side; brings `spotter-api` with it |
-| `com.michaelgrundvig.frc:spotter-api:0.3.0` | The agent's API records and their JSON, and the packs' reader |
+| `com.michaelgrundvig.frc:spotter-client:0.3.1` | The robot's side; brings `spotter-api` with it |
+| `com.michaelgrundvig.frc:spotter-api:0.3.1` | The agent's API records and their JSON, and the packs' reader |
 
 ```groovy
 repositories {
     maven { url = "https://mikegrundvig.github.io/frc-spotter/maven" }
 }
 dependencies {
-    implementation "com.michaelgrundvig.frc:spotter-client:0.3.0"
+    implementation "com.michaelgrundvig.frc:spotter-client:0.3.1"
 }
 ```
 
