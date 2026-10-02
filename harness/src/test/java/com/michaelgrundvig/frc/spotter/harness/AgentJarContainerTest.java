@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.containers.Network;
@@ -71,8 +72,8 @@ class AgentJarContainerTest {
         for (int i = 0; i < 50 && client.latest().answer() == null; i++) {
           Thread.sleep(100);
         }
-        Health health = client.latest().answer();
-        assertThat(health).as("%s", client.latest().error()).isNotNull();
+        Health health =
+            Objects.requireNonNull(client.latest().answer(), () -> client.latest().error());
         assertThat(health.probes()).extracting(ProbeResult::id).contains("builtin.memory");
         assertThat(health.memory().totalMb()).isPositive();
       }
