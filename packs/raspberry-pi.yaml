@@ -1,17 +1,36 @@
-# A Raspberry Pi: whether its supply is dropping below the firmware's under-voltage threshold, read
-# unprivileged from the kernel's rpi_volt hwmon (in0_lcrit_alarm), not with vcgencmd, which needs
-# the video group and a device the agent's sandbox closes. Copy it to
-# /etc/frc-spotter/packs/raspberry-pi.yaml (root's, chmod 644) on a Raspberry Pi.
+# A Raspberry Pi's supply: how often it fell below the firmware's under-voltage threshold since
+# boot, and when it last did, and whether it's under now. Read unprivileged, from the kernel's log
+# and its rpi_volt hwmon, not with vcgencmd, which needs the video group and a device the agent's
+# sandbox closes. Copy it to /etc/frc-spotter/packs/raspberry-pi.yaml (root's, chmod 644) on a
+# Raspberry Pi.
 #
-# Checked against the Raspberry Pi kernel's source (rpi-6.12.y, drivers/hwmon/raspberrypi-hwmon.c),
-# not yet on a board. The driver asks the firmware every 2 s and clears its sticky bits each time,
-# so the alarm says "in the last 2 s", not "since boot". Since boot, each time it starts, the kernel
-# logs "Undervoltage detected!" at critical, which the agent's journal summary counts. Throttling
-# isn't in this hwmon: a capped clock shows in the agent's own report (health.yaml's cpu-capped).
+# Checked in the Raspberry Pi kernel's source (rpi-6.12.y), and none of it tried on a board:
+# - drivers/hwmon/raspberrypi-hwmon.c asks the firmware every 2 s, clearing its sticky bits each
+#   time, so no reading says "since boot". Each time under-voltage starts (bit 16 set after a
+#   poll without it), the driver logs "Undervoltage detected!" at critical; when it ends, "Voltage
+#   normalised". So the kernel's log of this boot holds every episode, each with its time.
+# - The firmware driver's get_throttled file (/sys/devices/platform/soc/soc:firmware/get_throttled)
+#   is gone in rpi-6.12.y (reverted in a5d3fbb804). Where an older kernel has it, it's the last
+#   2-second reply too, not since boot.
+# - Throttling isn't in the hwmon: a capped clock shows in the agent's own report (health.yaml's
+#   cpu-capped).
 pack: raspberry-pi
 probes:
-  # Under-voltage in the last 2 s: the hwmon named rpi_volt (its number varies), its alarm 0.
-  - id: raspberry-pi.under-voltage
+  # Under-voltage since boot: how many episodes the kernel logged, and the latest one's time in
+  # seconds after boot (the agent's monotonic clock, which the robot's log places on its own
+  # timeline). Passes at 0.
+  - id: raspberry-pi.under-voltage-since-boot
+    kind: command
+    argv:
+      - sh
+      - -c
+      - 'out=$(journalctl -k -b -q --no-pager -o short-monotonic) || { echo "journalctl -k -b failed" >&2; exit 2; }; printf "%s\n" "$out" | awk "/Undervoltage detected!/ { n++; t = \$0; sub(/^\\[ */, \"\", t); sub(/\\].*/, \"\", t) } END { if (n == 0) { print 0; exit 0 } printf \"%d, latest %.1f s after boot\\n\", n, t; exit 1 }" || { echo "under-voltage since boot" >&2; exit 1; }'
+    every: 5
+    timeout: 10
+  # Under-voltage now: within the hwmon's last 2-second poll (rpi_volt's in0_lcrit_alarm, its
+  # hwmon's number varying). Cheap, and too short-lived to catch most brownouts by polling: the
+  # count above is the one that holds them.
+  - id: raspberry-pi.under-voltage-now
     kind: command
     argv:
       - sh

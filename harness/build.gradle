@@ -63,6 +63,10 @@ tasks.named("test") {
     def agentPackage = configurations.agentPackage
     inputs.files(agentJar).withPropertyName("agentJar").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(agentPackage).withPropertyName("agentPackage").withPathSensitivity(PathSensitivity.RELATIVE)
+    // Spotter's catalog of packs, whose programs one test runs as the agent would.
+    inputs.files(rootProject.fileTree("packs") { include "*.yaml" })
+    .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty "spotter.packs", rootProject.file("packs").absolutePath
     doFirst {
         systemProperty "spotter.agentJar", agentJar.singleFile.absolutePath
         systemProperty "spotter.agentPackage", agentPackage.singleFile.absolutePath

@@ -12,8 +12,12 @@ import com.michaelgrundvig.frc.spotter.client.AgentClient;
 import com.michaelgrundvig.frc.spotter.client.AgentHttp;
 import com.michaelgrundvig.frc.spotter.client.DeployCheck;
 import com.michaelgrundvig.frc.spotter.json.Json;
+import com.michaelgrundvig.frc.spotter.probes.Check;
+import com.michaelgrundvig.frc.spotter.probes.Pack;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.AfterAll;
@@ -174,6 +178,39 @@ class AgentContainerTest {
         "The drive timer's journal: "
             + coprocessor.run(
                 "journalctl", "-u", "frc-spotter-drive.service", "--no-pager", "-o", "cat"));
+  }
+
+  /**
+   * The Raspberry Pi pack's count of under-voltage since boot, its program run as the agent's
+   * account runs it, on Debian's own sh and awk: against this computer's kernel log (none here),
+   * then a stand-in journalctl's with two episodes.
+   */
+  @Test
+  void theRaspberryPiPacksCountRunsOnDebiansShellAndAwk() throws Exception {
+    Pack pack =
+        Pack.parseYaml(
+            Files.readString(
+                Images.property("spotter.packs").resolve("raspberry-pi.yaml"),
+                StandardCharsets.UTF_8),
+            "raspberry-pi.yaml");
+    List<String> argv = ((Check.Command) pack.probes().get(0).check()).argv();
+    Container.ExecResult real = coprocessor.runAsAgent(argv.toArray(new String[0]));
+    assertThat(real.getExitCode()).as(real.getStderr()).isZero();
+    assertThat(real.getStdout()).isEqualTo("0\n");
+
+    coprocessor.write(
+        "/tmp/fakebin/journalctl",
+        "#!/bin/sh\n"
+            + "printf '%s\\n' '[  301.250000] pi kernel: hwmon hwmon1: Undervoltage detected!'"
+            + " '[ 1234.560000] pi kernel: hwmon hwmon1: Undervoltage detected!'\n");
+    coprocessor.run("chmod", "0755", "/tmp/fakebin/journalctl");
+    List<String> faked =
+        new java.util.ArrayList<>(List.of("env", "PATH=/tmp/fakebin:/usr/bin:/bin"));
+    faked.addAll(argv);
+    Container.ExecResult twice = coprocessor.runAsAgent(faked.toArray(new String[0]));
+    assertThat(twice.getExitCode()).isEqualTo(1);
+    assertThat(twice.getStdout()).isEqualTo("2, latest 1234.6 s after boot\n");
+    assertThat(twice.getStderr()).isEqualTo("under-voltage since boot\n");
   }
 
   @Test
