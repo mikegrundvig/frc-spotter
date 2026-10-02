@@ -32,13 +32,18 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
   /** The software's port: a vision program's page, 5800, as the stand-in's is. */
   public static final int SOFTWARE = 5800;
 
-  /** What's written while it runs, in RAM, as on a board's image (its fstab's tmpfs). */
+  /**
+   * What's written while it runs, in RAM, as on a board's image (its fstab's tmpfs, and systemd's
+   * /run). Where a board lets programs run from them, so does this: a Java program's native library
+   * (sqlite-jdbc's, say) is unpacked into /tmp or a unit's runtime directory and loaded from there,
+   * and Docker's tmpfs is noexec unless told otherwise.
+   */
   public static final Map<String, String> TMPFS =
       Map.of(
-          "/run", "rw,mode=755",
+          "/run", "rw,exec,mode=755",
           "/run/lock", "rw",
-          "/tmp", "rw,mode=1777",
-          "/var/tmp", "rw,mode=1777",
+          "/tmp", "rw,exec,mode=1777",
+          "/var/tmp", "rw,exec,mode=1777",
           "/var/log", "rw,mode=755",
           "/var/lib/systemd", "rw,mode=755");
 
