@@ -1,0 +1,8 @@
+// The coprocessor agent's account is refused everything its package's rule (60) and its packs'
+// rules (61 to 98) don't grant: rules run in the order of their names, so this one comes last.
+polkit.addRule(function (action, subject) {
+  if (subject.user === "frc-coprocessor-agent") {
+    return polkit.Result.NO;
+  }
+  return polkit.Result.NOT_HANDLED;
+});

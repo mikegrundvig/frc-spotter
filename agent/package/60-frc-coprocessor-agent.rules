@@ -1,0 +1,14 @@
+// The coprocessor agent's soft-off (docs/agent.md): its account may power the computer off,
+// also while someone is logged in over SSH. Its POST /v1/shutdown takes requests from its
+// controller only. Each pack's rule (61 to 98) adds what that pack's steps need; the agent package's
+// 99 refuses its account everything else.
+polkit.addRule(function (action, subject) {
+  if (subject.user !== "frc-coprocessor-agent") {
+    return polkit.Result.NOT_HANDLED;
+  }
+  if (action.id === "org.freedesktop.login1.power-off" ||
+      action.id === "org.freedesktop.login1.power-off-multiple-sessions") {
+    return polkit.Result.YES;
+  }
+  return polkit.Result.NOT_HANDLED;
+});

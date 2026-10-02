@@ -1,5 +1,5 @@
 #!/bin/sh
-# PhotonVision's pack helper (coprocessor/README.md, "Packs"): the program this pack's definitions
+# PhotonVision's pack helper (docs/agent.md, "Packs"): the program this pack's definitions
 # name. It runs on the Java the agent runs on, which the agent names in FRC_AGENT_JAVA (its own
 # runtime, or the board's), so the pack never names a path to one. sqlite-jdbc unpacks its native
 # library into the agent's runtime directory, as /tmp may not allow running it.

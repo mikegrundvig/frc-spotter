@@ -1,5 +1,5 @@
 # PhotonVision's pack: what the agent checks of PhotonVision, and what it does for it, named and
-# fixed here (coprocessor/README.md, "Packs"). Its helper, bin/photonvision-helper, reads
+# fixed here (docs/agent.md, "Packs"). Its helper, bin/photonvision-helper, reads
 # PhotonVision's settings database with the robot's own canonicalization (coprocessor-common), on
 # the agent's Java runtime; it's this pack's only program.
 pack: photonvision

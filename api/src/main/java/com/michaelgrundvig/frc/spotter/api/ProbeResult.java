@@ -4,8 +4,8 @@ import com.michaelgrundvig.frc.spotter.json.JsonValue;
 
 /**
  * One probe's latest result, in {@link Health#probes}: a check the image defines, by name, that the
- * agent ran (coprocessor/README.md, "Probes"). The agent says what it found; the robot judges
- * whether that's what it needs.
+ * agent ran (docs/agent.md, "Probes"). The agent says what it found; the robot judges whether
+ * that's what it needs.
  *
  * @param id the probe's id, as the image defines it
  * @param kind its kind: {@code command}, {@code http}, {@code file}, {@code unit}, {@code usb}, or

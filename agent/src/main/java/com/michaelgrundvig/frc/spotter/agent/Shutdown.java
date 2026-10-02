@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * succeeded or not. It happens once: asking again while it's under way does nothing more.
  *
  * <p>The agent runs unprivileged; a polkit rule its package installs lets its user power off, and
- * each pack's rule lets it do what that pack's steps need (coprocessor/README.md).
+ * each pack's rule lets it do what that pack's steps need (docs/agent.md).
  */
 final class Shutdown {
   /** How long powering off may take to be accepted. */

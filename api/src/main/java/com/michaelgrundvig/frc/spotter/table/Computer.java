@@ -22,8 +22,7 @@ import org.jspecify.annotations.Nullable;
  * @param cameras the PhotonVision camera names it runs (its role): the names robot code gives
  *     {@code PhotonCamera}
  * @param agentPort the port its health agent serves on
- * @param packs the packs it runs besides the built-in one, in order (coprocessor/README.md,
- *     "Packs")
+ * @param packs the packs it runs besides the built-in one, in order (docs/agent.md, "Packs")
  * @param probes the probes the table gives it besides its packs', as written
  * @param ports where each camera plugs in, by camera: its {@code /dev/v4l/by-path/} entry (with or
  *     without that folder); a camera without one has no port to check

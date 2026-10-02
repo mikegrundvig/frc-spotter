@@ -33,9 +33,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * What the agent knows, assembled from its sources: the answers to the API's requests. It knows the
  * computer (load, heat, memory, disks, the journal, the drive, what booted) and nothing of the
- * software on it: that's its packs' probes (coprocessor/README.md, "Packs"). A source that fails
- * costs only its part, which reads as unknown, with the failure in the health's problems; nothing
- * one source does stops the others.
+ * software on it: that's its packs' probes (docs/agent.md, "Packs"). A source that fails costs only
+ * its part, which reads as unknown, with the failure in the health's problems; nothing one source
+ * does stops the others.
  */
 final class Agent implements AutoCloseable {
   /** Health asked for again within this long is answered from the last reading. */

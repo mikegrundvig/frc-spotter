@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs PhotonVision's pack (coprocessor/README.md, "Packs"): this folder, as built
+# Installs PhotonVision's pack (docs/agent.md, "Packs"): this folder, as built
 # (./gradlew :coprocessor-photonvision:packFolder), into /usr/lib/frc-coprocessor/packs/photonvision,
 # and its polkit rule. The agent package must be installed too; a computer runs the pack once its
 # configuration (/etc/frc-coprocessor/agent.json) names it, and the agent restarts.

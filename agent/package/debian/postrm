@@ -1,0 +1,11 @@
+#!/bin/sh
+# The coprocessor agent's package, removed: its unit's state forgotten when purged. Its account and
+# its configuration (/etc/frc-coprocessor) stay, as Debian's packages leave a system user.
+set -e
+if [ -d /run/systemd/system ]; then
+  systemctl --system daemon-reload >/dev/null || true
+fi
+if [ "$1" = purge ]; then
+  deb-systemd-helper purge frc-coprocessor-agent.service >/dev/null || true
+fi
+exit 0

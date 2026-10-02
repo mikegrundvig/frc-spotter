@@ -1,0 +1,58 @@
+# The coprocessor agent (docs/agent.md): the web service the robot polls for the computer's
+# health and its packs' probes, on the port its configuration names (/etc/frc-coprocessor/agent.json,
+# else 5808). Installed by its package as /usr/lib/systemd/system/frc-coprocessor-agent.service.
+#
+# It stays out of the way of what it watches: a lower priority, a 64 MB heap with the serial
+# collector and the quick compiler only (in its launcher), and on an RK3588 the small cores (0-3:
+# PhotonVision runs on the big ones, 4-7; a board with fewer cores runs it on those it has).
+
+[Unit]
+Description=FRC coprocessor agent
+After=network.target
+
+[Service]
+Type=simple
+# Its own system user (its package makes it, with systemd-sysusers), in systemd-journal to read the
+# journal. Its one privilege, by its package's polkit rule, is powering off; each pack's rule adds
+# what that pack's steps need (PhotonVision's: stopping and restarting its unit).
+User=frc-coprocessor-agent
+Group=frc-coprocessor-agent
+SupplementaryGroups=systemd-journal
+# Its launcher runs it on the package's own Java runtime, or the board's when the package has none.
+# Out of memory, it exits (and is restarted) rather than limping on.
+ExecStart=/usr/lib/frc-coprocessor-agent/bin/frc-coprocessor-agent
+# Its packs' helpers unpack native libraries here (sqlite-jdbc's); /tmp may not allow running them.
+RuntimeDirectory=frc-coprocessor-agent
+Restart=always
+RestartSec=2
+Nice=10
+AllowedCPUs=0-3
+MemoryMax=200M
+TasksMax=64
+UMask=0077
+# It writes nothing but its runtime directory, holds no capabilities, and talks only to the robot
+# network, link-local addresses, and itself. No MemoryDenyWriteExecute (Java compiles code as it
+# runs), and no ProcSubset=pid (it reads /proc/stat, /proc/uptime, /proc/meminfo, /proc/sys).
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+DevicePolicy=closed
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost 10.0.0.0/8 169.254.0.0/16
+
+[Install]
+WantedBy=multi-user.target

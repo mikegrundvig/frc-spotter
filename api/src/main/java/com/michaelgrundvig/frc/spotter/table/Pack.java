@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
  * software on a coprocessor, as its {@code pack.yaml} writes them, with placeholders still in
  * ({@code {pack}}, {@code {camera}}, ...). A computer names the packs it runs in the table, and the
  * build compiles them, with the probes the table gives it, into its {@link
- * com.michaelgrundvig.frc.spotter.probes.ProbeSet} (coprocessor/README.md, "Packs").
+ * com.michaelgrundvig.frc.spotter.probes.ProbeSet} (docs/agent.md, "Packs").
  *
  * <p>A pack is a folder: {@code pack.yaml}, and any helper programs its definitions name under its
  * {@code bin/}, installed at {@code /usr/lib/frc-coprocessor/packs/<name>/}. Spotter's own packs

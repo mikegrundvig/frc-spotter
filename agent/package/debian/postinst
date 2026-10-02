@@ -1,0 +1,16 @@
+#!/bin/sh
+# The coprocessor agent's package, installed: its account made, its unit enabled, and on a running
+# system (not a chroot building an image) started. In a chroot, nothing is started: the image starts
+# it at its first boot.
+set -e
+if [ "$1" = configure ]; then
+  systemd-sysusers frc-coprocessor-agent.conf
+  mkdir -p /etc/frc-coprocessor
+  deb-systemd-helper unmask frc-coprocessor-agent.service >/dev/null || true
+  deb-systemd-helper enable frc-coprocessor-agent.service >/dev/null || true
+  if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+    deb-systemd-invoke restart frc-coprocessor-agent.service >/dev/null || true
+  fi
+fi
+exit 0

@@ -1,4 +1,4 @@
-// PhotonVision's pack (coprocessor/README.md, "Packs"): the agent's account may stop PhotonVision's
+// PhotonVision's pack (docs/agent.md, "Packs"): the agent's account may stop PhotonVision's
 // unit (its step before a power-off, so its settings are saved) and restart it; polkit refuses it
 // everything else this rule doesn't name. The agent package's own rule lets it power off.
 polkit.addRule(function (action, subject) {

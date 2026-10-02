@@ -13,12 +13,12 @@ import java.util.regex.Pattern;
 
 /**
  * The coprocessor agent: {@code java -jar frc-coprocessor-agent.jar [serve] [--port=N]
- * [--bind=ADDRESS] [--controller=ADDRESS] [--root=DIR]} serves the API (coprocessor/README.md) on
- * the port its configuration names ({@code /etc/frc-coprocessor/agent.json}), else the image's
- * stamp file's, else 5808, unless {@code --port} says. {@code --controller} names the one address a
- * shutdown is taken from, over the configuration's (a test's, where the robot is a test process
- * behind the container runtime's port forwarding). {@code --root} reads the computer's files from a
- * folder rather than {@code /}: a fixture tree, for tests.
+ * [--bind=ADDRESS] [--controller=ADDRESS] [--root=DIR]} serves the API (docs/agent.md) on the port
+ * its configuration names ({@code /etc/frc-coprocessor/agent.json}), else the image's stamp file's,
+ * else 5808, unless {@code --port} says. {@code --controller} names the one address a shutdown is
+ * taken from, over the configuration's (a test's, where the robot is a test process behind the
+ * container runtime's port forwarding). {@code --root} reads the computer's files from a folder
+ * rather than {@code /}: a fixture tree, for tests.
  */
 public final class AgentMain {
   /** How long any one of the agent's own commands may take. */

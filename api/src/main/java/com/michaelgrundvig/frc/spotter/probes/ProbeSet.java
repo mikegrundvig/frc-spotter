@@ -16,9 +16,9 @@ import java.util.regex.Pattern;
  * Everything one computer's agent runs beyond the agent itself: its probes, the steps to run before
  * it powers off, the journal units it serves besides its own and the kernel's, and the files it
  * serves. The agent compiles it when it starts, from its configuration and the packs installed
- * (coprocessor/README.md, "Packs"); the robot's build compiles the same from the coprocessor table,
- * with the same code; and the agent's stamp carries its {@link #hash}, so the robot knows exactly
- * what each computer checks.
+ * (docs/agent.md, "Packs"); the robot's build compiles the same from the coprocessor table, with
+ * the same code; and the agent's stamp carries its {@link #hash}, so the robot knows exactly what
+ * each computer checks.
  *
  * @param computer the computer it's for
  * @param packs the packs it was compiled from, in order: {@code builtin} first

@@ -1,5 +1,5 @@
 // The coprocessor agent: a small web service each coprocessor runs, which the robot polls for the
-// computer's health and the probes its packs define (coprocessor/README.md). It knows the computer,
+// computer's health and the probes its packs define (docs/agent.md). It knows the computer,
 // not the software on it: PhotonVision is a pack. One runnable jar, with nothing but
 // :coprocessor-common inside, Java 17 bytecode.
 
@@ -49,9 +49,10 @@ tasks.named("test") {
     .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
-// coprocessor-agent.jar: the agent with everything it needs (the shared code), run with `java -jar`.
+// frc-coprocessor-agent.jar: the agent with everything it needs (the shared code), run with
+// `java -jar` on Java 17 or newer.
 tasks.named("jar") {
-    archiveFileName = "coprocessor-agent.jar"
+    archiveFileName = "frc-coprocessor-agent.jar"
     manifest {
         attributes("Main-Class": "com.michaelgrundvig.frc.spotter.agent.AgentMain")
     }
@@ -65,7 +66,7 @@ tasks.named("jar") {
 }
 
 // The libraries the agent runs with, group:name:version one to a line, for the recipe hash
-// (coprocessor/README.md): a new library is a new image; a new WPILib, which the agent doesn't run,
+// (docs/agent.md): a new library is a new image; a new WPILib, which the agent doesn't run,
 // isn't.
 tasks.register("runtimeLibraries") {
     description = "List the agent's runtime libraries, for the coprocessor recipe hash."
@@ -88,3 +89,167 @@ tasks.register("runtimeLibraries") {
 
 ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
 apply from: rootProject.file("gradle/quality.gradle")
+
+// ---- The agent's package (docs/agent.md, "The agent's package") ----
+//
+//   ./gradlew :coprocessor-agent:agentPackage   the package's files as installed: build/package/root
+//   ./gradlew :coprocessor-agent:agentRelease   build/distributions: the .deb (where dpkg-deb is), the
+//                                               tarball, and the -all.jar with its files
+//
+// One set of files three ways: a .deb with its own Java runtime, a tarball of the same for systems
+// without dpkg, and the -all.jar alone, with its unit, polkit rules, and install script beside it,
+// for a board that already has Java 17 or newer. The runtime is jlink's, of the modules the agent and
+// its packs' Java helpers need, for the computer building it: build an ARM package on ARM.
+def agentVersion = (project.findProperty("agentVersion") ?: "0.1.0").toString()
+def debianArch = [amd64: "amd64", x86_64: "amd64", aarch64: "arm64", arm64: "arm64"]
+.get(System.getProperty("os.arch"), System.getProperty("os.arch"))
+// The runtime's modules: the agent's (java.base, jdk.httpserver), and java.sql for packs' helpers
+// that read a database with the shared code (PhotonVision's).
+def runtimeModules = "java.base,jdk.httpserver,java.sql"
+def packageRoot = layout.buildDirectory.dir("package/root")
+
+def agentRuntime = tasks.register("agentRuntime", Exec) {
+    description = "Link the agent's own Java runtime (jlink), for the computer building it."
+    def launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+    def out = layout.buildDirectory.dir("package/runtime")
+    inputs.property("modules", runtimeModules)
+    outputs.dir(out)
+    doFirst { delete out }
+    executable launcher.map { it.metadata.installationPath.file("bin/jlink").asFile.absolutePath }.get()
+    // --strip-java-debug-attributes, not --strip-debug: that one runs objcopy, which a laptop may
+    // not have; the runtime's native libraries come stripped.
+    args "--add-modules", runtimeModules, "--strip-java-debug-attributes", "--no-header-files", "--no-man-pages",
+            "--compress=zip-9", "--output", out.get().asFile.absolutePath
+}
+
+// The built-in pack's definitions, as the agent reads them.
+def builtinPack = tasks.register("builtinPackJson", JavaExec) {
+    description = "Check the built-in pack and write it as pack.json."
+    classpath = configurations.runtimeClasspath
+    mainClass = "com.michaelgrundvig.frc.spotter.tools.CoprocessorBuild"
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+    def source = rootProject.file("packs/builtin/pack.yaml")
+    def out = layout.buildDirectory.file("package/builtin/pack.json")
+    inputs.file(source)
+    outputs.file(out)
+    args "pack", source.absolutePath, out.get().asFile.absolutePath
+}
+
+def agentPackageTask = tasks.register("agentPackage", Sync) {
+    group = "build"
+    description = "Assemble the agent's package as installed, with DEBIAN/: build/package/root."
+    into packageRoot
+    from(tasks.named("jar")) { into "usr/lib/frc-coprocessor-agent" }
+    from(agentRuntime) { into "usr/lib/frc-coprocessor-agent/runtime" }
+    // The launcher's source folder isn't named bin/, which Git ignores (an IDE's output).
+    from("package/launcher") {
+        into "usr/lib/frc-coprocessor-agent/bin"
+        filePermissions { unix("0755") }
+    }
+    from(builtinPack) { into "usr/lib/frc-coprocessor/packs/builtin" }
+    from("package/frc-coprocessor-agent.service") { into "usr/lib/systemd/system" }
+    from("package/frc-coprocessor-agent.sysusers") {
+        into "usr/lib/sysusers.d"
+        rename { "frc-coprocessor-agent.conf" }
+    }
+    from("package") {
+        include "*.rules"
+        into "usr/share/polkit-1/rules.d"
+    }
+    from("package/debian") {
+        include "postinst", "prerm", "postrm"
+        into "DEBIAN"
+        filePermissions { unix("0755") }
+    }
+    from("package/debian/control.in") {
+        into "DEBIAN"
+        rename { "control" }
+        // Installed-Size is in KiB; the runtime is most of it.
+        filter { line -> line.replace("@VERSION@", agentVersion).replace("@ARCH@", debianArch) }
+    }
+    inputs.property("version", agentVersion)
+    // jlink's legal notices are read-only, which Sync can't write over: start afresh.
+    doFirst {
+        def root = packageRoot.get().asFile
+        if (root.exists()) {
+            ant.chmod(dir: root, perm: "u+w", includes: "**/*")
+            delete root
+        }
+    }
+    doLast {
+        def size = fileTree(packageRoot.get().asFile) { exclude "DEBIAN/**" }.files.sum(0L) { it.length() }
+        def control = new File(packageRoot.get().asFile, "DEBIAN/control")
+        control.text = control.text.replace("@SIZE@", Long.toString((long) Math.ceil(size / 1024.0)))
+    }
+}
+
+configurations {
+    // The package's files as installed, for the container tests (which build the .deb from them).
+    agentPackage {
+        canBeConsumed = true
+        canBeResolved = false
+    }
+}
+artifacts {
+    add("agentPackage", agentPackageTask.map { it.destinationDir }) { builtBy agentPackageTask }
+}
+
+def distributions = layout.buildDirectory.dir("distributions")
+
+def agentDeb = tasks.register("agentDeb", Exec) {
+    description = "Build the agent's .deb with dpkg-deb, where it's installed (Debian, Ubuntu, CI)."
+    dependsOn agentPackageTask
+    def deb = distributions.map { it.file("frc-coprocessor-agent_${agentVersion}_${debianArch}.deb") }
+    outputs.file(deb)
+    def dpkgDeb = [
+        "/usr/bin/dpkg-deb",
+        "/bin/dpkg-deb"
+    ].find { new File(it).canExecute() }
+    onlyIf("dpkg-deb is installed") { dpkgDeb != null }
+    doFirst { distributions.get().asFile.mkdirs() }
+    executable dpkgDeb ?: "dpkg-deb"
+    args "--root-owner-group", "-Zxz", "--build", packageRoot.get().asFile.absolutePath,
+            deb.get().asFile.absolutePath
+}
+
+def agentTarball = tasks.register("agentTarball", Tar) {
+    description = "Pack the agent and its runtime for systems without dpkg, with its install script."
+    archiveFileName = "frc-coprocessor-agent-${agentVersion}-linux-${debianArch}.tar.gz"
+    destinationDirectory = distributions
+    compression = Compression.GZIP
+    into("frc-coprocessor-agent-${agentVersion}")
+    from(agentPackageTask) { exclude "DEBIAN/**" }
+    from("package/install.sh") {
+        filePermissions {
+            unix("0755")
+        }
+    }
+}
+
+def agentJarRelease = tasks.register("agentJarRelease", Sync) {
+    description = "The -all.jar, for a board with Java 17 or newer, with its unit, rules, and install script beside it."
+    into distributions.map { it.dir("jar") }
+    from(tasks.named("jar")) {
+        rename {
+            "frc-coprocessor-agent-${agentVersion}-all.jar"
+        }
+    }
+    from("package/launcher/frc-coprocessor-agent") {
+        filePermissions {
+            unix("0755")
+        }
+    }
+    from("package/install.sh") {
+        filePermissions {
+            unix("0755")
+        }
+    }
+    from("package") { include "*.rules", "*.service", "*.sysusers" }
+    from(builtinPack)
+}
+
+tasks.register("agentRelease") {
+    group = "build"
+    description = "Build the agent's three artifacts in build/distributions: the .deb, the tarball, the -all.jar."
+    dependsOn agentDeb, agentTarball, agentJarRelease
+}

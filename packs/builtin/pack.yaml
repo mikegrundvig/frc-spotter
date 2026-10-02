@@ -1,5 +1,5 @@
 # The built-in pack: every computer runs it, so the robot can require the agent's own measurements
-# like any other probe (coprocessor/README.md, "Packs"). Each holds one of the agent's metrics
+# like any other probe (docs/agent.md, "Packs"). Each holds one of the agent's metrics
 # against a limit; the limits are the README's, with why.
 pack: builtin
 probes:
