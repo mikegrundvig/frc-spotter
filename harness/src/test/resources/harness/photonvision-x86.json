@@ -1,0 +1,6 @@
+{
+  "comment": "The PhotonVision the container tests run (x86 Linux): the newest fetchable from a release that keeps it. PhotonVision's rolling Dev release replaces its jars on every push, so a tagged release it is.",
+  "version": "v2027.0.0-alpha-2",
+  "url": "https://github.com/PhotonVision/photonvision/releases/download/v2027.0.0-alpha-2/photonvision-v2027.0.0-alpha-2-linuxx86-64.jar",
+  "sha256": "e83969e850374bd901bdc8645d1e9250c48b4ca3a2acedaa7c622e09a8966837"
+}

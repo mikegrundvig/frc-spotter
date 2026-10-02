@@ -1,0 +1,107 @@
+// The container tests (@ContainerTest, tagged "container"): the agent installed from its .deb in a
+// plain Debian 13 container under systemd, with no Java of its own, its root read-only and /data
+// writable as on a board; PhotonVision's pack against the real PhotonVision; the -all.jar on a stock
+// Java 17. The tests play the robot with Spotter's own client. They need Docker or Podman running
+// Linux containers, and skip themselves without (as on a Windows laptop); in CI on Linux they must
+// run. `test -Pquick` leaves them out unless --tests names them.
+
+plugins {
+    id "java"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    // The agent's -all.jar, which one test runs on a stock Java 17.
+    agentJar {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
+    // The agent's package as installed (with DEBIAN/), which the tests build into a .deb and install.
+    agentPackage {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+    // PhotonVision's pack as installed.
+    photonVisionPack {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    agentJar project(":agent")
+    agentPackage project(path: ":agent", configuration: "agentPackage")
+    photonVisionPack project(path: ":photonvision-pack", configuration: "packFolder")
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation project(":client")
+    testImplementation platform(libs.testcontainers.bom)
+    testImplementation libs.testcontainers.core
+    testImplementation libs.testcontainers.toxiproxy
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+    def agentJar = configurations.agentJar
+    def agentPackage = configurations.agentPackage
+    def photonVisionPack = configurations.photonVisionPack
+    inputs.files(agentJar).withPropertyName("agentJar").withNormalizer(ClasspathNormalizer)
+    inputs.files(agentPackage).withPropertyName("agentPackage").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(photonVisionPack).withPropertyName("photonVisionPack").withPathSensitivity(PathSensitivity.RELATIVE)
+    doFirst {
+        systemProperty "spotter.agentJar", agentJar.singleFile.absolutePath
+        systemProperty "spotter.agentPackage", agentPackage.singleFile.absolutePath
+        systemProperty "spotter.photonVisionPack", photonVisionPack.singleFile.absolutePath
+    }
+    // Downloads the tests need (PhotonVision's jar), kept beside Gradle's own caches so a clean
+    // build doesn't fetch them again.
+    systemProperty "spotter.downloadCache", new File(gradle.gradleUserHomeDir, "caches/frc-spotter").absolutePath
+    // In CI on Linux, Docker is there: a container test that can't run fails rather than skips.
+    def os = System.getProperty("os.name").toLowerCase()
+    systemProperty "spotter.requireContainers", (System.getenv("CI") != null && os.contains("linux")).toString()
+    // Rootless Podman, as on a developer's Linux machine: its user socket, when it's there and
+    // nothing else was asked for. Testcontainers' cleanup container (Ryuk) needs a root socket, so the
+    // tests stop their own containers (and remove what a crashed run left, by label).
+    def runtimeDir = System.getenv("XDG_RUNTIME_DIR")
+    def podman = runtimeDir == null ? null : new File(runtimeDir, "podman/podman.sock")
+    if (System.getenv("DOCKER_HOST") == null && podman != null && podman.exists()) {
+        environment "DOCKER_HOST", "unix://" + podman.absolutePath
+        environment "TESTCONTAINERS_RYUK_DISABLED", "true"
+    }
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
+apply from: rootProject.file("gradle/quality.gradle")
+
+// Images build, and PhotonVision starts, within minutes: no test may hang past ten (quality.gradle's
+// two minutes are for unit tests).
+tasks.named("test") {
+    systemProperty "junit.jupiter.execution.timeout.default", "10 m"
+}
+
+// The built-in pack, as the robot's build reads it, for the tests to compile what the agent runs.
+tasks.named("processTestResources") {
+    from(rootProject.file("packs/builtin/pack.yaml")) {
+        into "harness"
+        rename { "builtin.yaml" }
+    }
+}

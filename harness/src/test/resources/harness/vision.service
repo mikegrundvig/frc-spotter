@@ -1,0 +1,10 @@
+# The stand-in for the software a coprocessor runs: a web server on 5800, as PhotonVision's page is.
+[Unit]
+Description=Vision software stand-in
+
+[Service]
+ExecStart=/bin/busybox httpd -f -p 5800 -h /srv/vision
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

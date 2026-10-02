@@ -1,0 +1,365 @@
+package com.michaelgrundvig.frc.spotter.harness;
+
+import com.github.dockerjava.api.exception.NotFoundException;
+import com.michaelgrundvig.frc.spotter.json.Json;
+import com.michaelgrundvig.frc.spotter.json.JsonValue;
+import com.michaelgrundvig.frc.spotter.table.Pack;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
+import org.testcontainers.DockerClientFactory;
+import org.testcontainers.images.builder.ImageFromDockerfile;
+
+/**
+ * The images the container tests run, each built once and named by a hash of everything it's built
+ * from, so an image already built is reused and a change builds a new one:
+ *
+ * <ul>
+ *   <li>{@link #agent}: Debian 13 under systemd with no Java, the agent installed from its .deb as a
+ *       board's image build would (the package's maintainer scripts run with no systemd running,
+ *       as in a chroot), and the test packs, a stand-in for the software it watches, and a fixture
+ *       tree of USB devices;
+ *   <li>{@link #photonVision}: the same with PhotonVision itself (on a Java of its own, as its image
+ *       has) and PhotonVision's pack.
+ * </ul>
+ *
+ * <p>Built images are kept (named {@code localhost/spotter-test-*}); a runtime's own prune removes
+ * old ones.
+ */
+final class Images {
+  /** Debian 13 (trixie), pinned. */
+  static final String DEBIAN =
+      "docker.io/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a";
+
+  /** The Java PhotonVision runs on in its image: 25, as its 2027 builds need. */
+  static final String PHOTONVISION_JAVA = "docker.io/library/eclipse-temurin:25.0.4.1_1-jre-noble";
+
+  /** A stock Java 17, as PhotonVision's 2026 images carry, for the -all.jar. */
+  static final String JAVA_17 = "docker.io/library/eclipse-temurin:17.0.19_10-jre-noble";
+
+  /** The team number the tests' computers are on: 10.99.71.x, unlikely on any test machine. */
+  static final int TEAM = 9971;
+
+  private static final Map<String, String> BUILT = new LinkedHashMap<>();
+
+  private Images() {}
+
+  /** The base: Debian 13 under systemd, with polkit and D-Bus, and nothing of Java. */
+  static String base() {
+    return build(
+        "base",
+        """
+        FROM %s
+        ENV container=docker
+        RUN apt-get update -qq \\
+         && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \\
+              systemd systemd-sysv dbus polkitd init-system-helpers busybox curl ca-certificates \\
+         && apt-get clean && rm -rf /var/lib/apt/lists/*
+        # A board's image starts nothing it doesn't need; neither does this.
+        RUN systemctl mask getty@.service console-getty.service systemd-firstboot.service
+        STOPSIGNAL SIGRTMIN+3
+        ENTRYPOINT ["/sbin/init"]
+        """
+            .formatted(DEBIAN),
+        Map.of());
+  }
+
+  /**
+   * The agent's image: the base, the agent installed from its .deb, the test packs (a stand-in for
+   * the software it watches, and one probe of each kind), the stand-in's unit, a failing unit, a
+   * fixture tree of USB devices at {@code /srv/fixture}, and the stamp.
+   */
+  static String agent() {
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put("package", property("spotter.agentPackage"));
+    context.put("standin.json", packJson("standin"));
+    context.put("kinds.json", packJson("kinds"));
+    context.put("61-standin.rules", resource("61-standin.rules"));
+    context.put("vision.service", resource("vision.service"));
+    context.put("broken.service", resource("broken.service"));
+    context.put("fixture-agent.json", resource("fixture-agent.json"));
+    context.put("stamp.json", stamp("vision-front", 11, "v-standin"));
+    return build(
+        "agent",
+        """
+        FROM %s
+        %s
+        # The test packs, as a pack's own install would put them.
+        COPY standin.json /usr/lib/frc-coprocessor/packs/standin/pack.json
+        COPY kinds.json /usr/lib/frc-coprocessor/packs/kinds/pack.json
+        COPY 61-standin.rules /usr/share/polkit-1/rules.d/61-frc-coprocessor-standin.rules
+        # The software the stand-in pack watches: a web server on 5800, as PhotonVision's page is.
+        COPY vision.service broken.service /etc/systemd/system/
+        RUN mkdir -p /srv/vision/api \\
+         && printf '{"status": "up"}' > /srv/vision/api/status.json \\
+         && printf '{"version": "v-standin"}' > /srv/vision/api/version.json \\
+         && printf 'PK stand-in backup' > /srv/vision/backup.zip \\
+         && systemctl enable vision.service broken.service
+        # A fixture tree of USB devices, with real links, for an agent run with --root: front-left
+        # on a USB 3 port, front-right not plugged in.
+        COPY fixture-agent.json /srv/fixture/etc/frc-coprocessor/agent.json
+        RUN set -e; f=/srv/fixture; usb=$f/sys/devices/platform/xhci-hcd.0.auto/usb7/7-1 \\
+         && mkdir -p $f/dev/v4l/by-path $f/sys/class/video4linux/video0 "$usb/7-1:1.0" \\
+              $f/usr/lib/frc-coprocessor/packs \\
+         && cp -R /usr/lib/frc-coprocessor/packs/builtin $f/usr/lib/frc-coprocessor/packs/ \\
+         && : > $f/dev/video0 \\
+         && ln -s ../../video0 "$f/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0" \\
+         && ln -s "../../../devices/platform/xhci-hcd.0.auto/usb7/7-1/7-1:1.0" $f/sys/class/video4linux/video0/device \\
+         && echo 5000 > $usb/speed && echo 0c45 > $usb/idVendor && echo 6366 > $usb/idProduct \\
+         && echo 'Arducam OV9281 USB Camera' > $usb/product
+        COPY stamp.json /etc/coprocessor/stamp.json
+        RUN mkdir -p /data/frc-coprocessor
+        VOLUME /data
+        """
+            .formatted(base(), INSTALL_AGENT),
+        context);
+  }
+
+  /** How an image installs the agent: its .deb, built from the package's files, then dpkg. */
+  static final String INSTALL_AGENT =
+      """
+      # The agent, installed from its .deb as an image build installs it: no systemd is running
+      # here, so its maintainer scripts enable its unit and start nothing.
+      COPY package /tmp/frc-coprocessor-agent
+      RUN dpkg-deb --root-owner-group --build /tmp/frc-coprocessor-agent /tmp/frc-coprocessor-agent.deb \\
+       && dpkg -i /tmp/frc-coprocessor-agent.deb \\
+       && rm -rf /tmp/frc-coprocessor-agent /tmp/frc-coprocessor-agent.deb \\
+       && ! command -v java
+      """;
+
+  /**
+   * PhotonVision's image: the base, the agent from its .deb, PhotonVision's jar on a Java of its own
+   * (its smoke test run, so its native libraries are in place on the read-only root), its unit with
+   * {@code -n} (the network is the image's), its settings on /data, and PhotonVision's pack.
+   */
+  static String photonVision() {
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put("package", property("spotter.agentPackage"));
+    context.put("pack", property("spotter.photonVisionPack"));
+    context.put("photonvision.jar", PhotonVisionJar.path());
+    context.put("photonvision.service", resource("photonvision.service"));
+    context.put("stamp.json", stamp("vision-front", 11, PhotonVisionJar.version()));
+    return build(
+        "photonvision",
+        """
+        FROM %s AS java
+        FROM %s
+        %s
+        COPY --from=java /opt/java/openjdk /opt/photonvision/jre
+        COPY photonvision.jar /opt/photonvision/photonvision.jar
+        # Its smoke test makes its empty settings and unpacks its native libraries under root's
+        # home, where they must be before the root goes read-only.
+        RUN mkdir -p /tmp/smoke && cd /tmp/smoke \\
+         && /opt/photonvision/jre/bin/java -jar /opt/photonvision/photonvision.jar --smoketest -n \\
+         && rm -rf /tmp/smoke
+        COPY photonvision.service /etc/systemd/system/
+        RUN mkdir -p /data/photonvision_config \\
+         && ln -s /data/photonvision_config /opt/photonvision/photonvision_config \\
+         && systemctl enable photonvision.service
+        COPY pack /tmp/pack
+        RUN sh /tmp/pack/install.sh && rm -rf /tmp/pack
+        COPY stamp.json /etc/coprocessor/stamp.json
+        RUN mkdir -p /data/frc-coprocessor
+        VOLUME /data
+        """
+            .formatted(PHOTONVISION_JAVA, base(), INSTALL_AGENT),
+        context);
+  }
+
+  /** A stamp, as the image's stamping writes it. */
+  static String stamp(String name, int address, String photonVisionVersion) {
+    return Json.compact(
+        JsonValue.Obj.builder()
+            .put("name", name)
+            .put("team", TEAM)
+            .put("address", address(address))
+            .put("board", "orangepi-5")
+            .put("cameras", List.of())
+            .put("release", "test")
+            .put("recipeHash", "")
+            .put("photonvisionVersion", photonVisionVersion)
+            .put("settingsHash", "")
+            .put("agentPort", 5808)
+            .build());
+  }
+
+  /** An address on the tests' network: 10.99.71.x. */
+  static String address(int last) {
+    return "10." + TEAM / 100 + "." + TEAM % 100 + "." + last;
+  }
+
+  /** A test pack, read from its YAML and written as the agent reads it. */
+  static String packJson(String name) {
+    String yaml = resource(name + ".yaml");
+    return Json.pretty(Pack.parseYaml(yaml, name + ".yaml").toJson());
+  }
+
+  /** A resource of the harness's, as text. */
+  static String resource(String name) {
+    try (InputStream in =
+        Objects.requireNonNull(
+            Images.class.getResourceAsStream("/harness/" + name), "no resource harness/" + name)) {
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  static Path property(String name) {
+    String value = System.getProperty(name);
+    if (value == null) {
+      throw new IllegalStateException(name + " isn't set: run the container tests with Gradle");
+    }
+    return Path.of(value);
+  }
+
+  /**
+   * Builds an image unless one built from the same Dockerfile and context is there already.
+   *
+   * @param context each file in the build's context: a {@link Path} (a file or a folder) or text
+   */
+  static synchronized String build(String kind, String dockerfile, Map<String, Object> context) {
+    String name = "localhost/spotter-test-" + kind + ":" + hash(dockerfile, context);
+    String built = BUILT.get(name);
+    if (built != null) {
+      return built;
+    }
+    boolean present;
+    try {
+      DockerClientFactory.instance().client().inspectImageCmd(name).exec();
+      present = true;
+    } catch (NotFoundException e) {
+      present = false;
+    }
+    if (!present) {
+      ImageFromDockerfile image =
+          new ImageFromDockerfile(name, false).withFileFromString("Dockerfile", dockerfile);
+      context.forEach(
+          (file, content) -> {
+            if (content instanceof Path) {
+              image.withFileFromPath(file, (Path) content);
+            } else {
+              image.withFileFromString(file, (String) content);
+            }
+          });
+      image.get();
+    }
+    BUILT.put(name, name);
+    return name;
+  }
+
+  /** A hash of what an image is built from. */
+  private static String hash(String dockerfile, Map<String, Object> context) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      digest.update(dockerfile.getBytes(StandardCharsets.UTF_8));
+      for (Map.Entry<String, Object> file : context.entrySet()) {
+        digest.update(file.getKey().getBytes(StandardCharsets.UTF_8));
+        Object content = file.getValue();
+        if (content instanceof Path) {
+          Path path = (Path) content;
+          if (Files.isDirectory(path)) {
+            try (Stream<Path> walk = Files.walk(path)) {
+              for (Path each : walk.sorted().toList()) {
+                digest.update(path.relativize(each).toString().getBytes(StandardCharsets.UTF_8));
+                if (Files.isRegularFile(each)) {
+                  digest.update(Files.readAllBytes(each));
+                  digest.update(Files.isExecutable(each) ? (byte) 1 : (byte) 0);
+                }
+              }
+            }
+          } else {
+            // A large file (PhotonVision's jar) is known by its size and time: it's pinned anyway.
+            digest.update((Files.size(path) + "@" + Files.getLastModifiedTime(path)).getBytes(StandardCharsets.UTF_8));
+          }
+        } else {
+          digest.update(((String) content).getBytes(StandardCharsets.UTF_8));
+        }
+      }
+      return HexFormat.of().formatHex(digest.digest()).substring(0, 16);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  /**
+   * The PhotonVision jar the tests run, for x86 Linux: pinned by its SHA-256 in {@code
+   * harness/photonvision-x86.json}, downloaded once into Gradle's caches and checked.
+   */
+  static final class PhotonVisionJar {
+    private PhotonVisionJar() {}
+
+    private static JsonValue.Obj pin() {
+      return Json.parse(resource("photonvision-x86.json")).asObject("photonvision-x86.json");
+    }
+
+    /** The pinned version. */
+    static String version() {
+      return pin().string("version", "");
+    }
+
+    /** The jar, downloaded if it isn't cached yet, and checked against its pin. */
+    static synchronized Path path() {
+      JsonValue.Obj pin = pin();
+      String sha256 = pin.string("sha256", "");
+      Path jar = property("spotter.downloadCache").resolve("photonvision").resolve(sha256 + ".jar");
+      try {
+        if (!Files.isRegularFile(jar)) {
+          Files.createDirectories(jar.getParent());
+          Path part = jar.resolveSibling(sha256 + ".part");
+          HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+          HttpResponse<Path> got =
+              client.send(
+                  HttpRequest.newBuilder(URI.create(pin.string("url", ""))).build(),
+                  HttpResponse.BodyHandlers.ofFile(part));
+          if (got.statusCode() != 200) {
+            throw new IOException("downloading PhotonVision's jar answered " + got.statusCode());
+          }
+          if (!sha256(part).equals(sha256)) {
+            Files.delete(part);
+            throw new IOException("PhotonVision's jar isn't the one pinned (its SHA-256 differs)");
+          }
+          Files.move(part, jar, StandardCopyOption.ATOMIC_MOVE);
+        }
+        return jar;
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException(e);
+      }
+    }
+
+    private static String sha256(Path file) throws IOException {
+      try (InputStream in = Files.newInputStream(file)) {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] chunk = new byte[1 << 16];
+        int read;
+        while ((read = in.read(chunk)) != -1) {
+          digest.update(chunk, 0, read);
+        }
+        return HexFormat.of().formatHex(digest.digest());
+      } catch (NoSuchAlgorithmException e) {
+        throw new IllegalStateException(e);
+      }
+    }
+  }
+}

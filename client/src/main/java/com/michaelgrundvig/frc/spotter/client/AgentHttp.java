@@ -113,10 +113,10 @@ public final class AgentHttp {
     private static final long serialVersionUID = 1;
 
     /** The answer's status. */
-    final int status;
+    public final int status;
 
     /** When it said to ask again, in seconds (its {@code Retry-After}): 1 when it didn't say. */
-    final int retryAfterSeconds;
+    public final int retryAfterSeconds;
 
     Answered(int status, String pathAndQuery, @Nullable String retryAfter) {
       super("answered " + status + " to " + pathAndQuery);
@@ -129,7 +129,7 @@ public final class AgentHttp {
     }
 
     /** Whether the agent was busy with another such request, and would take this one shortly. */
-    boolean busy() {
+    public boolean busy() {
       return status == 503;
     }
   }

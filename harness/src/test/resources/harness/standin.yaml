@@ -1,0 +1,25 @@
+# The container tests' stand-in for the software a coprocessor runs: a web server on 5800, as
+# PhotonVision's page is, watched, stopped before a power-off, and backed up, as a real pack would.
+pack: standin
+journalUnits: [vision.service]
+probes:
+  - id: vision.unit
+    kind: unit
+    unit: vision.service
+    every: 2
+  - id: vision.http
+    kind: http
+    url: http://localhost:5800/api/status.json
+    field: status
+    equals: up
+    every: 2
+beforeShutdown:
+  - name: vision.stop
+    argv: [systemctl, stop, vision.service]
+    timeout: 30
+downloads:
+  - name: settings.zip
+    argv: [cat, /srv/vision/backup.zip]
+    contentType: application/zip
+    maxBytes: 1048576
+    timeout: 10

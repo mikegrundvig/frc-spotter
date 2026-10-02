@@ -1,0 +1,66 @@
+# One probe of each kind against real things in the container: run when asked (no every), so each
+# test runs what it checks.
+pack: kinds
+probes:
+  - id: kinds.command
+    kind: command
+    argv: [cat, /etc/debian_version]
+    match: '^(\d+\.\d+)$'
+  - id: kinds.command-slow
+    kind: command
+    argv: [sleep, '10']
+    timeout: 1
+  - id: kinds.command-exit
+    kind: command
+    argv: [ls, /srv/none]
+  - id: kinds.http
+    kind: http
+    url: http://localhost:5800/api/version.json
+    field: version
+    equals: v-standin
+  - id: kinds.http-missing
+    kind: http
+    url: http://localhost:5800/api/none.json
+  - id: kinds.file-json
+    kind: file
+    path: /srv/vision/api/version.json
+    test: json
+    field: version
+  - id: kinds.file-sha256
+    kind: file
+    path: /srv/vision/backup.zip
+    test: sha256
+  - id: kinds.file-text
+    kind: file
+    path: /etc/os-release
+    test: text
+    match: '^VERSION_CODENAME=(\S+)$'
+  - id: kinds.file-missing
+    kind: file
+    path: /srv/vision/none
+  - id: kinds.file-data
+    kind: file
+    path: /data/frc-coprocessor/written
+    test: text
+    match: '^(\S+)$'
+  - id: kinds.unit
+    kind: unit
+    unit: vision.service
+  - id: kinds.unit-failed
+    kind: unit
+    unit: broken.service
+  - id: kinds.unit-missing
+    kind: unit
+    unit: nothing.service
+  - id: kinds.memory
+    kind: threshold
+    metric: memory.available.mb
+    min: 1
+  - id: kinds.data
+    kind: threshold
+    metric: disk.data.free.mb
+    min: 1
+  - id: kinds.root
+    kind: threshold
+    metric: boot.root.readonly
+    min: 1
