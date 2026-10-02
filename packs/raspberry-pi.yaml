@@ -1,0 +1,21 @@
+# A Raspberry Pi: whether its supply is dropping below the firmware's under-voltage threshold, read
+# unprivileged from the kernel's rpi_volt hwmon (in0_lcrit_alarm), not with vcgencmd, which needs
+# the video group and a device the agent's sandbox closes. Copy it to
+# /etc/frc-spotter/packs/raspberry-pi.yaml (root's, chmod 644) on a Raspberry Pi.
+#
+# Checked against the Raspberry Pi kernel's source (rpi-6.12.y, drivers/hwmon/raspberrypi-hwmon.c),
+# not yet on a board. The driver asks the firmware every 2 s and clears its sticky bits each time,
+# so the alarm says "in the last 2 s", not "since boot". Since boot, each time it starts, the kernel
+# logs "Undervoltage detected!" at critical, which the agent's journal summary counts. Throttling
+# isn't in this hwmon: a capped clock shows in the agent's own report (health.yaml's cpu-capped).
+pack: raspberry-pi
+probes:
+  # Under-voltage in the last 2 s: the hwmon named rpi_volt (its number varies), its alarm 0.
+  - id: raspberry-pi.under-voltage
+    kind: command
+    argv:
+      - sh
+      - -c
+      - 'for h in /sys/class/hwmon/hwmon*; do if [ "$(cat "$h/name" 2>/dev/null)" = rpi_volt ]; then a=$(cat "$h/in0_lcrit_alarm") || exit 2; echo "$a"; if [ "$a" != 0 ]; then echo "under-voltage: the supply dropped below the threshold in the last 2 s" >&2; exit 1; fi; exit 0; fi; done; echo "no rpi_volt hwmon: not a Raspberry Pi, or its kernel has no raspberrypi-hwmon" >&2; exit 1'
+    match: '^([01])$'
+    every: 2

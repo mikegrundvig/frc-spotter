@@ -47,6 +47,7 @@ agent's own reader.
 | `photonvision.yaml` | PhotonVision's service, its web server, and a cheap signal that its settings changed |
 | `health.yaml` | The computer's own measurements held to limits, so the robot can require them: thermal margin, CPU capped, memory, root disk free |
 | `orangepi-rk3588.yaml` | An Orange Pi 5-family board's GPU load and NPU clock, and what can't be read unprivileged |
+| `raspberry-pi.yaml` | A Raspberry Pi's supply dropping below its under-voltage threshold |
 | `my-program.yaml` | A template for your team's own program: its systemd service, and its health page if it has one |
 
 A pack of your own is one YAML file of probes: a systemd unit, a page on `localhost`, a file, a

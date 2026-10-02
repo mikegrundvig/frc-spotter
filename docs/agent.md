@@ -207,8 +207,9 @@ it doesn't switch the pack off.
 checks and where it goes: `photonvision.yaml` (its service, web server, and a settings-changed
 signal), `health.yaml` (the agent's own measurements held to limits: thermal margin, CPU capped,
 memory, root disk free), `orangepi-rk3588.yaml` (what an unprivileged user can read of the
-RK3588's accelerators, and what can't be read), and `my-program.yaml` (a template for a team's own
-service). CI reads every one with the agent's own reader (`CatalogTest`), and copies them all onto
+RK3588's accelerators, and what can't be read), `raspberry-pi.yaml` (under-voltage, from the
+kernel's `rpi_volt` hwmon rather than `vcgencmd`, which needs a device the agent's sandbox
+closes), and `my-program.yaml` (a template for a team's own service). CI reads every one with the agent's own reader (`CatalogTest`), and copies them all onto
 one computer together, so the catalog can't drift from the format. The package installs none: a
 team copies the ones it wants, and pins them by doing so.
 
