@@ -23,11 +23,11 @@ repositories {
 }
 
 configurations {
-    // The agent's -all.jar, which one test runs on a stock Java 17.
+    // The agent's -all.jar with its files (unit, rules, install script), which one test installs on
+    // a stock Java 17.
     agentJar {
         canBeConsumed = false
         canBeResolved = true
-        transitive = false
     }
     // The agent's package as installed (with DEBIAN/), which the tests build into a .deb and install.
     agentPackage {
@@ -42,7 +42,7 @@ configurations {
 }
 
 dependencies {
-    agentJar project(":agent")
+    agentJar project(path: ":agent", configuration: "agentJarRelease")
     agentPackage project(path: ":agent", configuration: "agentPackage")
     photonVisionPack project(path: ":photonvision-pack", configuration: "packFolder")
 
@@ -50,6 +50,8 @@ dependencies {
     errorprone libs.nullaway
 
     testImplementation project(":client")
+    // PhotonVision's settings database, made from its schema, to hash on both sides.
+    testImplementation testFixtures(project(":api"))
     testImplementation platform(libs.testcontainers.bom)
     testImplementation libs.testcontainers.core
     testImplementation libs.testcontainers.toxiproxy
@@ -61,10 +63,11 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
+    jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
     def agentJar = configurations.agentJar
     def agentPackage = configurations.agentPackage
     def photonVisionPack = configurations.photonVisionPack
-    inputs.files(agentJar).withPropertyName("agentJar").withNormalizer(ClasspathNormalizer)
+    inputs.files(agentJar).withPropertyName("agentJar").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(agentPackage).withPropertyName("agentPackage").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(photonVisionPack).withPropertyName("photonVisionPack").withPathSensitivity(PathSensitivity.RELATIVE)
     doFirst {

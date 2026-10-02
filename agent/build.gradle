@@ -226,7 +226,7 @@ def agentTarball = tasks.register("agentTarball", Tar) {
     }
 }
 
-def agentJarRelease = tasks.register("agentJarRelease", Sync) {
+def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
     description = "The -all.jar, for a board with Java 17 or newer, with its unit, rules, and install script beside it."
     into distributions.map { it.dir("jar") }
     from(tasks.named("jar")) {
@@ -248,8 +248,19 @@ def agentJarRelease = tasks.register("agentJarRelease", Sync) {
     from(builtinPack)
 }
 
+configurations {
+    // The -all.jar with its files, for the container test that runs it on a stock Java 17.
+    agentJarRelease {
+        canBeConsumed = true
+        canBeResolved = false
+    }
+}
+artifacts {
+    add("agentJarRelease", agentJarReleaseTask.map { it.destinationDir }) { builtBy agentJarReleaseTask }
+}
+
 tasks.register("agentRelease") {
     group = "build"
     description = "Build the agent's three artifacts in build/distributions: the .deb, the tarball, the -all.jar."
-    dependsOn agentDeb, agentTarball, agentJarRelease
+    dependsOn agentDeb, agentTarball, agentJarReleaseTask
 }

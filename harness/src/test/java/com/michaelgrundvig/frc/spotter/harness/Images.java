@@ -131,6 +131,52 @@ final class Images {
         context);
   }
 
+  /**
+   * The -all.jar's image: a stock Java 17 (Temurin's, on Ubuntu 24.04) under systemd, its java on
+   * the path as a system Java's is, and nothing else of Java; the agent installed from the -all.jar
+   * and its install script, PhotonVision's pack from its own, and a settings database where
+   * PhotonVision keeps it (on /data), for the pack's helper to read.
+   *
+   * @param database PhotonVision's settings database, made by the test
+   */
+  static String agentOnJava17(Path database) {
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put("jar", property("spotter.agentJar"));
+    context.put("pack", property("spotter.photonVisionPack"));
+    context.put("photon.sqlite", database);
+    context.put("stamp.json", stamp("vision-front", 21, ""));
+    return build(
+        "java17",
+        """
+        FROM %s
+        ENV container=docker
+        RUN apt-get update -qq \\
+         && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \\
+              systemd systemd-sysv dbus polkitd curl \\
+         && apt-get clean && rm -rf /var/lib/apt/lists/*
+        RUN systemctl mask getty@.service console-getty.service systemd-firstboot.service
+        # A system Java is on every unit's path (/usr/bin, by update-alternatives); Temurin's image
+        # puts it on the shell's only.
+        RUN ln -s /opt/java/openjdk/bin/java /usr/local/bin/java
+        # The agent from its -all.jar, as a board with its own Java installs it: no systemd is
+        # running here, so it's enabled and not started.
+        COPY jar /tmp/agent
+        RUN sh /tmp/agent/install.sh && rm -rf /tmp/agent \\
+         && test ! -e /usr/lib/frc-coprocessor-agent/runtime
+        COPY pack /tmp/pack
+        RUN sh /tmp/pack/install.sh && rm -rf /tmp/pack
+        COPY photon.sqlite /data/photonvision_config/photon.sqlite
+        RUN mkdir -p /opt/photonvision /data/frc-coprocessor \\
+         && ln -s /data/photonvision_config /opt/photonvision/photonvision_config
+        COPY stamp.json /etc/coprocessor/stamp.json
+        VOLUME /data
+        STOPSIGNAL SIGRTMIN+3
+        ENTRYPOINT ["/sbin/init"]
+        """
+            .formatted(JAVA_17),
+        context);
+  }
+
   /** How an image installs the agent: its .deb, built from the package's files, then dpkg. */
   static final String INSTALL_AGENT =
       """
@@ -284,6 +330,8 @@ final class Images {
                 }
               }
             }
+          } else if (Files.size(path) < (1 << 22)) {
+            digest.update(Files.readAllBytes(path));
           } else {
             // A large file (PhotonVision's jar) is known by its size and time: it's pinned anyway.
             digest.update(
