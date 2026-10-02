@@ -16,12 +16,11 @@ class ApiRecordsTest {
           "vision-front",
           1234,
           "10.12.34.11",
-          "orangepi-5",
-          List.of("front-left", "front-right"),
           "coprocessors-2027.1",
           "4f2c9d6e8a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c0d",
-          "v2027.1.0",
-          "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+          "2027-01-10T18:30:00Z",
+          Map.of("board", "orangepi-5", "visionVersion", "v2027.1.0"),
+          "",
           "3c1e6a2e-6f6c-4a1d-9a53-8c1f0c7b8e21",
           "c0:74:2b:fe:12:34");
 
@@ -58,25 +57,8 @@ class ApiRecordsTest {
             new ThermalZone("center-thermal", 60.0, List.of(new TripPoint("passive", 85))),
             new ThermalZone("gpu-thermal", 57.3, List.of(new TripPoint("passive", 85))),
             new ThermalZone("npu-thermal", 57.8, List.of(new TripPoint("passive", 85)))),
-        new Service("photonvision.service", "active", "running", "success", 1, 9_000_000),
-        new Cameras(
-            List.of(
-                new ExpectedCamera(
-                    "front-left",
-                    "/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0",
-                    true),
-                new ExpectedCamera("front-right", "", false)),
-            List.of(
-                new UsbCamera(
-                    "/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0",
-                    "7-1",
-                    5000,
-                    "0c45",
-                    "6366",
-                    "Arducam OV9281 USB Camera"))),
         new JournalSummary(Map.of("usb", 1, "uvc", 0, "error", 2), List.of(usb)),
         new Drive("/dev/nvme0", 41, 1, 23, 140, 75, 0, 0),
-        new SettingsState(STAMP.settingsHash(), STAMP.settingsHash()),
         List.of("journal: journalctl took longer than 2 s"),
         new Memory(7_928, 5_120),
         List.of(new Disk("/", 3_900, 1_200, true), new Disk("/data", 8_100, 7_600, false)),
@@ -90,7 +72,7 @@ class ApiRecordsTest {
                 1_234_400_000L,
                 0.1),
             new ProbeResult(
-                "photonvision.camera.front-right",
+                "camera.front-right",
                 "command",
                 ProbeResult.FAIL,
                 "",
@@ -107,12 +89,17 @@ class ApiRecordsTest {
 
   @Test
   void theStampFileLeavesOutWhatTheAgentAdds() {
-    Stamp file = Stamp.parse("{\"name\":\"vision-front\",\"cameras\":[\"a\"],\"extra\":1}");
+    Stamp file =
+        Stamp.parse(
+            "{\"name\":\"vision-front\",\"labels\":{\"board\":\"orangepi-5\"},\"extra\":1}");
     assertThat(file.bootId()).isEmpty();
     Stamp live = file.withRuntime("boot", "mac");
     assertThat(live.bootId()).isEqualTo("boot");
     assertThat(live.mac()).isEqualTo("mac");
-    assertThat(live.cameras()).containsExactly("a");
+    assertThat(live.label("board")).isEqualTo("orangepi-5");
+    assertThat(live.label("nothing")).isEmpty();
+    // Labels are kept sorted, so the stamp's JSON is the same however they were given.
+    assertThat(STAMP.labels().keySet()).containsExactly("board", "visionVersion");
   }
 
   @Test
@@ -122,14 +109,14 @@ class ApiRecordsTest {
     assertThat(Health.parse(json)).isEqualTo(health);
     // Each probe adds about 150 bytes: a computer's 64 at most keep it well under the robot's
     // 64 KB.
-    assertThat(json.getBytes(StandardCharsets.UTF_8).length).isBetween(1500, 4500);
+    assertThat(json.getBytes(StandardCharsets.UTF_8).length).isBetween(1500, 4000);
   }
 
   @Test
   void probesAreFoundByIdAndTheirTextIsBounded() {
     Health health = health();
     assertThat(health.probe("builtin.thermal-margin").orElseThrow().passed()).isTrue();
-    assertThat(health.probe("photonvision.camera.front-right").orElseThrow().passed()).isFalse();
+    assertThat(health.probe("camera.front-right").orElseThrow().passed()).isFalse();
     assertThat(health.probe("none")).isEmpty();
     assertThat(health.memory().availablePercent())
         .isCloseTo(64.6, org.assertj.core.data.Offset.offset(0.1));
@@ -157,9 +144,7 @@ class ApiRecordsTest {
     assertThat(empty.drive()).isNull();
     assertThat(empty.stamp()).isEqualTo(Stamp.NONE);
     assertThat(empty.cpu()).isEqualTo(Cpu.UNKNOWN);
-    assertThat(empty.cameras()).isEqualTo(Cameras.UNKNOWN);
     assertThat(empty.journal()).isEqualTo(JournalSummary.EMPTY);
-    assertThat(empty.settings()).isEqualTo(SettingsState.UNKNOWN);
     assertThat(empty.boot().lastShutdownClean()).isNull();
     assertThat(empty.hottest()).isEmpty();
     Health same = Health.parse(Json.compact(empty.toJson()));
@@ -174,15 +159,8 @@ class ApiRecordsTest {
     assertThat(new ThermalZone("x", 1, List.of()).firstPassive()).isEmpty();
     assertThat(health.cpu().bigClusters()).hasSize(2);
     assertThat(health.cpu().bigCoresCapped()).isTrue();
-    assertThat(health.photonvision().running()).isTrue();
-    assertThat(health.cameras().missing())
-        .extracting(ExpectedCamera::name)
-        .containsExactly("front-right");
     assertThat(health.journal().count("usb")).isEqualTo(1);
     assertThat(health.journal().count("oom")).isZero();
-    assertThat(health.settings().matches()).isTrue();
-    assertThat(new SettingsState("", "").matches()).isFalse();
-    assertThat(new SettingsState("a", "b").matches()).isFalse();
   }
 
   @Test
@@ -196,7 +174,7 @@ class ApiRecordsTest {
 
   @Test
   void theJournalIsServedForTheKernelAndTheAgentAndTheirPacksUnitsOnly() {
-    // A computer's packs add their own (ProbeSet.journalUnits): PhotonVision's adds its unit.
+    // A computer's packs add their own (ProbeSet.journalUnits): the units they watch.
     assertThat(AgentApi.JOURNAL_UNITS).containsExactly("kernel", "frc-coprocessor-agent.service");
   }
 

@@ -33,19 +33,21 @@ class DeployCheckTest {
       new Computer("vision-back", 12, Board.ORANGEPI_5, List.of("back-left"), 5808);
   private static final CompiledTable TABLE =
       new CompiledTable(
-          new Table(24680, 5808, List.of(FRONT, BACK)), "v2027.1.0", "recipe-1", Map.of());
+          new Table(24680, 5808, List.of(FRONT, BACK)),
+          "recipe-1",
+          Map.of("visionVersion", "v2027.1.0"),
+          Map.of());
 
-  /** The stamp this build's image for a computer would carry. */
+  /** The stamp this build's image for a computer would carry, with its software's version. */
   private static Stamp stampOf(Computer computer, String version, String recipe) {
     return new Stamp(
         computer.name(),
         24680,
         TABLE.table().ip(computer),
-        computer.board().id(),
-        computer.cameras(),
         "r1",
         recipe,
-        version,
+        "",
+        Map.of("visionVersion", version),
         "",
         "boot",
         "02:00:00:00:00:0b");
@@ -57,11 +59,11 @@ class DeployCheckTest {
         DeployCheck.judge(TABLE, FRONT, new Asked.Stamped(stampOf(FRONT, "v2027.1.0", "recipe-1")));
 
     assertThat(finding.verdict()).isEqualTo(Verdict.OK);
-    assertThat(finding.text()).contains("release r1", "PhotonVision v2027.1.0");
+    assertThat(finding.text()).isEqualTo("image r1, as this build's");
   }
 
   @Test
-  void anotherPhotonVisionFailsNamingBoth() {
+  void anotherVersionOfItsSoftwareFailsNamingBoth() {
     Finding finding =
         DeployCheck.judge(TABLE, FRONT, new Asked.Stamped(stampOf(FRONT, "v2026.3.4", "recipe-1")));
 
@@ -83,7 +85,11 @@ class DeployCheckTest {
   @Test
   void aBuildWithoutARecipeHashWarnsAndJudgesTheRest() {
     CompiledTable unhashed =
-        new CompiledTable(new Table(24680, 5808, List.of(FRONT, BACK)), "v2027.1.0", "", Map.of());
+        new CompiledTable(
+            new Table(24680, 5808, List.of(FRONT, BACK)),
+            "",
+            Map.of("visionVersion", "v2027.1.0"),
+            Map.of());
 
     Finding right =
         DeployCheck.judge(unhashed, FRONT, new Asked.Stamped(stampOf(FRONT, "v2027.1.0", "x")));
@@ -105,18 +111,19 @@ class DeployCheckTest {
     assertThat(finding.text()).contains("vision-back", "vision-front");
   }
 
-  /** PhotonVision up and its agent not: the agent isn't running, whatever the image. */
+  /** Its software up and its agent not (as a builder's asker finds): the agent isn't running. */
   @Test
-  void photonVisionWithoutItsAgentFailsSayingTheAgentIsntRunning() {
+  void itsSoftwareWithoutItsAgentFailsSayingTheAgentIsntRunning() {
     Finding finding =
-        DeployCheck.judge(TABLE, FRONT, new Asked.PhotonVisionOnly("Connection refused"));
+        DeployCheck.judge(
+            TABLE, FRONT, new Asked.AgentMissing("Its vision page", "Connection refused"));
 
     assertThat(finding.verdict()).isEqualTo(Verdict.FAIL);
     assertThat(finding.text())
         .isEqualTo(
-            "PhotonVision answers at 10.246.80.11, but its health agent doesn't (Connection"
-                + " refused): the agent isn't running, or this isn't this repository's image. Read"
-                + " its journal, or flash it with this build's release");
+            "Its vision page answers at 10.246.80.11, but its agent doesn't (Connection refused):"
+                + " the agent isn't running, or this isn't this build's image. Read its journal, or"
+                + " flash it with this build's release");
   }
 
   /** Something on the agent's port that isn't this agent is a different image. */
@@ -140,11 +147,10 @@ class DeployCheckTest {
     Deque<Asked> answers =
         new ArrayDeque<>(
             List.of(
-                new Asked.PhotonVisionOnly("connect timed out"),
+                new Asked.Unreachable("connect timed out"),
                 new Asked.Stamped(stampOf(FRONT, "v2027.1.0", "recipe-1"))));
     CompiledTable one =
-        new CompiledTable(
-            new Table(24680, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
+        new CompiledTable(new Table(24680, 5808, List.of(FRONT)), "recipe-1", Map.of(), Map.of());
 
     List<Finding> findings =
         DeployCheck.check(
@@ -166,8 +172,7 @@ class DeployCheckTest {
   void aCoprocessorThatAnswersIsAskedOnce() {
     List<Long> slept = new ArrayList<>();
     CompiledTable one =
-        new CompiledTable(
-            new Table(24680, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
+        new CompiledTable(new Table(24680, 5808, List.of(FRONT)), "recipe-1", Map.of(), Map.of());
 
     DeployCheck.check(
         one,
@@ -182,7 +187,7 @@ class DeployCheckTest {
   @Test
   void theTemplatesExampleTableIsNotChecked() {
     CompiledTable example =
-        new CompiledTable(new Table(0, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
+        new CompiledTable(new Table(0, 5808, List.of(FRONT)), "recipe-1", Map.of(), Map.of());
 
     List<Finding> findings =
         DeployCheck.check(
@@ -274,13 +279,13 @@ class DeployCheckTest {
 
   @Test
   void askingNobodyIsUnreachable() throws Exception {
-    // A closed port on this computer: refused at once, and nothing on PhotonVision's port either.
+    // A closed port on this computer: refused at once.
     int free;
     try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
       free = socket.getLocalPort();
     }
 
-    Asked asked = DeployCheck.ask("127.0.0.1", free, free);
+    Asked asked = DeployCheck.ask("127.0.0.1", free);
 
     assertThat(asked).isInstanceOf(Asked.Unreachable.class);
   }
@@ -290,8 +295,7 @@ class DeployCheckTest {
   void aBusyAgentIsLeftUncheckedWithAWarning() {
     List<Long> slept = new ArrayList<>();
     CompiledTable one =
-        new CompiledTable(
-            new Table(24680, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
+        new CompiledTable(new Table(24680, 5808, List.of(FRONT)), "recipe-1", Map.of(), Map.of());
 
     List<Finding> findings =
         DeployCheck.check(

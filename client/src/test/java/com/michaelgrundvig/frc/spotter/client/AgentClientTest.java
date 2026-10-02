@@ -5,14 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
 import com.michaelgrundvig.frc.spotter.api.Boot;
-import com.michaelgrundvig.frc.spotter.api.Cameras;
 import com.michaelgrundvig.frc.spotter.api.Cpu;
 import com.michaelgrundvig.frc.spotter.api.Health;
 import com.michaelgrundvig.frc.spotter.api.JournalSummary;
 import com.michaelgrundvig.frc.spotter.api.Memory;
 import com.michaelgrundvig.frc.spotter.api.ProbeResult;
-import com.michaelgrundvig.frc.spotter.api.Service;
-import com.michaelgrundvig.frc.spotter.api.SettingsState;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.json.Json;
 import com.sun.net.httpserver.HttpExchange;
@@ -24,6 +21,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
@@ -39,30 +37,16 @@ class AgentClientTest {
   static final ClientSettings FAST = new ClientSettings(0.1, 0.04, 0.05, 0.5, 2, 2);
 
   static final ProbeResult VERSION =
-      new ProbeResult("photonvision.version", "command", ProbeResult.PASS, "v1", "", 5, 400);
+      new ProbeResult("vision.version", "command", ProbeResult.PASS, "v1", "", 5, 400);
 
   static Health health() {
     return new Health(
-        new Stamp(
-            "vision-front",
-            1234,
-            "10.12.34.11",
-            "orangepi-5",
-            List.of(),
-            "r",
-            "",
-            "v1",
-            "",
-            "",
-            ""),
+        new Stamp("vision-front", 1234, "10.12.34.11", "r", "", "", Map.of(), "", "", ""),
         new Boot("boot", 10, 10_000_000, true, "/dev/nvme0n1p2", true, ""),
         Cpu.UNKNOWN,
         List.of(),
-        new Service("", "", "", "", 0, 0),
-        Cameras.UNKNOWN,
         JournalSummary.EMPTY,
         null,
-        SettingsState.UNKNOWN,
         List.of(),
         new Memory(8000, 6000),
         List.of(),
@@ -86,7 +70,7 @@ class AgentClientTest {
         AgentApi.PROBES + "/",
         exchange -> {
           String path = exchange.getRequestURI().getPath();
-          if (path.equals(AgentApi.PROBES + "/photonvision.version")) {
+          if (path.equals(AgentApi.PROBES + "/vision.version")) {
             send(exchange, 200, Json.compact(VERSION.toJson()));
           } else {
             send(exchange, 404, "{\"error\":\"no such probe\"}");
@@ -155,14 +139,12 @@ class AgentClientTest {
     List<Verdict> verdicts =
         Verdict.judge(
             List.of(
-                Requirement.equals(
-                    "photonvision.version", "v1", Requirement.Level.HIGH, "the version"),
-                Requirement.equals(
-                    "photonvision.version", "v2", Requirement.Level.HIGH, "the version"),
+                Requirement.equals("vision.version", "v1", Requirement.Level.HIGH, "the version"),
+                Requirement.equals("vision.version", "v2", Requirement.Level.HIGH, "the version"),
                 Requirement.passes("camera.front-left", Requirement.Level.MEDIUM, "a camera")),
             health);
     assertThat(verdicts).extracting(Verdict::met).containsExactly(true, false, false);
-    assertThat(verdicts.get(1).said()).isEqualTo("photonvision.version is \"v1\", not \"v2\"");
+    assertThat(verdicts.get(1).said()).isEqualTo("vision.version is \"v1\", not \"v2\"");
     assertThat(verdicts.get(2).said()).contains("isn't defined on this computer");
 
     // Answers it can't read keep the last, and say why; it goes missing as the robot's time passes.
@@ -176,7 +158,7 @@ class AgentClientTest {
 
   @Test
   void itsProbesRunAndItsFilesDownloadWhenAsked() throws Exception {
-    assertThat(client.runProbe("photonvision.version")).isEqualTo(VERSION);
+    assertThat(client.runProbe("vision.version")).isEqualTo(VERSION);
     assertThatThrownBy(() -> client.runProbe("none"))
         .isInstanceOf(AgentHttp.Answered.class)
         .hasMessageContaining("404");

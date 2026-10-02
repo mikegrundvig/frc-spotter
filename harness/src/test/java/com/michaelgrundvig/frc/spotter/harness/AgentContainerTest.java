@@ -156,16 +156,14 @@ class AgentContainerTest {
   }
 
   @Test
-  void aPacksDownloadIsServedAndVersionOnesBackupPathIsItsAlias() throws Exception {
+  void aPacksDownloadIsServed() throws Exception {
     AgentHttp http = new AgentHttp(coprocessor.agentHost(), coprocessor.agentPort(), 1, 5, 1 << 20);
-    assertThat(new String(http.get(AgentApi.SETTINGS_ZIP), StandardCharsets.UTF_8))
-        .isEqualTo("PK stand-in backup");
     AgentHttp.Streamed streamed = client.download("settings.zip");
     try (InputStream in = streamed.body()) {
       assertThat(new String(in.readAllBytes(), StandardCharsets.UTF_8))
           .isEqualTo("PK stand-in backup");
     }
-    assertThat(statusOf(() -> http.get(AgentApi.SETTINGS))).isEqualTo(404);
+    assertThat(statusOf(() -> http.get("/v1/settings.zip"))).isEqualTo(404);
   }
 
   @FunctionalInterface
@@ -269,29 +267,43 @@ class AgentContainerTest {
     Table table = new Table(Images.TEAM, 5808, List.of(computer));
     ProbeSet probes = Packs.compile(STANDIN, packs());
     CompiledTable same =
-        new CompiledTable(table, "v-standin", "", Map.of(), Map.of("vision-front", probes));
-    DeployCheck.Asked asked =
-        DeployCheck.ask(
-            coprocessor.agentHost(), coprocessor.agentPort(), coprocessor.softwarePort());
+        new CompiledTable(
+            table, "", Map.of("standinVersion", "v-standin"), Map.of("vision-front", probes));
+    DeployCheck.Asked asked = DeployCheck.ask(coprocessor.agentHost(), coprocessor.agentPort());
     assertThat(asked).isInstanceOf(DeployCheck.Asked.Stamped.class);
     assertThat(DeployCheck.judge(same, computer, asked).verdict())
         .isEqualTo(DeployCheck.Verdict.WARN);
     assertThat(DeployCheck.judge(same, computer, asked).text())
         .contains("its recipe can't be checked");
     CompiledTable other =
-        new CompiledTable(table, "v2027.1.0", "", Map.of(), Map.of("vision-front", probes));
+        new CompiledTable(
+            table, "", Map.of("standinVersion", "v2027.1.0"), Map.of("vision-front", probes));
     DeployCheck.Finding wrong = DeployCheck.judge(other, computer, asked);
     assertThat(wrong.verdict()).isEqualTo(DeployCheck.Verdict.FAIL);
     assertThat(wrong.text())
         .contains("\"v-standin\" on the coprocessor and \"v2027.1.0\" in this build");
 
-    // The agent stopped, its software answering: not this repository's image, or the agent's down.
+    // The agent stopped, its software answering: an image builder's asker checks the software's
+    // port when the agent doesn't answer, and says so.
     coprocessor.run("systemctl", "stop", "frc-coprocessor-agent.service");
     try {
-      DeployCheck.Asked agentless =
-          DeployCheck.ask(
-              coprocessor.agentHost(), coprocessor.agentPort(), coprocessor.softwarePort());
-      assertThat(agentless).isInstanceOf(DeployCheck.Asked.PhotonVisionOnly.class);
+      DeployCheck.Asker builders =
+          (address, port) -> {
+            DeployCheck.Asked agent = DeployCheck.ask(address, port);
+            if (!(agent instanceof DeployCheck.Asked.Unreachable)) {
+              return agent;
+            }
+            try (java.net.Socket software = new java.net.Socket()) {
+              software.connect(
+                  new java.net.InetSocketAddress(address, coprocessor.softwarePort()), 1000);
+              return new DeployCheck.Asked.AgentMissing(
+                  "The stand-in's page", ((DeployCheck.Asked.Unreachable) agent).why());
+            } catch (IOException nothing) {
+              return agent;
+            }
+          };
+      DeployCheck.Asked agentless = builders.ask(coprocessor.agentHost(), coprocessor.agentPort());
+      assertThat(agentless).isInstanceOf(DeployCheck.Asked.AgentMissing.class);
       assertThat(DeployCheck.judge(same, computer, agentless).verdict())
           .isEqualTo(DeployCheck.Verdict.FAIL);
     } finally {

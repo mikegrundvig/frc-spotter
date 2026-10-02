@@ -259,21 +259,9 @@ class PacksTest {
     Table table = new Table(1234, 5808, List.of(computer));
     ProbeSet set =
         Packs.compile(AgentConfig.of(table, computer), List.of(Pack.parseYaml(PACK, "p")));
-    CompiledTable compiled =
-        new CompiledTable(table, "v1", "", Map.of(), Map.of("vision-front", set));
+    CompiledTable compiled = new CompiledTable(table, "", Map.of(), Map.of("vision-front", set));
     Stamp stamp =
-        new Stamp(
-                "vision-front",
-                1234,
-                "10.12.34.11",
-                "orangepi-5",
-                List.of(),
-                "r",
-                "",
-                "v1",
-                "",
-                "",
-                "")
+        new Stamp("vision-front", 1234, "10.12.34.11", "r", "", "", Map.of(), "", "", "")
             .withProbesHash("other");
     assertThat(compiled.compare(computer, stamp))
         .anyMatch(
@@ -286,7 +274,7 @@ class PacksTest {
     assertThat(compiled.probeSet(computer)).isEqualTo(set);
     assertThat(CompiledTable.parse(Json.compact(compiled.toJson()))).isEqualTo(compiled);
     // A table compiled without probe definitions doesn't judge them.
-    assertThat(new CompiledTable(table, "v1", "", Map.of()).compare(computer, stamp))
+    assertThat(new CompiledTable(table, "", Map.of(), Map.of()).compare(computer, stamp))
         .noneMatch(m -> m.field().equals("probesHash"));
   }
 

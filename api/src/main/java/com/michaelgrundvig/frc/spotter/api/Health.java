@@ -7,35 +7,29 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A coprocessor's health: {@code GET /v1/health}. What PhotonVision can't see, including its own
- * failure; what PhotonVision already publishes (one temperature, total CPU, memory, disk) it
- * doesn't repeat. About 2 KB.
+ * A coprocessor's health: {@code GET /v1/health}. The computer's, whatever runs on it: how busy and
+ * hot it is, its memory and disks, how it booted, its journal's trouble, its drive, and each
+ * probe's latest result, which is where what runs on it is checked.
  *
  * @param stamp which image this is, and as which computer
  * @param boot this boot, and what booted
  * @param cpu how busy each core is, and how fast each cluster runs
  * @param thermal every thermal zone, with its trip points
- * @param photonvision PhotonVision's service, as systemd sees it
- * @param cameras the cameras it should run against those plugged in
  * @param journal this boot's trouble, counted
- * @param drive the NVMe drive's health; null when the image found no NVMe drive (or isn't ours)
- * @param settings PhotonVision's live settings against the stamped ones
+ * @param drive the NVMe drive's health; null when the image found no NVMe drive
  * @param problems what the agent couldn't read, each saying what and why; empty when it read
  *     everything
  * @param memory the computer's memory
  * @param disks the root's and {@code /data}'s space, for those mounted
- * @param probes each probe the image defines, with its latest result, in the image's order
+ * @param probes each probe the agent runs, with its latest result, in its configuration's order
  */
 public record Health(
     Stamp stamp,
     Boot boot,
     Cpu cpu,
     List<ThermalZone> thermal,
-    Service photonvision,
-    Cameras cameras,
     JournalSummary journal,
     @Nullable Drive drive,
-    SettingsState settings,
     List<String> problems,
     Memory memory,
     List<Disk> disks,
@@ -65,11 +59,8 @@ public record Health(
         .put("boot", boot.toJson())
         .put("cpu", cpu.toJson())
         .put("thermal", JsonValue.array(thermal, ThermalZone::toJson))
-        .put("photonvision", photonvision.toJson())
-        .put("cameras", cameras.toJson())
         .put("journal", journal.toJson())
         .put("drive", known == null ? JsonValue.NULL : known.toJson())
-        .put("settings", settings.toJson())
         .put("problems", problems)
         .put("memory", memory.toJson())
         .put("disks", JsonValue.array(disks, Disk::toJson))
@@ -86,11 +77,8 @@ public record Health(
         Boot.fromJson(o.objectOrEmpty("boot")),
         Cpu.fromJson(o.objectOrEmpty("cpu")),
         o.list("thermal", ThermalZone::fromJson),
-        Service.fromJson(o.objectOrEmpty("photonvision")),
-        Cameras.fromJson(o.objectOrEmpty("cameras")),
         JournalSummary.fromJson(o.objectOrEmpty("journal")),
         drive == null ? null : Drive.fromJson(drive),
-        SettingsState.fromJson(o.objectOrEmpty("settings")),
         o.strings("problems"),
         Memory.fromJson(o.objectOrEmpty("memory")),
         o.list("disks", Disk::fromJson),

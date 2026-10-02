@@ -47,21 +47,7 @@ final class AgentServer implements AutoCloseable {
   static final long REFUSAL_LOG_MICROS = 10_000_000;
 
   private static final Set<String> PATHS =
-      Set.of(
-          AgentApi.STAMP,
-          AgentApi.HEALTH,
-          AgentApi.JOURNAL,
-          AgentApi.PROBES,
-          AgentApi.SETTINGS,
-          AgentApi.SETTINGS_ZIP,
-          AgentApi.SHUTDOWN);
-
-  /**
-   * API version 1's settings paths, each now a download PhotonVision's pack defines: kept so a
-   * robot program built before packs still finds its settings backup.
-   */
-  static final Map<String, String> ALIASES =
-      Map.of(AgentApi.SETTINGS, "settings.json", AgentApi.SETTINGS_ZIP, "settings.zip");
+      Set.of(AgentApi.STAMP, AgentApi.HEALTH, AgentApi.JOURNAL, AgentApi.PROBES, AgentApi.SHUTDOWN);
 
   private static final Map<String, Integer> PRIORITIES =
       Map.of(
@@ -145,14 +131,12 @@ final class AgentServer implements AutoCloseable {
           exchange.getResponseHeaders().set("Allow", shutdown ? "POST" : "GET");
           throw new Refused(405, path + " takes " + (shutdown ? "POST" : "GET") + " only");
         }
-        String alias = ALIASES.get(path);
         if (shutdown) {
           shutdown(exchange);
         } else if (path.equals(AgentApi.JOURNAL)) {
           heavy(exchange, () -> journal(exchange));
-        } else if (download != null || alias != null) {
-          String name = download != null ? download : java.util.Objects.requireNonNull(alias);
-          heavy(exchange, () -> download(exchange, name));
+        } else if (download != null) {
+          heavy(exchange, () -> download(exchange, download));
         } else if (probe != null) {
           probe(exchange, probe);
         } else if (path.equals(AgentApi.PROBES)) {

@@ -111,7 +111,7 @@ public final class CoprocessorBuild {
   /** The compiled table for the repository at {@code root}. */
   static CompiledTable compile(Path root) throws IOException {
     Table table = readTable(root);
-    return new CompiledTable(table, "", "", Map.of(), probeSets(root, table));
+    return new CompiledTable(table, "", Map.of(), probeSets(root, table));
   }
 
   /** The table in the repository, checked; a problem is an {@link IllegalArgumentException}. */

@@ -14,7 +14,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -85,7 +84,7 @@ final class Images {
     context.put("vision.service", resource("vision.service"));
     context.put("broken.service", resource("broken.service"));
     context.put("fixture-agent.json", resource("fixture-agent.json"));
-    context.put("stamp.json", stamp("vision-front", 11, "v-standin"));
+    context.put("stamp.json", stamp("vision-front", 11, Map.of("standinVersion", "v-standin")));
     return build(
         "agent",
         """
@@ -130,7 +129,7 @@ final class Images {
   static String agentOnJava17() {
     Map<String, Object> context = new LinkedHashMap<>();
     context.put("jar", property("spotter.agentJar"));
-    context.put("stamp.json", stamp("vision-front", 21, ""));
+    context.put("stamp.json", stamp("vision-front", 21, Map.of()));
     return build(
         "java17",
         """
@@ -172,18 +171,18 @@ final class Images {
       """;
 
   /** A stamp, as the image's stamping writes it. */
-  static String stamp(String name, int address, String photonVisionVersion) {
+  static String stamp(String name, int address, Map<String, String> labels) {
+    JsonValue.Obj.Builder labelsJson = JsonValue.Obj.builder();
+    labels.forEach(labelsJson::put);
     return Json.compact(
         JsonValue.Obj.builder()
             .put("name", name)
             .put("team", TEAM)
             .put("address", address(address))
-            .put("board", "orangepi-5")
-            .put("cameras", List.of())
-            .put("release", "test")
+            .put("version", "test")
             .put("recipeHash", "")
-            .put("photonvisionVersion", photonVisionVersion)
-            .put("settingsHash", "")
+            .put("builtAt", "")
+            .put("labels", labelsJson.build())
             .put("agentPort", 5808)
             .build());
   }

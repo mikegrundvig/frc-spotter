@@ -2,7 +2,6 @@ package com.michaelgrundvig.frc.spotter.agent;
 
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
 import com.michaelgrundvig.frc.spotter.api.Boot;
-import com.michaelgrundvig.frc.spotter.api.Cameras;
 import com.michaelgrundvig.frc.spotter.api.Cpu;
 import com.michaelgrundvig.frc.spotter.api.Disk;
 import com.michaelgrundvig.frc.spotter.api.Drive;
@@ -11,8 +10,6 @@ import com.michaelgrundvig.frc.spotter.api.JournalPage;
 import com.michaelgrundvig.frc.spotter.api.JournalSummary;
 import com.michaelgrundvig.frc.spotter.api.Memory;
 import com.michaelgrundvig.frc.spotter.api.ProbeResult;
-import com.michaelgrundvig.frc.spotter.api.Service;
-import com.michaelgrundvig.frc.spotter.api.SettingsState;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.api.ThermalZone;
 import com.michaelgrundvig.frc.spotter.probes.Download;
@@ -43,9 +40,6 @@ final class Agent implements AutoCloseable {
 
   /** The most problems a health answer carries. */
   static final int MAX_PROBLEMS = 10;
-
-  /** API version 1's service, which no agent fills since probes: PhotonVision's pack has it. */
-  static final Service NO_SERVICE = new Service("", "", "", "", 0, 0);
 
   private final Host host;
   private final Configuration configuration;
@@ -125,19 +119,7 @@ final class Agent implements AutoCloseable {
   Stamp stamp() throws IOException {
     Stamp file = stamp.file().stamp();
     if (file.name().isEmpty() && !configuration.config().name().isEmpty()) {
-      file =
-          new Stamp(
-              configuration.config().name(),
-              0,
-              "",
-              "",
-              configuration.config().cameraNames(),
-              "",
-              "",
-              "",
-              "",
-              "",
-              "");
+      file = new Stamp(configuration.config().name(), 0, "", "", "", "", Map.of(), "", "", "");
     }
     return file.withRuntime(stamp.bootId(), stamp.mac())
         .withProbesHash(configuration.probes().hash());
@@ -218,11 +200,8 @@ final class Agent implements AutoCloseable {
             booted,
             load,
             zones,
-            NO_SERVICE,
-            Cameras.UNKNOWN,
             trouble,
             nvme.orElse(null),
-            new SettingsState(stamped.settingsHash(), ""),
             problems.subList(0, Math.min(problems.size(), MAX_PROBLEMS)),
             memoryNow,
             space,

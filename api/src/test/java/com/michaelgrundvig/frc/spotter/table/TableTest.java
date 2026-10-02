@@ -83,23 +83,20 @@ class TableTest {
     CompiledTable compiled =
         new CompiledTable(
             new Table(1234, 5808, List.of(FRONT, BACK)),
-            "v2027.1.0",
             "abc",
-            Map.of("vision-front", "f00d"));
+            Map.of("visionVersion", "v2027.1.0"),
+            Map.of());
     assertThat(CompiledTable.parse(Json.compact(compiled.toJson()))).isEqualTo(compiled);
-    assertThat(compiled.settingsHash(FRONT)).isEqualTo("f00d");
-    assertThat(compiled.settingsHash(BACK)).isEmpty();
 
     Stamp stamp =
         new Stamp(
             "vision-front",
             1234,
             "10.12.34.11",
-            "orangepi-5",
-            List.of("front-left"),
             "r1",
             "abc",
-            "v2027.1.0",
+            "",
+            Map.of("visionVersion", "v2027.1.0", "board", "orangepi-5"),
             "",
             "",
             "");
@@ -109,11 +106,10 @@ class TableTest {
             "vision-back",
             1234,
             "10.12.34.12",
-            "orangepi-5",
-            List.of(),
             "r1",
             "abd",
-            "v2027.0.9",
+            "",
+            Map.of("visionVersion", "v2027.0.9"),
             "",
             "",
             "");
@@ -121,7 +117,8 @@ class TableTest {
         .containsExactly(
             "name is \"vision-back\" on the coprocessor and \"vision-front\" in this build",
             "address is \"10.12.34.12\" on the coprocessor and \"10.12.34.11\" in this build",
-            "PhotonVision is \"v2027.0.9\" on the coprocessor and \"v2027.1.0\" in this build",
+            "the image's visionVersion is \"v2027.0.9\" on the coprocessor and \"v2027.1.0\" in"
+                + " this build",
             "recipe hash is \"abd\" on the coprocessor and \"abc\" in this build");
   }
 
@@ -133,23 +130,29 @@ class TableTest {
             "vision-front",
             1234,
             "10.12.34.11",
-            "orangepi-5",
-            List.of(),
             "r1",
             "old",
-            "v2027.0.9",
+            "",
+            Map.of("visionVersion", "v2027.0.9"),
             "",
             "",
             "");
-    CompiledTable built = new CompiledTable(table, "v2027.1.0", "new", Map.of());
+    CompiledTable built =
+        new CompiledTable(table, "new", Map.of("visionVersion", "v2027.1.0"), Map.of());
     assertThat(built.compare(FRONT, stamp))
         .extracting(CompiledTable.Mismatch::field, CompiledTable.Mismatch::severity)
         .containsExactly(
-            tuple("photonvisionVersion", CompiledTable.Severity.ERROR),
+            tuple("labels.visionVersion", CompiledTable.Severity.ERROR),
             tuple("recipeHash", CompiledTable.Severity.WARNING));
+    // A label the build expects and the image lacks is a mismatch too.
+    assertThat(
+            new CompiledTable(table, "old", Map.of("board", "orangepi-5"), Map.of())
+                .mismatches(FRONT, stamp))
+        .containsExactly(
+            "the image's board is \"\" on the coprocessor and \"orangepi-5\" in this build");
 
-    // Built without Git: the recipe can't be judged, which isn't a mismatch.
-    CompiledTable noGit = new CompiledTable(table, "v2027.0.9", "", Map.of());
+    // No recipe hash (no image builder): the recipe can't be judged, which isn't a mismatch.
+    CompiledTable noGit = new CompiledTable(table, "", Map.of(), Map.of());
     assertThat(noGit.compare(FRONT, stamp))
         .singleElement()
         .satisfies(
@@ -163,7 +166,7 @@ class TableTest {
 
   @Test
   void theCompiledTableIsReadFromTheProgramOrSaysHowItsMade() throws IOException {
-    String json = "{\"table\":{\"team\":9999,\"computers\":[]},\"photonvisionVersion\":\"v0\"}";
+    String json = "{\"table\":{\"team\":9999,\"computers\":[]},\"recipeHash\":\"x\"}";
     assertThat(
             CompiledTable.read(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)))
                 .table()

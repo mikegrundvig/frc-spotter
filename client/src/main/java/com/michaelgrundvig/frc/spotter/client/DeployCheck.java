@@ -7,8 +7,6 @@ import com.michaelgrundvig.frc.spotter.table.CompiledTable;
 import com.michaelgrundvig.frc.spotter.table.Computer;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,23 +15,18 @@ import java.util.List;
  * The check {@code deploy} runs first: asks each coprocessor in the table for its stamp (a second
  * to connect, a second to answer), and compares it with this build. One that doesn't answer is
  * asked once more, two seconds on, as one restarting would answer then: at most about 8 s for a
- * coprocessor that never answers. A coprocessor that answers with another PhotonVision, image
- * recipe, name, team, or address than this build's fails the deploy, as does something else
- * answering on the agent's port (a different image), or PhotonVision answering without its agent
- * (the agent isn't running, or it isn't this repository's image). One that doesn't answer at all
- * only warns, so a robot can be deployed with its vision off. The template's example table (team 0)
- * is checked against nothing.
+ * coprocessor that never answers. A coprocessor whose stamp has another name, team, or address than
+ * this build's, or lacks a label it expects (an image builder's, such as the version of the
+ * software in it), fails the deploy, as does something else answering on the agent's port (a
+ * different image), or the image's software answering without its agent, when an image builder's
+ * asker checks for that; another recipe only warns. One that doesn't answer at all only warns, so a
+ * robot can be deployed with its vision off. The template's example table (team 0) is checked
+ * against nothing.
  *
  * <p>Run by Gradle ({@code ./gradlew coprocessorCheck}, which {@code deploy} depends on), on the
  * laptop, never on the robot. {@code -PskipCoprocessorCheck} skips it, and says so.
  */
 public final class DeployCheck {
-  /**
-   * The port the software a coprocessor's image runs answers on, which says a computer is up when
-   * its agent isn't: PhotonVision's page, 5800.
-   */
-  public static final int SOFTWARE_PORT = 5800;
-
   /**
    * Whether a table is the robot template's example: team 0, with computers listed, which a robot
    * has none of; one with no computers says none on purpose.
@@ -65,10 +58,14 @@ public final class DeployCheck {
     record Unreadable(String why) implements Asked {}
 
     /**
-     * Its agent didn't answer (refused, or no answer in time), but PhotonVision's port did: the
-     * agent isn't running, or it isn't this repository's image.
+     * Its agent didn't answer (refused, or no answer in time), but something else of the image did,
+     * as an image builder's asker checks (the software it runs, on its own port): the agent isn't
+     * running, or this isn't the image this build expects.
+     *
+     * @param what what answered, for people: "PhotonVision"
+     * @param why why the agent didn't
      */
-    record PhotonVisionOnly(String why) implements Asked {}
+    record AgentMissing(String what, String why) implements Asked {}
 
     /** Its agent answered that it's busy (503), twice: not checked, not failed. */
     record Busy(String why) implements Asked {}
@@ -116,14 +113,13 @@ public final class DeployCheck {
     String at = table.table().ip(computer);
     if (asked instanceof Asked.Stamped) {
       Stamp stamp = ((Asked.Stamped) asked).stamp();
-      // The table's own comparison: the wrong computer or PhotonVision fails the deploy, an older
-      // recipe or one this build can't judge (no recipe hash) only warns.
+      // The table's own comparison: the wrong computer or image fails the deploy, an older recipe
+      // or one this build can't judge (no recipe hash) only warns.
       List<CompiledTable.Mismatch> mismatches = table.compare(computer, stamp);
       List<String> errors = messages(mismatches, CompiledTable.Severity.ERROR);
       List<String> warnings = messages(mismatches, CompiledTable.Severity.WARNING);
       List<String> unknown = messages(mismatches, CompiledTable.Severity.UNKNOWN);
-      String release =
-          "release " + stamp.release() + ", PhotonVision " + stamp.photonvisionVersion();
+      String release = "image " + (stamp.version().isEmpty() ? "(no version)" : stamp.version());
       if (!errors.isEmpty()) {
         return new Finding(
             name,
@@ -164,16 +160,18 @@ public final class DeployCheck {
               + ((Asked.Unreadable) asked).why()
               + "). Flash it with this build's release");
     }
-    if (asked instanceof Asked.PhotonVisionOnly) {
+    if (asked instanceof Asked.AgentMissing) {
+      Asked.AgentMissing missing = (Asked.AgentMissing) asked;
       return new Finding(
           name,
           Verdict.FAIL,
-          "PhotonVision answers at "
+          missing.what()
+              + " answers at "
               + at
-              + ", but its health agent doesn't ("
-              + ((Asked.PhotonVisionOnly) asked).why()
-              + "): the agent isn't running, or this isn't this repository's image. Read its"
-              + " journal, or flash it with this build's release");
+              + ", but its agent doesn't ("
+              + missing.why()
+              + "): the agent isn't running, or this isn't this build's image. Read its journal,"
+              + " or flash it with this build's release");
     }
     if (asked instanceof Asked.Busy) {
       return new Finding(
@@ -253,17 +251,11 @@ public final class DeployCheck {
     return findings;
   }
 
-  /** Asks a coprocessor over the network: its agent's stamp, else whether PhotonVision answers. */
-  public static Asked ask(String address, int agentPort) {
-    return ask(address, agentPort, SOFTWARE_PORT);
-  }
-
   /**
-   * Asks a coprocessor over the network: its agent's stamp, else whether PhotonVision answers.
-   *
-   * @param photonVisionPort where PhotonVision's page answers: 5800, but for a test's stand-in
+   * Asks a coprocessor's agent for its stamp over the network. An image builder's asker may go on
+   * to check what else answers when the agent doesn't ({@link Asked.AgentMissing}).
    */
-  public static Asked ask(String address, int agentPort, int photonVisionPort) {
+  public static Asked ask(String address, int agentPort) {
     AgentHttp agent =
         new AgentHttp(address, agentPort, TIMEOUT_SECONDS, TIMEOUT_SECONDS, MAX_STAMP_BYTES);
     byte[] body;
@@ -274,14 +266,7 @@ public final class DeployCheck {
           ? new Asked.Busy(String.valueOf(another.getMessage()))
           : new Asked.Unreadable(String.valueOf(another.getMessage()));
     } catch (IOException noAgent) {
-      String why = Poller.why(noAgent);
-      try (Socket photonVision = new Socket()) {
-        photonVision.connect(
-            new InetSocketAddress(address, photonVisionPort), (int) (TIMEOUT_SECONDS * 1000));
-        return new Asked.PhotonVisionOnly(why);
-      } catch (IOException nothing) {
-        return new Asked.Unreachable(why);
-      }
+      return new Asked.Unreachable(Poller.why(noAgent));
     }
     try {
       return new Asked.Stamped(Stamp.parse(new String(body, StandardCharsets.UTF_8)));

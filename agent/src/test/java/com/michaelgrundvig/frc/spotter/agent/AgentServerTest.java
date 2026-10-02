@@ -193,15 +193,14 @@ class AgentServerTest {
   }
 
   @Test
-  void aPacksDownloadsAreServedWholeAndVersionOnesSettingsPathsAreTheirAliases() throws Exception {
+  void aPacksDownloadsAreServedWhole() throws Exception {
     HttpResponse<byte[]> json = get(AgentApi.DOWNLOADS + "/settings.json");
     assertThat(json.statusCode()).isEqualTo(200);
     assertThat(text(json)).isEqualTo("{\"hash\":\"abc\"}\n");
     assertThat(json.headers().firstValue("Content-Type"))
         .contains("application/json; charset=utf-8");
-    assertThat(text(get(AgentApi.SETTINGS))).isEqualTo(text(json));
 
-    HttpResponse<byte[]> zip = get(AgentApi.SETTINGS_ZIP);
+    HttpResponse<byte[]> zip = get(AgentApi.DOWNLOADS + "/settings.zip");
     assertThat(zip.statusCode()).isEqualTo(200);
     assertThat(zip.headers().firstValue("Content-Type")).contains("application/zip");
     assertThat(zip.headers().firstValue("Content-Disposition"))
@@ -210,25 +209,28 @@ class AgentServerTest {
 
     assertThat(get(AgentApi.DOWNLOADS + "/nothing").statusCode()).isEqualTo(404);
     assertThat(get(AgentApi.DOWNLOADS + "/").statusCode()).isEqualTo(404);
+    // The first API's settings paths are gone: a pack's downloads are under DOWNLOADS only.
+    assertThat(get("/v1/settings").statusCode()).isEqualTo(404);
+    assertThat(get("/v1/settings.zip").statusCode()).isEqualTo(404);
   }
 
   @Test
   void aDownloadThatFailsOrRunsOverIsAnErrorNeverAFileCutShort() throws Exception {
     fixture.commands.answer(
         List.of(BACKUP, "json"), new Commands.Output(2, List.of("{"), false, false));
-    assertThat(get(AgentApi.SETTINGS).statusCode()).isEqualTo(500);
+    assertThat(get(AgentApi.DOWNLOADS + "/settings.json").statusCode()).isEqualTo(500);
     fixture.commands.answer(List.of(BACKUP, "json"), List.of("x".repeat(100)));
-    HttpResponse<byte[]> over = get(AgentApi.SETTINGS);
+    HttpResponse<byte[]> over = get(AgentApi.DOWNLOADS + "/settings.json");
     assertThat(over.statusCode()).isEqualTo(500);
     assertThat(text(over)).contains("making settings.json failed");
     assertThat(fixture.log())
         .contains(
             "Download settings.json failed: exit 2",
             "Download settings.json failed: larger than 64 bytes");
-    // Without a pack that defines them, version one's paths have nothing behind them.
+    // Without a pack that defines them, there's nothing to download.
     fixture.config(withPacks(List.of()));
     serve(fixture.agent());
-    assertThat(get(AgentApi.SETTINGS_ZIP).statusCode()).isEqualTo(404);
+    assertThat(get(AgentApi.DOWNLOADS + "/settings.zip").statusCode()).isEqualTo(404);
   }
 
   @Test
@@ -427,7 +429,7 @@ class AgentServerTest {
     try {
       awaitWaiting();
       // A journal page is under way, held: another heavy request is refused at once.
-      HttpResponse<byte[]> busy = get(AgentApi.SETTINGS_ZIP);
+      HttpResponse<byte[]> busy = get(AgentApi.DOWNLOADS + "/settings.zip");
       assertThat(busy.statusCode()).isEqualTo(503);
       assertThat(busy.headers().firstValue("Retry-After")).contains("1");
       long start = System.nanoTime();
@@ -437,7 +439,7 @@ class AgentServerTest {
       slow.countDown();
     }
     assertThat(first.get(20, TimeUnit.SECONDS).statusCode()).isEqualTo(200);
-    assertThat(get(AgentApi.SETTINGS_ZIP).statusCode()).isEqualTo(200);
+    assertThat(get(AgentApi.DOWNLOADS + "/settings.zip").statusCode()).isEqualTo(200);
   }
 
   @Test

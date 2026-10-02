@@ -98,11 +98,6 @@ class AgentTest {
     assertThat(drive.celsius()).isEqualTo(40.9);
     assertThat(drive.unsafeShutdowns()).isEqualTo(23);
 
-    // Nothing of PhotonVision's: API version 1's members are empty.
-    assertThat(health.photonvision().activeState()).isEmpty();
-    assertThat(health.cameras().expected()).isEmpty();
-    assertThat(health.settings().liveHash()).isEmpty();
-
     // The built-in pack's probes, not yet run.
     assertThat(health.probes())
         .extracting(ProbeResult::id)

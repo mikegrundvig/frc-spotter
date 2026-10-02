@@ -48,23 +48,11 @@ public final class AgentApi {
   public static final String DOWNLOADS = "/v1/downloads";
 
   /**
-   * API version 1's settings, kept as a path: the download {@code settings.json}, which
-   * PhotonVision's pack defines (its settings as canonical rows, with their hash).
-   */
-  public static final String SETTINGS = "/v1/settings";
-
-  /**
-   * API version 1's settings backup, kept as a path: the download {@code settings.zip}, which
-   * PhotonVision's pack defines (laid out like the repository's folder for the computer).
-   */
-  public static final String SETTINGS_ZIP = "/v1/settings.zip";
-
-  /**
-   * Shuts the computer down (POST): runs the steps its packs define first (PhotonVision's stops
-   * PhotonVision), then powers off. Only the robot controller ({@link #CONTROLLER}, or the address
-   * the computer's configuration names) may ask; anyone else gets 403. It answers 202 with a {@link
-   * ShutdownAnswer} at once, then acts; asking again while it's under way answers 202 and does
-   * nothing more.
+   * Shuts the computer down (POST): runs the steps its packs define first (a pack stops the
+   * software it watches, so it saves its state), then powers off. Only the robot controller ({@link
+   * #CONTROLLER}, or the address the computer's configuration names) may ask; anyone else gets 403.
+   * It answers 202 with a {@link ShutdownAnswer} at once, then acts; asking again while it's under
+   * way answers 202 and does nothing more.
    */
   public static final String SHUTDOWN = "/v1/shutdown";
 
