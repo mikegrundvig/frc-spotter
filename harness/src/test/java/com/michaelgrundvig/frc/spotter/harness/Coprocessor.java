@@ -164,12 +164,18 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
    */
   String robotAddress() throws IOException {
     try (java.net.Socket socket = new java.net.Socket(agentHost(), agentPort())) {
-      for (int i = 0; i < 50; i++) {
-        for (String line : run("cat", "/proc/net/tcp").split("\n")) {
+      // A request begun, never finished: a port forwarder may dial the container only once data
+      // comes, and the agent holds a request that hasn't finished for up to 4 s.
+      socket.getOutputStream().write("GET /v1/stamp HTTP/1.1\r\n".getBytes(StandardCharsets.UTF_8));
+      socket.getOutputStream().flush();
+      for (int i = 0; i < 30; i++) {
+        // Java listens on a dual-stack socket, so an IPv4 connection shows in tcp6, IPv4-mapped.
+        for (String line : run("cat", "/proc/net/tcp", "/proc/net/tcp6").split("\n")) {
           String[] fields = line.trim().split("\\s+");
           // local_address rem_address st: ESTABLISHED (01) on the agent's port (16B0).
           if (fields.length > 3 && fields[1].endsWith(":16B0") && fields[3].equals("01")) {
-            return address(fields[2].substring(0, 8));
+            String remote = fields[2].substring(0, fields[2].indexOf(':'));
+            return address(remote.substring(remote.length() - 8));
           }
         }
         Thread.sleep(100);
@@ -181,7 +187,10 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
     }
   }
 
-  /** An address as /proc/net/tcp writes it: hex, its bytes reversed. */
+  /**
+   * An IPv4 address as /proc/net/tcp writes it (or the last word of an IPv4-mapped one in tcp6):
+   * hex, its bytes reversed.
+   */
   static String address(String hex) {
     long value = Long.parseLong(hex, 16);
     return (value & 0xff) + "." + ((value >> 8) & 0xff) + "." + ((value >> 16) & 0xff) + "." + ((value >> 24) & 0xff);
