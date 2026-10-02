@@ -116,4 +116,27 @@ class ProcessCommandsTest {
       assertThat(output.lines()).containsExactly(JAVA);
     }
   }
+
+  @Test
+  void theFirstLineOfWhatItWritesToStandardErrorIsKept() throws IOException {
+    Path source = dir.resolve("Fail.java");
+    Files.writeString(
+        source,
+        "class Fail { public static void main(String[] a) {"
+            + " System.err.println(); System.err.println(\"  no layout of its own  \");"
+            + " for (int i = 0; i < 100000; i++) System.err.println(\"more \" + i);"
+            + " System.out.println(\"out\"); System.exit(1); } }");
+    try (ProcessCommands commands = new ProcessCommands()) {
+      Commands.Output output =
+          commands.run(
+              List.of(JAVA, "-Xlog:disable", source.toString()), Duration.ofSeconds(60), 10, 1000);
+      assertThat(output.exit()).isEqualTo(1);
+      assertThat(output.lines()).containsExactly("out");
+      assertThat(output.errors()).isEqualTo("no layout of its own");
+      assertThat(output.describe()).isEqualTo("exit 1: no layout of its own");
+      // Nothing on standard error: no reason.
+      assertThat(commands.run(program(1, false), Duration.ofSeconds(60), 10, 1000).errors())
+          .isEmpty();
+    }
+  }
 }

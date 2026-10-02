@@ -121,6 +121,8 @@ final class ProbeRunner {
     if (output.timedOut()) {
       return Found.error("timed out after " + timeout.toMillis() + " ms");
     }
+    // Why it failed, when it failed and said so on its standard error.
+    String why = output.exit() == 0 || output.errors().isEmpty() ? "" : ": " + output.errors();
     String printed = String.join("\n", output.lines());
     String value;
     if (!check.match().isEmpty()) {
@@ -128,7 +130,9 @@ final class ProbeRunner {
       if (!matcher.find()) {
         return Found.fail(
             firstLine(printed),
-            "exit " + output.exit() + ": its output didn't match " + check.match());
+            "exit "
+                + output.exit()
+                + (why.isEmpty() ? ": its output didn't match " + check.match() : why));
       }
       value = matched(matcher);
     } else {
@@ -136,7 +140,12 @@ final class ProbeRunner {
     }
     if (check.exit() != Check.Command.ANY_EXIT && output.exit() != check.exit()) {
       return Found.fail(
-          value, "exit " + output.exit() + ", not " + check.exit() + ": " + firstLine(printed));
+          value,
+          "exit "
+              + output.exit()
+              + ", not "
+              + check.exit()
+              + (why.isEmpty() ? ": " + firstLine(printed) : why));
     }
     return Found.pass(value);
   }

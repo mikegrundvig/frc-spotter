@@ -44,10 +44,25 @@ interface Commands {
    * @param lines the lines it printed, without their line endings
    * @param truncated whether it had more to print than was read
    * @param timedOut whether it ran out of time
+   * @param errors the first line it wrote to standard error, at most {@link #MAX_ERRORS}
+   *     characters: why it failed, as a pack's helper says it; empty when it wrote none
    */
-  record Output(int exit, List<String> lines, boolean truncated, boolean timedOut) {
+  record Output(int exit, List<String> lines, boolean truncated, boolean timedOut, String errors) {
+    /** The most of a command's standard error kept. */
+    static final int MAX_ERRORS = 200;
+
     public Output {
       lines = List.copyOf(lines);
+    }
+
+    Output(int exit, List<String> lines, boolean truncated, boolean timedOut) {
+      this(exit, lines, truncated, timedOut, "");
+    }
+
+    /** How it went, for a log line or a probe's detail: its exit, and why when it said. */
+    String describe() {
+      String how = timedOut ? "timed out" : "exit " + exit;
+      return errors.isEmpty() ? how : how + ": " + errors;
     }
 
     /** Whether it finished on its own and succeeded, or was stopped only for printing enough. */

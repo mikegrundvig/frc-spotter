@@ -74,7 +74,7 @@ final class Shutdown {
         Commands.Output output = host.commands().run(step.argv(), timeout, 16, 4096);
         if (output.exit() != 0) {
           host.log(
-              "Step " + step.name() + " failed (" + describe(output) + "); powering off anyway");
+              "Step " + step.name() + " failed (" + output.describe() + "); powering off anyway");
         }
       } catch (IOException e) {
         host.log("Step " + step.name() + " failed (" + e.getMessage() + "); powering off anyway");
@@ -84,7 +84,7 @@ final class Shutdown {
     try {
       Commands.Output off =
           host.commands().run(List.of("systemctl", "poweroff"), POWEROFF_TIMEOUT, 16, 4096);
-      failed = off.exit() == 0 ? "" : describe(off);
+      failed = off.exit() == 0 ? "" : off.describe();
     } catch (IOException e) {
       failed = String.valueOf(e.getMessage());
     }
@@ -94,9 +94,5 @@ final class Shutdown {
       failure = "powering off failed (" + failed + ")";
       requested.set(false);
     }
-  }
-
-  private static String describe(Commands.Output output) {
-    return output.timedOut() ? "timed out" : "exit " + output.exit();
   }
 }

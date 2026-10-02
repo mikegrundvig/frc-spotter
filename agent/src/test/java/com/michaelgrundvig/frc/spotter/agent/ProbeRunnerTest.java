@@ -68,6 +68,13 @@ class ProbeRunnerTest {
                         List.of("helper", "camera"), Check.Command.ANY_EXIT, "^missing (.*)$"))))
         .isEqualTo("pass [/dev/v4l/by-path/x] ");
 
+    // A failure the command explained on its standard error says why.
+    fixture.commands.answer(
+        List.of("helper", "fingerprint"),
+        new Commands.Output(1, List.of(), false, false, "no AprilTag layout of its own"));
+    assertThat(said(run(new Check.Command(List.of("helper", "fingerprint"), 0, "^([0-9a-f]+)$"))))
+        .isEqualTo("fail [] exit 1: no AprilTag layout of its own");
+
     fixture.commands.answer(
         List.of("helper", "slow"), new Commands.Output(-1, List.of(), false, true));
     assertThat(said(run(new Check.Command(List.of("helper", "slow"), 0, ""))))
