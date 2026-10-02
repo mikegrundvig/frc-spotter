@@ -1,0 +1,49 @@
+// The robot's side of Spotter: asking each coprocessor's agent how it is, on a thread of its own so
+// the robot loop never waits; judging what it says against what the robot needs; asking it to power
+// down and watching it go; and the check before a deploy. Plain Java, with nothing of WPILib or
+// AdvantageKit: a robot program wraps it in its own IO layer and logging.
+
+plugins {
+    id "java-library"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// Java 17 bytecode and APIs, as the agent's: see agent/build.gradle.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+base {
+    archivesName = "spotter-client"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api project(":api")
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
+apply from: rootProject.file("gradle/quality.gradle")

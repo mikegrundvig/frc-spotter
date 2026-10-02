@@ -17,6 +17,8 @@ rootProject.name = "frc-spotter"
 include "api"
 // The agent each coprocessor runs.
 include "agent"
+// The robot's side: polling each agent, judging what it says, powering it down, the deploy check.
+include "client"
 // PhotonVision's pack: its definitions, and the helper they name.
 include "photonvision-pack"
 project(":photonvision-pack").projectDir = file("packs/photonvision")
