@@ -226,40 +226,40 @@ public final class Json {
   /** Writes on one line. */
   private record Writer(StringBuilder out, boolean sort, boolean normalize, Drain drain) {
     void write(JsonValue value) {
-      switch (value) {
-        case JsonValue.Obj object -> {
-          out.append('{');
-          boolean first = true;
-          for (Map.Entry<String, JsonValue> member : members(object, sort)) {
-            if (!first) {
-              out.append(',');
-            }
-            first = false;
-            writeString(out, member.getKey());
-            out.append(':');
-            write(member.getValue());
-            drain.maybe(out);
+      if (value instanceof JsonValue.Obj object) {
+        out.append('{');
+        boolean first = true;
+        for (Map.Entry<String, JsonValue> member : members(object, sort)) {
+          if (!first) {
+            out.append(',');
           }
-          out.append('}');
+          first = false;
+          writeString(out, member.getKey());
+          out.append(':');
+          write(member.getValue());
+          drain.maybe(out);
         }
-        case JsonValue.Arr array -> {
-          out.append('[');
-          boolean first = true;
-          for (JsonValue item : array.items()) {
-            if (!first) {
-              out.append(',');
-            }
-            first = false;
-            write(item);
-            drain.maybe(out);
+        out.append('}');
+      } else if (value instanceof JsonValue.Arr array) {
+        out.append('[');
+        boolean first = true;
+        for (JsonValue item : array.items()) {
+          if (!first) {
+            out.append(',');
           }
-          out.append(']');
+          first = false;
+          write(item);
+          drain.maybe(out);
         }
-        case JsonValue.Str string -> writeString(out, string.value());
-        case JsonValue.Num number ->
-            out.append(normalize ? normalizedNumber(number) : number.text());
-        case JsonValue.Bool bool -> out.append(bool.value());
-        case JsonValue.Null n -> out.append("null");
+        out.append(']');
+      } else if (value instanceof JsonValue.Str string) {
+        writeString(out, string.value());
+      } else if (value instanceof JsonValue.Num number) {
+        out.append(normalize ? normalizedNumber(number) : number.text());
+      } else if (value instanceof JsonValue.Bool bool) {
+        out.append(bool.value());
+      } else {
+        out.append("null");
       }
     }
   }
@@ -272,83 +272,79 @@ public final class Json {
         out.append(inline);
         return;
       }
-      switch (value) {
-        case JsonValue.Obj object -> {
-          out.append("{\n");
-          List<Map.Entry<String, JsonValue>> members = members(object, true);
-          for (int i = 0; i < members.size(); i++) {
-            indent(depth + 1);
-            writeString(out, members.get(i).getKey());
-            out.append(": ");
-            write(members.get(i).getValue(), depth + 1);
-            out.append(i + 1 < members.size() ? ",\n" : "\n");
-            drain.maybe(out);
-          }
-          indent(depth);
-          out.append('}');
+      if (value instanceof JsonValue.Obj object) {
+        out.append("{\n");
+        List<Map.Entry<String, JsonValue>> members = members(object, true);
+        for (int i = 0; i < members.size(); i++) {
+          indent(depth + 1);
+          writeString(out, members.get(i).getKey());
+          out.append(": ");
+          write(members.get(i).getValue(), depth + 1);
+          out.append(i + 1 < members.size() ? ",\n" : "\n");
+          drain.maybe(out);
         }
-        case JsonValue.Arr array -> {
-          out.append("[\n");
-          List<JsonValue> items = array.items();
-          for (int i = 0; i < items.size(); i++) {
-            indent(depth + 1);
-            write(items.get(i), depth + 1);
-            out.append(i + 1 < items.size() ? ",\n" : "\n");
-            drain.maybe(out);
-          }
-          indent(depth);
-          out.append(']');
+        indent(depth);
+        out.append('}');
+      } else if (value instanceof JsonValue.Arr array) {
+        out.append("[\n");
+        List<JsonValue> items = array.items();
+        for (int i = 0; i < items.size(); i++) {
+          indent(depth + 1);
+          write(items.get(i), depth + 1);
+          out.append(i + 1 < items.size() ? ",\n" : "\n");
+          drain.maybe(out);
         }
-        default -> throw new IllegalStateException("plain values are always inline");
+        indent(depth);
+        out.append(']');
+      } else {
+        throw new IllegalStateException("plain values are always inline");
       }
     }
 
     /** The value on one line, when it's plain, or a short container of plain values. */
     private static @Nullable String inline(JsonValue value) {
       StringBuilder line = new StringBuilder();
-      switch (value) {
-        case JsonValue.Obj object -> {
-          line.append('{');
-          boolean first = true;
-          for (Map.Entry<String, JsonValue> member : members(object, true)) {
-            if (!isPlain(member.getValue())) {
-              return null;
-            }
-            line.append(first ? "" : ", ");
-            first = false;
-            writeString(line, member.getKey());
-            line.append(": ");
-            new Writer(line, true, false, Drain.NONE).write(member.getValue());
+      if (value instanceof JsonValue.Obj object) {
+        line.append('{');
+        boolean first = true;
+        for (Map.Entry<String, JsonValue> member : members(object, true)) {
+          if (!isPlain(member.getValue())) {
+            return null;
           }
-          line.append('}');
+          line.append(first ? "" : ", ");
+          first = false;
+          writeString(line, member.getKey());
+          line.append(": ");
+          new Writer(line, true, false, Drain.NONE).write(member.getValue());
         }
-        case JsonValue.Arr array -> {
-          line.append('[');
-          boolean first = true;
-          for (JsonValue item : array.items()) {
-            if (!isPlain(item)) {
-              return null;
-            }
-            line.append(first ? "" : ", ");
-            first = false;
-            new Writer(line, true, false, Drain.NONE).write(item);
+        line.append('}');
+      } else if (value instanceof JsonValue.Arr array) {
+        line.append('[');
+        boolean first = true;
+        for (JsonValue item : array.items()) {
+          if (!isPlain(item)) {
+            return null;
           }
-          line.append(']');
+          line.append(first ? "" : ", ");
+          first = false;
+          new Writer(line, true, false, Drain.NONE).write(item);
         }
-        default -> {
-          new Writer(line, true, false, Drain.NONE).write(value);
-          return line.toString();
-        }
+        line.append(']');
+      } else {
+        new Writer(line, true, false, Drain.NONE).write(value);
+        return line.toString();
       }
       return line.length() <= INLINE_WIDTH ? line.toString() : null;
     }
 
     private static boolean isPlain(JsonValue value) {
-      return switch (value) {
-        case JsonValue.Obj object -> object.members().isEmpty();
-        case JsonValue.Arr array -> array.items().isEmpty();
-        default -> true;
-      };
+      if (value instanceof JsonValue.Obj object) {
+        return object.members().isEmpty();
+      }
+      if (value instanceof JsonValue.Arr array) {
+        return array.items().isEmpty();
+      }
+      return true;
     }
 
     private void indent(int depth) {

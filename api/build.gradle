@@ -17,6 +17,14 @@ java {
     }
 }
 
+// Java 17 bytecode and APIs, though built with 25: the agent's jar also runs on a board's own Java,
+// which may be 17 (PhotonVision's 2026 images ship it), and a robot program on 25 runs 17's
+// unchanged. So nothing past 17: no pattern-matching switches, sequenced collections, or virtual
+// threads.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
 base {
     archivesName = "spotter-api"
 }

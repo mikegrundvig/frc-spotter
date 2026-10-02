@@ -16,4 +16,5 @@ template uses it; `image/README.md` is the image builder.
 ## Building
 
 `./gradlew ci` runs every check: formatting, static analysis, the tests, and coverage. Java 25 is
-downloaded if it's missing.
+downloaded if it's missing; the code is compiled for Java 17, so the agent also runs on a
+board's own Java.

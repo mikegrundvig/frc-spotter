@@ -41,8 +41,8 @@ import org.jspecify.annotations.Nullable;
  * request says is run. The one action, {@code POST /v1/shutdown}, is the robot controller's alone.
  * The only class that touches the web server.
  *
- * <p>Each request has a virtual thread of its own, so a client that's slow to send (or never
- * finishes) holds up nobody else. The heavy requests (the journal and the settings) take turns, and
+ * <p>Each request has a thread of its own, so a client that's slow to send (or never finishes)
+ * holds up nobody else. The heavy requests (the journal and the settings) take turns, and
  * a request that finds one under way is refused as busy (503) at once, so the light ones (health,
  * stamp, shutdown) never wait behind them. It answers only requests addressed to it (by a
  * robot-network, link-local, or loopback address, or its own name), so a web page elsewhere can't
@@ -78,7 +78,18 @@ final class AgentServer implements AutoCloseable {
 
   private final Agent agent;
   private final HttpServer server;
-  private final ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor();
+  /**
+   * A thread for each request, made when one's needed: the server takes at most {@code
+   * jdk.httpserver.maxConnections} (32) at once, so there are never more. Platform threads, as Java
+   * 17 has no others; each reserves its stack ({@code -Xss512k}) only as it's used.
+   */
+  private final ExecutorService threads =
+      Executors.newCachedThreadPool(
+          work -> {
+            Thread thread = new Thread(work, "coprocessor-agent-request");
+            thread.setDaemon(true);
+            return thread;
+          });
   private final Semaphore heavy = new Semaphore(HEAVY);
   private final RateLimitedLog refusals;
 

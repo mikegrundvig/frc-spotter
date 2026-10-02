@@ -50,10 +50,20 @@ public final class AgentMain {
     ProcessCommands commands = new ProcessCommands();
     Host host = Host.system(commands, message -> System.err.println(message));
     try (AgentServer server =
-        serve(host, List.of(args), runnable -> Thread.ofVirtual().start(runnable))) {
+        serve(host, List.of(args), AgentMain::background)) {
       System.err.println("Coprocessor agent serving on port " + server.port());
       new CountDownLatch(1).await();
     }
+  }
+
+  /**
+   * Runs work that outlasts a request (reading health afresh, a shutdown once its request is
+   * answered) on a thread of its own, which doesn't keep the agent from exiting.
+   */
+  static void background(Runnable work) {
+    Thread thread = new Thread(work, "coprocessor-agent-work");
+    thread.setDaemon(true);
+    thread.start();
   }
 
   /** Starts serving a host, with the command line's options. */
