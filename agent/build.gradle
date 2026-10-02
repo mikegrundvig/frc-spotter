@@ -248,6 +248,16 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
     from(builtinPack)
 }
 
+// The -all.jar with its files, as one download: unpack it and run its install.sh.
+def agentJarTarball = tasks.register("agentJarTarball", Tar) {
+    description = "Pack the -all.jar with its unit, rules, and install script, for a release."
+    archiveFileName = "frc-coprocessor-agent-${agentVersion}-all.tar.gz"
+    destinationDirectory = distributions
+    compression = Compression.GZIP
+    into("frc-coprocessor-agent-${agentVersion}-all")
+    from(agentJarReleaseTask)
+}
+
 configurations {
     // The -all.jar with its files, for the container test that runs it on a stock Java 17.
     agentJarRelease {
@@ -261,6 +271,6 @@ artifacts {
 
 tasks.register("agentRelease") {
     group = "build"
-    description = "Build the agent's three artifacts in build/distributions: the .deb, the tarball, the -all.jar."
-    dependsOn agentDeb, agentTarball, agentJarReleaseTask
+    description = "Build the agent's artifacts in build/distributions: the .deb, the tarball, the -all.jar alone and with its files."
+    dependsOn agentDeb, agentTarball, agentJarReleaseTask, agentJarTarball
 }

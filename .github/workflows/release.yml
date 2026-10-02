@@ -1,0 +1,73 @@
+name: Release
+
+# A version tag (v0.1.0) builds the agent's packages and publishes them as that tag's GitHub
+# release, with their SHA-256 checksums: the .deb and the tarball for 64-bit ARM and x86 Linux, each
+# built on its own architecture (jlink links the runtime of the computer it runs on), and the
+# -all.jar, alone and with its files. Image builders pin a release by its version and checksums.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      # Actions are pinned to a commit (the version beside it), so a moved tag can't change what
+      # runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Build the packages
+        run: ./gradlew :agent:agentRelease "-PagentVersion=${GITHUB_REF_NAME#v}"
+      - name: Collect them
+        run: |
+          mkdir -p out
+          cp agent/build/distributions/*.deb agent/build/distributions/*.tar.gz out/
+          if [ "${{ matrix.arch }}" = amd64 ]; then
+            cp agent/build/distributions/jar/*-all.jar out/
+          else
+            # The -all.jar and its tarball are the same on every architecture: amd64's are published.
+            rm out/*-all.tar.gz
+          fi
+          ls -l out
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packages-${{ matrix.arch }}
+          path: out/
+          if-no-files-found: error
+
+  release:
+    name: Publish
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: out
+      - name: Checksums
+        working-directory: out
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* --verify-tag --title "Spotter $GITHUB_REF_NAME" \
+            --notes "The coprocessor agent $GITHUB_REF_NAME: its .deb and tarball for arm64 and amd64 Linux, and the -all.jar for a board with Java 17 or newer, alone and with its unit, polkit rules, and install script. SHA256SUMS has every file's checksum."
