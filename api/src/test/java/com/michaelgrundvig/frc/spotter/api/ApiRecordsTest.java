@@ -77,7 +77,26 @@ class ApiRecordsTest {
         new JournalSummary(Map.of("usb", 1, "uvc", 0, "error", 2), List.of(usb)),
         new Drive("/dev/nvme0", 41, 1, 23, 140, 75, 0, 0),
         new SettingsState(STAMP.settingsHash(), STAMP.settingsHash()),
-        List.of("journal: journalctl took longer than 2 s"));
+        List.of("journal: journalctl took longer than 2 s"),
+        new Memory(7_928, 5_120),
+        List.of(new Disk("/", 3_900, 1_200, true), new Disk("/data", 8_100, 7_600, false)),
+        List.of(
+            new ProbeResult(
+                "builtin.thermal-margin",
+                "threshold",
+                ProbeResult.PASS,
+                "12.2",
+                "",
+                1_234_400_000L,
+                0.1),
+            new ProbeResult(
+                "photonvision.camera.front-right",
+                "command",
+                ProbeResult.FAIL,
+                "",
+                "exit 1: missing /dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0",
+                1_234_000_000L,
+                412)));
   }
 
   @Test
@@ -97,11 +116,39 @@ class ApiRecordsTest {
   }
 
   @Test
-  void healthRoundTripsAndIsAboutTwoKilobytes() {
+  void healthRoundTripsAndIsAFewKilobytes() {
     Health health = health();
     String json = Json.compact(health.toJson());
     assertThat(Health.parse(json)).isEqualTo(health);
-    assertThat(json.getBytes(StandardCharsets.UTF_8).length).isBetween(1500, 3500);
+    // Each probe adds about 150 bytes: a computer's 64 at most keep it well under the robot's
+    // 64 KB.
+    assertThat(json.getBytes(StandardCharsets.UTF_8).length).isBetween(1500, 4500);
+  }
+
+  @Test
+  void probesAreFoundByIdAndTheirTextIsBounded() {
+    Health health = health();
+    assertThat(health.probe("builtin.thermal-margin").orElseThrow().passed()).isTrue();
+    assertThat(health.probe("photonvision.camera.front-right").orElseThrow().passed()).isFalse();
+    assertThat(health.probe("none")).isEmpty();
+    assertThat(health.memory().availablePercent())
+        .isCloseTo(64.6, org.assertj.core.data.Offset.offset(0.1));
+    assertThat(Memory.UNKNOWN.availablePercent()).isNaN();
+    assertThat(health.disks().get(1).freePercent())
+        .isCloseTo(93.8, org.assertj.core.data.Offset.offset(0.1));
+    assertThat(new Disk("/x", 0, 0, false).freePercent()).isNaN();
+    ProbeResult longOne =
+        new ProbeResult("x", "command", ProbeResult.PASS, "v".repeat(1000), "", 0, 0);
+    assertThat(longOne.value()).hasSize(ProbeResult.MAX_TEXT).endsWith("…");
+    assertThat(ProbeResult.pending("y", "unit").status()).isEqualTo(ProbeResult.PENDING);
+  }
+
+  @Test
+  void aStampCarriesItsProbeDefinitionsHash() {
+    Stamp stamped = STAMP.withProbesHash("abc");
+    assertThat(stamped.probesHash()).isEqualTo("abc");
+    assertThat(Stamp.parse(Json.compact(stamped.toJson()))).isEqualTo(stamped);
+    assertThat(STAMP.probesHash()).isEmpty();
   }
 
   @Test

@@ -1,10 +1,14 @@
 package com.michaelgrundvig.frc.spotter.tools;
 
 import com.michaelgrundvig.frc.spotter.json.Json;
+import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
 import com.michaelgrundvig.frc.spotter.settings.Settings;
 import com.michaelgrundvig.frc.spotter.settings.SettingsFiles;
+import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import com.michaelgrundvig.frc.spotter.table.CompiledTable;
 import com.michaelgrundvig.frc.spotter.table.Computer;
+import com.michaelgrundvig.frc.spotter.table.Pack;
+import com.michaelgrundvig.frc.spotter.table.Packs;
 import com.michaelgrundvig.frc.spotter.table.Table;
 import com.michaelgrundvig.frc.spotter.table.TableException;
 import java.io.IOException;
@@ -12,6 +16,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +33,14 @@ import java.util.Optional;
  *       robot program, with PhotonLib's version, the recipe hash, and each computer's committed
  *       settings hash ({@link CompiledTable});
  *   <li>{@code recipe-hash <repository> <libraries> <out>}: prints the recipe hash ({@link
- *       RecipeHash}), and writes it to {@code <out>}.
+ *       RecipeHash}), and writes it to {@code <out>};
+ *   <li>{@code probes <repository> <out-dir>}: compiles each computer's probe definitions from the
+ *       table and the packs it names ({@link Packs}), as its agent will, and writes them to {@code
+ *       <out-dir>/<computer>.json}, printing each one's hash;
+ *   <li>{@code agent-configs <repository> <out-dir>}: writes each computer's agent configuration
+ *       ({@link AgentConfig}) to {@code <out-dir>/<computer>.json}, for its image;
+ *   <li>{@code pack <pack.yaml> <out.json>}: checks a pack and writes its {@code pack.json}, as its
+ *       folder carries it on a computer.
  * </ul>
  *
  * <p>{@code <libraries>} is a file of the agent's runtime libraries, {@code group:name:version} one
@@ -77,9 +89,50 @@ public final class CoprocessorBuild {
         out.println(recipe.hash());
         return 0;
       }
+      if (args.length == 3 && args[0].equals("probes")) {
+        Path root = Path.of(args[1]);
+        Path target = Path.of(args[2]);
+        Files.createDirectories(target);
+        Map<String, ProbeSet> sets = probeSets(root, readTable(root));
+        for (Map.Entry<String, ProbeSet> set : sets.entrySet()) {
+          Files.writeString(
+              target.resolve(set.getKey() + ".json"),
+              set.getValue().text(),
+              StandardCharsets.UTF_8);
+          out.println(set.getValue().hash() + "  " + set.getKey() + ".json");
+        }
+        return 0;
+      }
+      if (args.length == 3 && args[0].equals("agent-configs")) {
+        Path root = Path.of(args[1]);
+        Path target = Path.of(args[2]);
+        Files.createDirectories(target);
+        Table table = readTable(root);
+        for (Computer computer : table.computers()) {
+          Files.writeString(
+              target.resolve(computer.name() + ".json"),
+              AgentConfig.of(table, computer).text(),
+              StandardCharsets.UTF_8);
+        }
+        return 0;
+      }
+      if (args.length == 3 && args[0].equals("pack")) {
+        Path file = Path.of(args[1]);
+        Pack pack;
+        try {
+          pack = Pack.parseYaml(Files.readString(file, StandardCharsets.UTF_8), file.toString());
+        } catch (TableException e) {
+          throw new IllegalArgumentException(e.getMessage(), e);
+        }
+        Path target = Path.of(args[2]);
+        Files.createDirectories(target.toAbsolutePath().getParent());
+        Files.writeString(target, Json.pretty(pack.toJson()), StandardCharsets.UTF_8);
+        return 0;
+      }
       err.println(
           "Usage: check-lock <repository> <marker> | table <repository> <libraries> <out.json>"
-              + " | recipe-hash <repository> <libraries> <out>");
+              + " | recipe-hash <repository> <libraries> <out> | probes <repository> <out-dir>"
+              + " | agent-configs <repository> <out-dir> | pack <pack.yaml> <out.json>");
       return 2;
     } catch (IllegalArgumentException e) {
       err.println(e.getMessage());
@@ -126,12 +179,7 @@ public final class CoprocessorBuild {
    */
   static CompiledTable compile(Path root, List<String> libraries, PrintStream out)
       throws IOException {
-    Table table;
-    try {
-      table = Table.readYaml(root.resolve(Table.PATH));
-    } catch (TableException e) {
-      throw new IllegalArgumentException(e.getMessage(), e);
-    }
+    Table table = readTable(root);
     String version =
         PhotonVisionLock.vendordepVersion(
             read(root.resolve(PhotonVisionLock.VENDORDEP), PhotonVisionLock.VENDORDEP));
@@ -154,7 +202,49 @@ public final class CoprocessorBuild {
               + recipe.why()
               + "): the robot will report each coprocessor's recipe as unknown.");
     }
-    return new CompiledTable(table, version, recipe.hash(), hashes);
+    return new CompiledTable(table, version, recipe.hash(), hashes, probeSets(root, table));
+  }
+
+  /** The table in the repository, checked; a problem is an {@link IllegalArgumentException}. */
+  static Table readTable(Path root) throws IOException {
+    try {
+      return Table.readYaml(root.resolve(Table.PATH));
+    } catch (TableException e) {
+      throw new IllegalArgumentException(e.getMessage(), e);
+    }
+  }
+
+  /**
+   * Each computer's probe definitions: the built-in pack's, the packs it names, and its own from
+   * the table; a problem is an {@link IllegalArgumentException} listing them all.
+   */
+  static Map<String, ProbeSet> probeSets(Path root, Table table) throws IOException {
+    Map<String, ProbeSet> sets = new LinkedHashMap<>();
+    Map<String, Pack> packs = new LinkedHashMap<>();
+    try {
+      for (Computer computer : table.computers()) {
+        List<Pack> named = new ArrayList<>();
+        for (String name : prepend(Pack.BUILTIN, computer.packs())) {
+          Pack pack = packs.get(name);
+          if (pack == null) {
+            pack = Pack.read(root, name);
+            packs.put(name, pack);
+          }
+          named.add(pack);
+        }
+        sets.put(computer.name(), Packs.compile(AgentConfig.of(table, computer), named));
+      }
+    } catch (TableException e) {
+      throw new IllegalArgumentException(e.getMessage(), e);
+    }
+    return sets;
+  }
+
+  private static List<String> prepend(String first, List<String> rest) {
+    List<String> all = new ArrayList<>();
+    all.add(first);
+    all.addAll(rest);
+    return all;
   }
 
   private static String read(Path file, String name) throws IOException {

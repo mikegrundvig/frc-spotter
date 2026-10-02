@@ -49,8 +49,7 @@ public final class AgentMain {
     System.setProperty("jdk.httpserver.maxConnections", "32");
     ProcessCommands commands = new ProcessCommands();
     Host host = Host.system(commands, message -> System.err.println(message));
-    try (AgentServer server =
-        serve(host, List.of(args), AgentMain::background)) {
+    try (AgentServer server = serve(host, List.of(args), AgentMain::background)) {
       System.err.println("Coprocessor agent serving on port " + server.port());
       new CountDownLatch(1).await();
     }

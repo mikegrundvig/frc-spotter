@@ -2,8 +2,11 @@ package com.michaelgrundvig.frc.spotter.table;
 
 import com.michaelgrundvig.frc.spotter.json.JsonValue;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -19,8 +22,21 @@ import org.jspecify.annotations.Nullable;
  * @param cameras the PhotonVision camera names it runs (its role): the names robot code gives
  *     {@code PhotonCamera}
  * @param agentPort the port its health agent serves on
+ * @param packs the packs it runs besides the built-in one, in order (coprocessor/README.md,
+ *     "Packs")
+ * @param probes the probes the table gives it besides its packs', as written
+ * @param ports where each camera plugs in, by camera: its {@code /dev/v4l/by-path/} entry (with or
+ *     without that folder); a camera without one has no port to check
  */
-public record Computer(String name, int address, Board board, List<String> cameras, int agentPort) {
+public record Computer(
+    String name,
+    int address,
+    Board board,
+    List<String> cameras,
+    int agentPort,
+    List<String> packs,
+    List<Pack.Written> probes,
+    Map<String, String> ports) {
   /** What a computer's name may be: a hostname's single label, lowercase. */
   public static final Pattern NAME = Pattern.compile("[a-z]([a-z0-9-]{0,61}[a-z0-9])?");
 
@@ -46,9 +62,39 @@ public record Computer(String name, int address, Board board, List<String> camer
   /** The longest a camera's name may be. */
   public static final int MAX_CAMERA_NAME = 64;
 
+  /** A computer with no packs or probes of its own. */
+  public Computer(String name, int address, Board board, List<String> cameras, int agentPort) {
+    this(name, address, board, cameras, agentPort, List.of(), List.of(), Map.of());
+  }
+
   public Computer {
     cameras = List.copyOf(cameras);
+    packs = List.copyOf(packs);
+    probes = List.copyOf(probes);
+    ports = Collections.unmodifiableMap(new LinkedHashMap<>(ports));
     List<String> problems = new ArrayList<>();
+    for (Map.Entry<String, String> port : ports.entrySet()) {
+      if (!cameras.contains(port.getKey())) {
+        problems.add(
+            "computer "
+                + name
+                + " gives a port for "
+                + port.getKey()
+                + ", which isn't one of its cameras");
+      } else {
+        try {
+          new AgentConfig.Camera(port.getKey(), port.getValue());
+        } catch (IllegalArgumentException e) {
+          problems.add(e.getMessage());
+        }
+      }
+    }
+    for (String pack : packs) {
+      addIfPresent(problems, packProblem(pack));
+    }
+    if (new HashSet<>(packs).size() != packs.size()) {
+      problems.add("computer " + name + " lists a pack twice: " + packs);
+    }
     addIfPresent(problems, nameProblem(name));
     addIfPresent(problems, addressProblem(address));
     for (String camera : cameras) {
@@ -72,6 +118,17 @@ public record Computer(String name, int address, Board board, List<String> camer
         + name
         + "\" isn't a hostname: use lowercase letters, digits, and hyphens, starting with a letter"
         + " and not ending with a hyphen, at most 63 characters";
+  }
+
+  /** What's wrong with a pack's name in a computer's list, or null if nothing. */
+  public static @Nullable String packProblem(String pack) {
+    if (pack.equals(Pack.BUILTIN) || pack.equals(Packs.TABLE)) {
+      return "pack " + pack + " needn't be listed: every computer runs it";
+    }
+    if (!Pack.NAME.matcher(pack).matches()) {
+      return "pack \"" + pack + "\" isn't a pack's name: lowercase letters, digits, and hyphens";
+    }
+    return null;
   }
 
   /** What's wrong with a computer's address, or null if nothing. */
@@ -146,7 +203,16 @@ public record Computer(String name, int address, Board board, List<String> camer
         .put("board", board.id())
         .put("cameras", cameras)
         .put("agentPort", agentPort)
+        .put("packs", packs)
+        .put("probes", JsonValue.array(probes, Pack.Written::toJson))
+        .put("ports", ports(ports))
         .build();
+  }
+
+  private static JsonValue.Obj ports(Map<String, String> ports) {
+    JsonValue.Obj.Builder json = JsonValue.Obj.builder();
+    ports.forEach(json::put);
+    return json.build();
   }
 
   /** A computer from its JSON. */
@@ -164,7 +230,18 @@ public record Computer(String name, int address, Board board, List<String> camer
         object.integer("address", 0),
         board,
         object.strings("cameras"),
-        object.integer("agentPort", Table.DEFAULT_AGENT_PORT));
+        object.integer("agentPort", Table.DEFAULT_AGENT_PORT),
+        object.strings("packs"),
+        object.list("probes", probe -> Pack.Written.fromJson(probe, Table.PATH)),
+        ports(object.objectOrEmpty("ports")));
+  }
+
+  private static Map<String, String> ports(JsonValue.Obj json) {
+    Map<String, String> ports = new LinkedHashMap<>();
+    for (String camera : json.members().keySet()) {
+      ports.put(camera, json.string(camera, ""));
+    }
+    return ports;
   }
 
   private static void addIfPresent(List<String> problems, @Nullable String problem) {

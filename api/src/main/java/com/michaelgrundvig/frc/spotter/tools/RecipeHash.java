@@ -18,9 +18,9 @@ import org.jspecify.annotations.Nullable;
  * The hash of the recipe a coprocessor image is built from, which the robot checks each
  * coprocessor's stamp against. It changes when what goes onto a board changes, and only then: the
  * image's scripts and files, the agent's and the shared code with their own build files, the
- * PhotonVision lock, and the libraries the agent runs with. A robot-side change (a GradleRIO or
- * WPILib update, the wrapper, the robot program) leaves it alone, so it never asks for a new image
- * that would be the same.
+ * template's packs (their definitions and helpers), the PhotonVision lock, and the libraries the
+ * agent runs with. A robot-side change (a GradleRIO or WPILib update, the wrapper, the robot
+ * program) leaves it alone, so it never asks for a new image that would be the same.
  *
  * <p>It's the SHA-256, in lowercase hex, of:
  *
@@ -39,12 +39,7 @@ import org.jspecify.annotations.Nullable;
 public final class RecipeHash {
   /** What the recipe covers, from the repository's root. */
   public static final List<String> PATHS =
-      List.of(
-          "coprocessor/image",
-          "coprocessor/agent",
-          "coprocessor/common",
-          "coprocessor/photonvision.lock",
-          "gradle/quality.gradle");
+      List.of("image", "agent", "api", "packs", "photonvision.lock", "gradle/quality.gradle");
 
   private RecipeHash() {}
 
@@ -118,7 +113,7 @@ public final class RecipeHash {
     String name = plain.substring(plain.lastIndexOf('/') + 1);
     return !name.endsWith(".md")
         && !name.equals("coverage-floor.properties")
-        && !plain.startsWith("coprocessor/image/test/")
+        && !plain.startsWith("image/test/")
         && !plain.contains("/src/test/")
         && !plain.contains("/src/testFixtures/");
   }

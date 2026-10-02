@@ -174,7 +174,10 @@ final class Agent {
             nvme.orElse(null),
             new SettingsState(
                 stamped.settingsHash(), live.map(SettingsSource.Summary::hash).orElse("")),
-            problems.subList(0, Math.min(problems.size(), MAX_PROBLEMS)));
+            problems.subList(0, Math.min(problems.size(), MAX_PROBLEMS)),
+            com.michaelgrundvig.frc.spotter.api.Memory.UNKNOWN,
+            List.of(),
+            List.of());
     lastHealthMicros = now;
     lastHealth = health;
     return health;

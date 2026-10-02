@@ -4,11 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.michaelgrundvig.frc.spotter.probes.Check;
+import com.michaelgrundvig.frc.spotter.probes.Probe;
+import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
+import com.michaelgrundvig.frc.spotter.probes.Step;
 import com.michaelgrundvig.frc.spotter.settings.Settings;
 import com.michaelgrundvig.frc.spotter.settings.SettingsFiles;
 import com.michaelgrundvig.frc.spotter.settings.SettingsRow;
+import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import com.michaelgrundvig.frc.spotter.table.Board;
 import com.michaelgrundvig.frc.spotter.table.CompiledTable;
+import com.michaelgrundvig.frc.spotter.table.Pack;
+import com.michaelgrundvig.frc.spotter.table.Packs;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -57,8 +64,15 @@ class CoprocessorBuildTest {
     Files.writeString(file, text, StandardCharsets.UTF_8);
   }
 
+  /** The template's own repository, whose packs every test repository gets. */
+  static final Path PROJECT = Path.of(System.getProperty("frc.projectDir", "../.."));
+
   @BeforeEach
   void aRepository() throws IOException {
+    for (String pack : List.of("builtin", "photonvision")) {
+      String file = Pack.TEMPLATE_PACKS + "/" + pack + "/" + Pack.FILE;
+      write(file, Files.readString(PROJECT.resolve(file), StandardCharsets.UTF_8));
+    }
     write("vendordeps/photonlib.json", "{\"name\":\"photonlib\",\"version\":\"" + VERSION + "\"}");
     write("coprocessor/photonvision.lock", lock(VERSION, "PLACEHOLDER: not archived yet"));
     write(
@@ -174,6 +188,152 @@ class CoprocessorBuildTest {
     assertThat(compiled.recipeHash()).isEmpty();
     assertThat(compiled.settingsHashes())
         .containsOnly(Map.entry("vision-front", settings.hash()), Map.entry("vision-back", ""));
+  }
+
+  @Test
+  void eachComputersProbesAreCompiledFromItsPacksAndTheTable() throws IOException {
+    write(
+        "coprocessors/coprocessors.yaml",
+        """
+        team: 1234
+        computers:
+          - name: vision-front
+            address: 11
+            board: orangepi-5
+            cameras: [front-left, front-right]
+            packs: [photonvision]
+            ports:
+              front-left: platform-fc880000.usb-usb-0:1:1.0-video-index0
+            probes:
+              - id: front-left.fast
+                kind: usb
+                path: /dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0
+                minSpeedMbps: 5000
+                every: 5
+          - name: vision-back
+            address: 12
+            board: orangepi-5
+        """);
+    Path out = root.resolve("build/coprocessor/probes");
+    ByteArrayOutputStream printed = new ByteArrayOutputStream();
+    int status =
+        CoprocessorBuild.run(
+            new String[] {"probes", root.toString(), out.toString()},
+            new PrintStream(printed, true, StandardCharsets.UTF_8),
+            System.err);
+    assertThat(status).isZero();
+    ProbeSet front =
+        ProbeSet.parse(Files.readString(out.resolve("vision-front.json"), StandardCharsets.UTF_8));
+    assertThat(front.packs()).containsExactly("builtin", "photonvision");
+    assertThat(front.probes())
+        .extracting(Probe::id)
+        .contains(
+            "builtin.thermal-margin",
+            "photonvision.unit",
+            "photonvision.camera.front-left",
+            "photonvision.camera.front-right",
+            "camera.front-left",
+            "front-left.fast")
+        .endsWith("front-left.fast")
+        // The built-in camera probe is for a camera whose port is known.
+        .doesNotContain("camera.front-right");
+    assertThat(((Check.Usb) front.probe("camera.front-left").orElseThrow().check()).path())
+        .isEqualTo("/dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0");
+    // Every placeholder is filled in: the pack's folder, the computer, each camera.
+    Probe camera = front.probe("photonvision.camera.front-right").orElseThrow();
+    assertThat(((Check.Command) camera.check()).argv())
+        .containsExactly(
+            "/usr/lib/frc-coprocessor/packs/photonvision/bin/photonvision-helper",
+            "camera",
+            "/opt/photonvision/photonvision_config/photon.sqlite",
+            "front-right");
+    assertThat(front.download("settings.zip").orElseThrow().argv()).contains("vision-front");
+    assertThat(front.beforeShutdown()).extracting(Step::name).containsExactly("photonvision.stop");
+    assertThat(front.journalUnits()).containsExactly("photonvision.service");
+    // The file's own SHA-256 is the hash the stamp carries.
+    assertThat(printed.toString(StandardCharsets.UTF_8))
+        .contains(front.hash() + "  vision-front.json")
+        .contains("vision-back.json");
+    assertThat(
+            ProbeSet.sha256(
+                Files.readString(out.resolve("vision-front.json"), StandardCharsets.UTF_8)))
+        .isEqualTo(front.hash());
+    ProbeSet back =
+        ProbeSet.parse(Files.readString(out.resolve("vision-back.json"), StandardCharsets.UTF_8));
+    assertThat(back.packs()).containsExactly("builtin");
+    assertThat(back.beforeShutdown()).isEmpty();
+
+    // Each computer's agent configuration, which its agent compiles the same definitions from.
+    Path configs = root.resolve("build/coprocessor/agent");
+    assertThat(
+            CoprocessorBuild.run(
+                new String[] {"agent-configs", root.toString(), configs.toString()},
+                System.out,
+                System.err))
+        .isZero();
+    AgentConfig config =
+        AgentConfig.parse(
+            Files.readString(configs.resolve("vision-front.json"), StandardCharsets.UTF_8), "x");
+    assertThat(config.controller()).isEqualTo("10.12.34.2");
+    assertThat(config.packs()).containsExactly("photonvision");
+    assertThat(config.cameras().get(0).port())
+        .isEqualTo("/dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0");
+    assertThat(config.cameras().get(1).port()).isEmpty();
+    List<Pack> packs = new java.util.ArrayList<>();
+    for (String name : List.of("builtin", "photonvision")) {
+      Path json = root.resolve("build/packs/" + name + ".json");
+      assertThat(
+              CoprocessorBuild.run(
+                  new String[] {
+                    "pack", root.resolve("packs/" + name + "/pack.yaml").toString(), json.toString()
+                  },
+                  System.out,
+                  System.err))
+          .isZero();
+      packs.add(
+          Pack.fromJson(
+              com.michaelgrundvig.frc.spotter.json.Json.parse(Files.readString(json)), name));
+    }
+    assertThat(Packs.compile(config, packs)).isEqualTo(front);
+
+    // The compiled table carries them, so the robot knows what each image defines.
+    CompiledTable compiled = CoprocessorBuild.compile(root, List.of(), System.out);
+    assertThat(compiled.probeSets()).containsKeys("vision-front", "vision-back");
+    assertThat(compiled.probeSet(compiled.table().computers().get(0))).isEqualTo(front);
+  }
+
+  @Test
+  void aBrokenPackOrProbeFailsTheBuildSayingWhere() throws IOException {
+    write(
+        "coprocessors/coprocessors.yaml",
+        """
+        team: 1234
+        computers:
+          - name: vision-front
+            address: 11
+            board: orangepi-5
+            packs: [nothing-here]
+        """);
+    assertThatThrownBy(() -> CoprocessorBuild.compile(root, List.of(), System.out))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("no pack named \"nothing-here\"");
+    write(
+        "coprocessors/coprocessors.yaml",
+        """
+        team: 1234
+        computers:
+          - name: vision-front
+            address: 11
+            board: orangepi-5
+            probes:
+              - id: builtin.memory
+                kind: unit
+                unit: x.service
+        """);
+    assertThatThrownBy(() -> CoprocessorBuild.compile(root, List.of(), System.out))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining(
+            "coprocessors/coprocessors.yaml:7: probe builtin.memory is already defined at packs/builtin/pack.yaml:");
   }
 
   @Test

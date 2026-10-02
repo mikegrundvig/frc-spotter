@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.spotter.table;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.json.Json;
 import com.michaelgrundvig.frc.spotter.json.JsonValue;
+import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -25,17 +26,35 @@ import org.jspecify.annotations.Nullable;
  * @param recipeHash the hash of the image recipe this build would build
  * @param settingsHashes each computer's committed settings hash, by name; empty for a computer with
  *     none committed
+ * @param probeSets each computer's probe definitions, by name, as its image carries them; none for
+ *     a table compiled without them
  */
 public record CompiledTable(
     Table table,
     String photonvisionVersion,
     String recipeHash,
-    Map<String, String> settingsHashes) {
+    Map<String, String> settingsHashes,
+    Map<String, ProbeSet> probeSets) {
   /** Where the build puts the compiled table in the robot program's jar. */
   public static final String RESOURCE = "/coprocessor/table.json";
 
+  /** A table compiled without probe definitions. */
+  public CompiledTable(
+      Table table,
+      String photonvisionVersion,
+      String recipeHash,
+      Map<String, String> settingsHashes) {
+    this(table, photonvisionVersion, recipeHash, settingsHashes, Map.of());
+  }
+
   public CompiledTable {
     settingsHashes = Collections.unmodifiableMap(new LinkedHashMap<>(settingsHashes));
+    probeSets = Collections.unmodifiableMap(new LinkedHashMap<>(probeSets));
+  }
+
+  /** A computer's probe definitions, as its image carries them; none when the build had none. */
+  public ProbeSet probeSet(Computer computer) {
+    return probeSets.getOrDefault(computer.name(), ProbeSet.EMPTY);
   }
 
   /** A computer's committed settings hash; empty when none are committed. */
@@ -66,7 +85,7 @@ public record CompiledTable(
    * One way a computer's stamp differs from this build, or couldn't be compared.
    *
    * @param field what differs: {@code name}, {@code team}, {@code address}, {@code
-   *     photonvisionVersion}, or {@code recipeHash}
+   *     photonvisionVersion}, {@code probesHash}, or {@code recipeHash}
    * @param severity how much it matters
    * @param message a sentence naming both values (or why there's no comparing)
    */
@@ -74,10 +93,12 @@ public record CompiledTable(
 
   /**
    * How a computer's stamp compares with what this build expects of it: its name, team, address,
-   * and PhotonVision version (each an {@link Severity#ERROR} when it differs), and its recipe hash
-   * (a {@link Severity#WARNING} when it differs; {@link Severity#UNKNOWN} when this build has no
-   * recipe hash to compare). Empty when they all match. The settings hash is left out: settings
-   * change while someone calibrates, which isn't a mismatch.
+   * and PhotonVision version (each an {@link Severity#ERROR} when it differs); its probe
+   * definitions' hash, when this build compiled them (a {@link Severity#WARNING}: the image checks
+   * other things than this build expects); and its recipe hash (a {@link Severity#WARNING} when it
+   * differs; {@link Severity#UNKNOWN} when this build has no recipe hash to compare). Empty when
+   * they all match. The settings hash is left out: settings change while someone calibrates, which
+   * isn't a mismatch.
    */
   public List<Mismatch> compare(Computer computer, Stamp stamp) {
     List<Mismatch> mismatches = new ArrayList<>();
@@ -95,6 +116,10 @@ public record CompiledTable(
         Severity.ERROR,
         photonvisionVersion,
         stamp.photonvisionVersion());
+    ProbeSet probes = probeSets.get(computer.name());
+    if (probes != null) {
+      compare(mismatches, "probesHash", Severity.WARNING, probes.hash(), stamp.probesHash());
+    }
     if (recipeHash.isEmpty()) {
       mismatches.add(
           new Mismatch(
@@ -126,7 +151,9 @@ public record CompiledTable(
       String what =
           field.equals("photonvisionVersion")
               ? "PhotonVision"
-              : field.equals("recipeHash") ? "recipe hash" : field;
+              : field.equals("recipeHash")
+                  ? "recipe hash"
+                  : field.equals("probesHash") ? "the probe definitions' hash" : field;
       mismatches.add(
           new Mismatch(
               field,
@@ -144,11 +171,14 @@ public record CompiledTable(
   public JsonValue.Obj toJson() {
     JsonValue.Obj.Builder hashes = JsonValue.Obj.builder();
     settingsHashes.forEach(hashes::put);
+    JsonValue.Obj.Builder probes = JsonValue.Obj.builder();
+    probeSets.forEach((name, set) -> probes.put(name, set.toJson()));
     return JsonValue.Obj.builder()
         .put("table", table.toJson())
         .put("photonvisionVersion", photonvisionVersion)
         .put("recipeHash", recipeHash)
         .put("settingsHashes", hashes.build())
+        .put("probeSets", probes.build())
         .build();
   }
 
@@ -160,11 +190,15 @@ public record CompiledTable(
     for (String name : hashesJson.members().keySet()) {
       hashes.put(name, hashesJson.string(name, ""));
     }
+    Map<String, ProbeSet> probes = new LinkedHashMap<>();
+    JsonValue.Obj probesJson = o.objectOrEmpty("probeSets");
+    probesJson.members().forEach((name, set) -> probes.put(name, ProbeSet.fromJson(set)));
     return new CompiledTable(
         Table.fromJson(o.objectOrEmpty("table")),
         o.string("photonvisionVersion", ""),
         o.string("recipeHash", ""),
-        hashes);
+        hashes,
+        probes);
   }
 
   /** A compiled table from JSON text. */

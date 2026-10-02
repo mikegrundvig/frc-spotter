@@ -76,17 +76,17 @@ class RecipeHashTest {
 
   /** A repository with a recipe, and what's around it; committed. */
   private void aRepository() throws Exception {
-    write("coprocessor/image/provision.sh", "#!/bin/sh\n");
-    write("coprocessor/agent/coprocessor-agent.service", "[Service]\n");
-    write("coprocessor/photonvision.lock", "{}\n");
+    write("image/provision.sh", "#!/bin/sh\n");
+    write("agent/coprocessor-agent.service", "[Service]\n");
+    write("photonvision.lock", "{}\n");
     write("gradle/quality.gradle", "// checks\n");
     // Not the recipe:
-    write("coprocessor/README.md", "docs\n");
-    write("coprocessor/image/README.md", "docs\n");
-    write("coprocessor/image/test/provision_test.sh", "test\n");
-    write("coprocessor/agent/src/test/java/ATest.java", "class ATest {}\n");
-    write("coprocessor/common/src/testFixtures/resources/x.sql", "x\n");
-    write("coprocessor/common/coverage-floor.properties", "line=50\n");
+    write("docs/agent.md", "docs\n");
+    write("image/README.md", "docs\n");
+    write("image/test/provision_test.sh", "test\n");
+    write("agent/src/test/java/ATest.java", "class ATest {}\n");
+    write("api/src/testFixtures/resources/x.sql", "x\n");
+    write("api/coverage-floor.properties", "line=50\n");
     write("build.gradle", "plugins { id 'org.wpilib.GradleRIO' version '1' }\n");
     write("settings.gradle", "include 'x'\n");
     write("gradle/libs.versions.toml", "[versions]\n");
@@ -110,16 +110,16 @@ class RecipeHashTest {
         sha256(
             "100644 blob "
                 + blob("[Service]\n")
-                + "\tcoprocessor/agent/coprocessor-agent.service\n"
-                + "100644 blob "
-                + blob("#!/bin/sh\n")
-                + "\tcoprocessor/image/provision.sh\n"
-                + "100644 blob "
-                + blob("{}\n")
-                + "\tcoprocessor/photonvision.lock\n"
+                + "\tagent/coprocessor-agent.service\n"
                 + "100644 blob "
                 + blob("// checks\n")
                 + "\tgradle/quality.gradle\n"
+                + "100644 blob "
+                + blob("#!/bin/sh\n")
+                + "\timage/provision.sh\n"
+                + "100644 blob "
+                + blob("{}\n")
+                + "\tphotonvision.lock\n"
                 + "runtime org.jspecify:jspecify:1.0.1\n"
                 + "runtime org.xerial:sqlite-jdbc:3.53.4.0\n");
     RecipeHash.Result result = RecipeHash.of(root, LIBRARIES);
@@ -137,11 +137,11 @@ class RecipeHashTest {
     commit("settings.gradle", "include 'x', 'y'\n");
     commit("gradle/libs.versions.toml", "[versions]\nwpilib = \"2\"\n");
     commit("gradle/wrapper/gradle-wrapper.properties", "distributionUrl=y\n");
-    commit("coprocessor/image/README.md", "more docs\n");
-    commit("coprocessor/agent/src/test/java/ATest.java", "class ATest { int x; }\n");
+    commit("image/README.md", "more docs\n");
+    commit("agent/src/test/java/ATest.java", "class ATest { int x; }\n");
     assertThat(RecipeHash.of(root, LIBRARIES).hash()).isEqualTo(hash);
     // Uncommitted changes don't count: an image is built from a commit.
-    write("coprocessor/image/provision.sh", "#!/bin/sh\necho uncommitted\n");
+    write("image/provision.sh", "#!/bin/sh\necho uncommitted\n");
     assertThat(RecipeHash.of(root, LIBRARIES).hash()).isEqualTo(hash);
 
     // A new library, or a change to what's built into the image: a new image.
@@ -150,7 +150,7 @@ class RecipeHashTest {
                     root, List.of("org.xerial:sqlite-jdbc:3.54.0.0", "org.jspecify:jspecify:1.0.1"))
                 .hash())
         .isNotEqualTo(hash);
-    commit("coprocessor/agent/coprocessor-agent.service", "[Service]\nNice=10\n");
+    commit("agent/coprocessor-agent.service", "[Service]\nNice=10\n");
     String unit = RecipeHash.of(root, LIBRARIES).hash();
     assertThat(unit).isNotEqualTo(hash);
     commit("gradle/quality.gradle", "// stricter checks\n");
@@ -166,18 +166,18 @@ class RecipeHashTest {
 
   @Test
   void docsAndTestsAreLeftOutHoweverGitQuotesTheirPaths() {
-    assertThat(RecipeHash.inRecipe("coprocessor/image/provision.sh")).isTrue();
-    assertThat(RecipeHash.inRecipe("coprocessor/image/bench-procedures.md")).isFalse();
-    assertThat(RecipeHash.inRecipe("\"coprocessor/image/caf\\303\\251.md\"")).isFalse();
-    assertThat(RecipeHash.inRecipe("\"coprocessor/image/test/caf\\303\\251.sh\"")).isFalse();
-    assertThat(RecipeHash.inRecipe("\"coprocessor/image/caf\\303\\251.sh\"")).isTrue();
-    assertThat(RecipeHash.inRecipe("coprocessor/common/src/testFixtures/x.sql")).isFalse();
-    assertThat(RecipeHash.inRecipe("coprocessor/agent/coverage-floor.properties")).isFalse();
+    assertThat(RecipeHash.inRecipe("image/provision.sh")).isTrue();
+    assertThat(RecipeHash.inRecipe("image/bench-procedures.md")).isFalse();
+    assertThat(RecipeHash.inRecipe("\"image/caf\\303\\251.md\"")).isFalse();
+    assertThat(RecipeHash.inRecipe("\"image/test/caf\\303\\251.sh\"")).isFalse();
+    assertThat(RecipeHash.inRecipe("\"image/caf\\303\\251.sh\"")).isTrue();
+    assertThat(RecipeHash.inRecipe("api/src/testFixtures/x.sql")).isFalse();
+    assertThat(RecipeHash.inRecipe("agent/coverage-floor.properties")).isFalse();
   }
 
   @Test
   void aListingHashesItsRecipeLinesAndLibrariesOnly() throws NoSuchAlgorithmException {
-    assertThat(RecipeHash.of("100644 blob abc\tcoprocessor/image/README.md\n", List.of()))
+    assertThat(RecipeHash.of("100644 blob abc\timage/README.md\n", List.of()))
         .isEqualTo(sha256(""));
     assertThat(RecipeHash.of("", List.of("b:b:1", "a:a:1")))
         .isEqualTo(sha256("runtime a:a:1\nruntime b:b:1\n"));

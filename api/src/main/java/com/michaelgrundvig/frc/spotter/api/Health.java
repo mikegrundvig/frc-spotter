@@ -22,6 +22,9 @@ import org.jspecify.annotations.Nullable;
  * @param settings PhotonVision's live settings against the stamped ones
  * @param problems what the agent couldn't read, each saying what and why; empty when it read
  *     everything
+ * @param memory the computer's memory
+ * @param disks the root's and {@code /data}'s space, for those mounted
+ * @param probes each probe the image defines, with its latest result, in the image's order
  */
 public record Health(
     Stamp stamp,
@@ -33,10 +36,20 @@ public record Health(
     JournalSummary journal,
     @Nullable Drive drive,
     SettingsState settings,
-    List<String> problems) {
+    List<String> problems,
+    Memory memory,
+    List<Disk> disks,
+    List<ProbeResult> probes) {
   public Health {
     thermal = List.copyOf(thermal);
     problems = List.copyOf(problems);
+    disks = List.copyOf(disks);
+    probes = List.copyOf(probes);
+  }
+
+  /** A probe's latest result, if the image defines it. */
+  public Optional<ProbeResult> probe(String id) {
+    return probes.stream().filter(probe -> probe.id().equals(id)).findFirst();
   }
 
   /** The hottest zone, or none when there are no zones. */
@@ -58,6 +71,9 @@ public record Health(
         .put("drive", known == null ? JsonValue.NULL : known.toJson())
         .put("settings", settings.toJson())
         .put("problems", problems)
+        .put("memory", memory.toJson())
+        .put("disks", JsonValue.array(disks, Disk::toJson))
+        .put("probes", JsonValue.array(probes, ProbeResult::toJson))
         .build();
   }
 
@@ -75,7 +91,10 @@ public record Health(
         JournalSummary.fromJson(o.objectOrEmpty("journal")),
         drive == null ? null : Drive.fromJson(drive),
         SettingsState.fromJson(o.objectOrEmpty("settings")),
-        o.strings("problems"));
+        o.strings("problems"),
+        Memory.fromJson(o.objectOrEmpty("memory")),
+        o.list("disks", Disk::fromJson),
+        o.list("probes", ProbeResult::fromJson));
   }
 
   /** Health from JSON text: {@code /v1/health}'s answer. */

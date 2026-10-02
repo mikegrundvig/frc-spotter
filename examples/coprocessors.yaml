@@ -1,6 +1,6 @@
 # The robot's vision coprocessors: the one place they're described. Each one's image, the robot
 # program's list of what to watch, and Pitwall's links all come from here. What each key may be:
-# coprocessor/README.md.
+# docs/agent.md.
 #
 # An example: set your team number, and list your computers. The image workflow builds nothing
 # until the team number is set and there's at least one computer.
@@ -11,9 +11,11 @@ computers:
     address: 11            # 10.TE.AM.11; FRC's static range for robot devices is .6 to .19
     board: orangepi-5      # orangepi-5, orangepi-5b, orangepi-5-plus, orangepi-5-pro, orangepi-5-max
     cameras: [front-left, front-right]  # the PhotonVision camera names it runs
+    packs: [photonvision]  # what it runs besides the agent: PhotonVision's checks and soft-off
 
   # About two AprilTag cameras per board: a second computer for the back cameras.
   # - name: vision-back
   #   address: 12
   #   board: orangepi-5
   #   cameras: [back-left, back-right]
+  #   packs: [photonvision]

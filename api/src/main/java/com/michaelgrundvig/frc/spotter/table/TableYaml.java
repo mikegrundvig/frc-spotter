@@ -21,7 +21,7 @@ import org.jspecify.annotations.Nullable;
 final class TableYaml {
   private static final Set<String> TABLE_KEYS = Set.of("team", "agentPort", "computers");
   private static final Set<String> COMPUTER_KEYS =
-      Set.of("name", "address", "board", "cameras", "agentPort");
+      Set.of("name", "address", "board", "cameras", "agentPort", "packs", "probes", "ports");
 
   /** A whole number as the table writes one: no leading zeros, no sign but minus. */
   private static final Pattern INTEGER = Pattern.compile("-?(0|[1-9][0-9]{0,8})");
@@ -149,6 +149,11 @@ final class TableYaml {
     if (port != null && mapping.entries().containsKey("agentPort")) {
       check(mapping.entries().get("agentPort"), Computer.portProblem(port));
     }
+    List<String> packs = packs(mapping);
+    Map<String, String> ports = ports(mapping, cameras);
+    Entry probesEntry = mapping.entries().get("probes");
+    List<Pack.Written> probes =
+        probesEntry == null ? List.of() : PackYaml.tableProbes(probesEntry, source, problems);
     if (problems.size() > before
         || name == null
         || address == null
@@ -156,7 +161,66 @@ final class TableYaml {
         || port == null) {
       return null;
     }
-    return new Computer(name, address, board, cameras, port);
+    return new Computer(name, address, board, cameras, port, packs, probes, ports);
+  }
+
+  /** Where each camera plugs in: a mapping of camera to its by-path entry. */
+  private Map<String, String> ports(Mapping mapping, List<String> cameras) {
+    Entry entry = mapping.entries().get("ports");
+    if (entry == null || entry.value() instanceof Scalar scalar && scalar.empty()) {
+      return Map.of();
+    }
+    if (!(entry.value() instanceof Mapping ports)) {
+      problems.add(
+          at(entry.line(), "ports is a mapping: each camera, then its /dev/v4l/by-path/ entry"));
+      return Map.of();
+    }
+    Map<String, String> found = new java.util.LinkedHashMap<>();
+    for (Map.Entry<String, Entry> port : ports.entries().entrySet()) {
+      int line = port.getValue().line();
+      if (!(port.getValue().value() instanceof Scalar value) || value.empty()) {
+        problems.add(at(line, "camera " + port.getKey() + "'s port is a single value"));
+        continue;
+      }
+      if (!cameras.contains(port.getKey())) {
+        problems.add(at(line, port.getKey() + " isn't one of this computer's cameras"));
+        continue;
+      }
+      try {
+        new AgentConfig.Camera(port.getKey(), value.text());
+        found.put(port.getKey(), value.text());
+      } catch (IllegalArgumentException e) {
+        problems.add(at(line, String.valueOf(e.getMessage())));
+      }
+    }
+    return found;
+  }
+
+  private List<String> packs(Mapping mapping) {
+    Entry entry = mapping.entries().get("packs");
+    if (entry == null || entry.value() instanceof Scalar scalar && scalar.empty()) {
+      return List.of();
+    }
+    if (!(entry.value() instanceof Sequence sequence)) {
+      problems.add(at(entry.line(), "packs must be a list: [photonvision]"));
+      return List.of();
+    }
+    List<String> packs = new ArrayList<>();
+    for (Node item : sequence.items()) {
+      if (!(item instanceof Scalar scalar) || scalar.empty()) {
+        problems.add(at(item.line(), "each pack is a name"));
+        continue;
+      }
+      String problem = Computer.packProblem(scalar.text());
+      if (problem != null) {
+        problems.add(at(item.line(), problem));
+      } else if (packs.contains(scalar.text())) {
+        problems.add(at(item.line(), "pack " + scalar.text() + " is listed twice"));
+      } else {
+        packs.add(scalar.text());
+      }
+    }
+    return packs;
   }
 
   private List<String> cameras(Mapping mapping) {

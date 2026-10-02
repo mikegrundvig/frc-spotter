@@ -18,6 +18,8 @@ import java.util.List;
  * @param recipeHash the hash of the recipe that built the image (see the coprocessor README)
  * @param photonvisionVersion the PhotonVision version in the image, exactly as PhotonLib's
  * @param settingsHash the hash of the settings stamped into the image; empty when none were
+ * @param probesHash the hash of the probe definitions stamped into the image ({@code
+ *     /etc/coprocessor/probes.json}: the SHA-256 of the file); empty for an image without them
  * @param bootId this boot's ID (/proc/sys/kernel/random/boot_id); empty in the file
  * @param mac the MAC address of the network interface, lowercase; empty in the file
  */
@@ -31,14 +33,60 @@ public record Stamp(
     String recipeHash,
     String photonvisionVersion,
     String settingsHash,
+    String probesHash,
     String bootId,
     String mac) {
   public Stamp {
     cameras = List.copyOf(cameras);
   }
 
+  /** A stamp without probe definitions: an image stamped before them. */
+  public Stamp(
+      String name,
+      int team,
+      String address,
+      String board,
+      List<String> cameras,
+      String release,
+      String recipeHash,
+      String photonvisionVersion,
+      String settingsHash,
+      String bootId,
+      String mac) {
+    this(
+        name,
+        team,
+        address,
+        board,
+        cameras,
+        release,
+        recipeHash,
+        photonvisionVersion,
+        settingsHash,
+        "",
+        bootId,
+        mac);
+  }
+
   /** A stamp that says nothing: what the agent reports when the image carries none. */
-  public static final Stamp NONE = new Stamp("", 0, "", "", List.of(), "", "", "", "", "", "");
+  public static final Stamp NONE = new Stamp("", 0, "", "", List.of(), "", "", "", "", "", "", "");
+
+  /** This stamp, as an image carrying these probe definitions would say. */
+  public Stamp withProbesHash(String probesHash) {
+    return new Stamp(
+        name,
+        team,
+        address,
+        board,
+        cameras,
+        release,
+        recipeHash,
+        photonvisionVersion,
+        settingsHash,
+        probesHash,
+        bootId,
+        mac);
+  }
 
   /** This stamp with the boot and MAC address the agent found. */
   public Stamp withRuntime(String bootId, String mac) {
@@ -52,6 +100,7 @@ public record Stamp(
         recipeHash,
         photonvisionVersion,
         settingsHash,
+        probesHash,
         bootId,
         mac);
   }
@@ -68,6 +117,7 @@ public record Stamp(
         .put("recipeHash", recipeHash)
         .put("photonvisionVersion", photonvisionVersion)
         .put("settingsHash", settingsHash)
+        .put("probesHash", probesHash)
         .put("bootId", bootId)
         .put("mac", mac)
         .build();
@@ -86,6 +136,7 @@ public record Stamp(
         o.string("recipeHash", ""),
         o.string("photonvisionVersion", ""),
         o.string("settingsHash", ""),
+        o.string("probesHash", ""),
         o.string("bootId", ""),
         o.string("mac", ""));
   }

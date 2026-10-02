@@ -1,0 +1,42 @@
+# The built-in pack: every computer runs it, so the robot can require the agent's own measurements
+# like any other probe (coprocessor/README.md, "Packs"). Each holds one of the agent's metrics
+# against a limit; the limits are the README's, with why.
+pack: builtin
+probes:
+  # Each camera whose port the configuration names: plugged in there, with its link speed. A camera
+  # in the wrong port fails here.
+  - id: camera.{camera}
+    each: camera
+    kind: usb
+    path: '{port}'
+    every: 2
+  # Within 5 °C of a passive trip point, the kernel is about to slow the cores.
+  - id: builtin.thermal-margin
+    kind: threshold
+    metric: thermal.margin.celsius
+    min: 5
+    every: 1
+  # A cluster held below its most clock: throttled, by heat or power.
+  - id: builtin.cpu-capped
+    kind: threshold
+    metric: cpu.capped
+    max: 0
+    every: 1
+  # Under a tenth of memory left, the kernel is close to killing something.
+  - id: builtin.memory
+    kind: threshold
+    metric: memory.available.percent
+    min: 10
+    every: 5
+  # A full /data fails saves (settings, the journal) quietly.
+  - id: builtin.data-free
+    kind: threshold
+    metric: disk.data.free.percent
+    min: 10
+    every: 30
+  # The image runs with its root read-only; writable means it booted something else.
+  - id: builtin.root-read-only
+    kind: threshold
+    metric: boot.root.readonly
+    min: 1
+    every: 60

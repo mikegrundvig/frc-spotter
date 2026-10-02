@@ -54,6 +54,10 @@ dependencies {
 tasks.named("test") {
     useJUnitPlatform()
     jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
+    // Spotter's own packs, which the build tool's tests compile.
+    systemProperty "frc.projectDir", rootProject.projectDir.absolutePath
+    inputs.files(rootProject.fileTree("packs") { include "*/pack.yaml" })
+    .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
