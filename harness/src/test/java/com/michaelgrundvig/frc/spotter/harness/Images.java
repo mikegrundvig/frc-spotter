@@ -124,11 +124,12 @@ final class Images {
   /**
    * The -all.jar's image: a stock Java 17 (Temurin's, on Ubuntu 24.04) under systemd, its java on
    * the path as a system Java's is, and nothing else of Java; the agent installed from the -all.jar
-   * and its install script.
+   * and its install script, and the example pack with a Java helper from its own.
    */
   static String agentOnJava17() {
     Map<String, Object> context = new LinkedHashMap<>();
     context.put("jar", property("spotter.agentJar"));
+    context.put("pack", property("spotter.javaHelperPack"));
     context.put("stamp.json", stamp("vision-front", 21, Map.of()));
     return build(
         "java17",
@@ -148,6 +149,8 @@ final class Images {
         COPY jar /tmp/agent
         RUN sh /tmp/agent/install.sh && rm -rf /tmp/agent \\
          && test ! -e /usr/lib/frc-coprocessor-agent/runtime
+        COPY pack /tmp/pack
+        RUN sh /tmp/pack/install.sh && rm -rf /tmp/pack
         COPY stamp.json /etc/coprocessor/stamp.json
         RUN mkdir -p /data/frc-coprocessor
         VOLUME /data

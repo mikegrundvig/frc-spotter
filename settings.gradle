@@ -19,6 +19,9 @@ include "api"
 include "agent"
 // The robot's side: polling each agent, judging what it says, powering it down, the deploy check.
 include "client"
+// An example pack with a Java helper, which the container tests install.
+include "java-helper-pack"
+project(":java-helper-pack").projectDir = file("examples/packs/java-helper")
 // The container tests: the agent installed from its package in a Java-less Debian 13 container, with
 // the robot's client calling it.
 include "harness"

@@ -1,0 +1,19 @@
+# An example pack with a Java helper (docs/agent.md, "Packs"): its probes name one program, a small
+# Java helper, each use a fixed command line. The helper runs on the Java the agent runs on, which
+# the agent names in FRC_AGENT_JAVA (its package's own runtime, or the board's), so the pack never
+# names a path to one. A copy of this folder is the start of a pack of your own.
+pack: java-helper
+probes:
+  # The Java the helper runs on: its feature version, such as 17 or 25.
+  - id: java-helper.java
+    kind: command
+    argv: ['{pack}/bin/java-helper', java]
+    match: '^java (\d+)$'
+    every: 60
+  # A file's SHA-256, worked out by the helper: rerun at once when the file changes.
+  - id: java-helper.os-release
+    kind: command
+    argv: ['{pack}/bin/java-helper', sha256, /etc/os-release]
+    match: '^([0-9a-f]{64})$'
+    every: 60
+    watch: [/etc/os-release]

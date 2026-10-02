@@ -1,0 +1,6 @@
+#!/bin/sh
+# The example pack's helper: the program its probes name. It runs on the Java the agent runs on,
+# which the agent names in FRC_AGENT_JAVA, else the board's java; small, as the agent is.
+here=$(dirname "$0")
+exec "${FRC_AGENT_JAVA:-java}" -Xmx16m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 \
+  -jar "$here/../lib/java-helper.jar" "$@"
