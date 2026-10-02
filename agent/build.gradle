@@ -1,7 +1,7 @@
 // The coprocessor agent: a small web service each coprocessor runs, which the robot polls for the
 // computer's health and the probes its packs define (docs/agent.md). It knows the computer,
-// not the software on it: PhotonVision is a pack. One runnable jar, with nothing but
-// :coprocessor-common inside, Java 17 bytecode.
+// not the software on it: what to check of that is a pack's. One runnable jar, with nothing but
+// :api inside, Java 17 bytecode.
 
 plugins {
     id "java"
@@ -17,7 +17,7 @@ java {
 }
 
 // Java 17 bytecode and APIs, though built with 25: the agent's jar also runs on a board's own
-// Java, which may be 17 (PhotonVision's 2026 images ship it), and the robot program, on 25, runs
+// Java, which may be 17, and the robot program, on 25, runs
 // 17's unchanged. So nothing past 17: no pattern-matching switches, sequenced collections, or
 // virtual threads.
 tasks.withType(JavaCompile).configureEach {
@@ -103,9 +103,9 @@ apply from: rootProject.file("gradle/quality.gradle")
 def agentVersion = (project.findProperty("agentVersion") ?: "0.1.0").toString()
 def debianArch = [amd64: "amd64", x86_64: "amd64", aarch64: "arm64", arm64: "arm64"]
 .get(System.getProperty("os.arch"), System.getProperty("os.arch"))
-// The runtime's modules: the agent's (java.base, jdk.httpserver), and java.sql for packs' helpers
-// that read a database with the shared code (PhotonVision's).
-def runtimeModules = "java.base,jdk.httpserver,java.sql"
+// The runtime's modules: the agent's, and no more. A pack's Java helper that needs others runs on
+// the board's own Java (FRC_AGENT_JAVA names this runtime, for helpers that need only these).
+def runtimeModules = "java.base,jdk.httpserver"
 def packageRoot = layout.buildDirectory.dir("package/root")
 
 def agentRuntime = tasks.register("agentRuntime", Exec) {
