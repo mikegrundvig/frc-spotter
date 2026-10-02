@@ -129,7 +129,7 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
   /** Runs a command inside as the agent's own account, and answers how it went. */
   public Container.ExecResult runAsAgent(String... command) {
     try {
-      return execInContainerWithUser("frc-coprocessor-agent", command);
+      return execInContainerWithUser("frc-spotter", command);
     } catch (IOException e) {
       throw new IllegalStateException(e);
     } catch (InterruptedException e) {
@@ -155,11 +155,11 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
 
   /**
    * Configures its agent as a team would on a board whose root is read-only ({@code
-   * /data/frc-coprocessor/agent.json}), and restarts it to read it.
+   * /data/frc-spotter/agent.json}), and restarts it to read it.
    */
   public void configure(AgentConfig config) {
     write(AgentConfig.DATA_PATH, config.text());
-    run("systemctl", "restart", "frc-coprocessor-agent.service");
+    run("systemctl", "restart", "frc-spotter.service");
     awaitAgent();
   }
 
@@ -183,7 +183,7 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
     }
     throw new IllegalStateException(
         "its agent didn't answer within 30 s: "
-            + run("systemctl", "status", "frc-coprocessor-agent", "--no-pager"));
+            + run("systemctl", "status", "frc-spotter", "--no-pager"));
   }
 
   /**
@@ -242,8 +242,7 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
   /** The agent's own memory: its unit's cgroup, in MiB, now. */
   public long agentMemoryMb() {
     String value =
-        run("systemctl", "show", "frc-coprocessor-agent", "--property=MemoryCurrent", "--value")
-            .strip();
+        run("systemctl", "show", "frc-spotter", "--property=MemoryCurrent", "--value").strip();
     return value.matches("\\d+") ? Long.parseLong(value) >> 20 : -1;
   }
 }

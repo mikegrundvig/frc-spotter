@@ -30,11 +30,11 @@ class AgentJarContainerTest {
       // Its unit runs the jar on that Java: the package brought no runtime of its own.
       String pid =
           coprocessor
-              .run("systemctl", "show", "frc-coprocessor-agent", "--property=MainPID", "--value")
+              .run("systemctl", "show", "frc-spotter", "--property=MainPID", "--value")
               .strip();
       assertThat(coprocessor.run("sh", "-c", "tr '\\0' ' ' < /proc/" + pid + "/cmdline"))
           .startsWith("/usr/local/bin/java ")
-          .contains("-jar /usr/lib/frc-coprocessor-agent/frc-coprocessor-agent.jar");
+          .contains("-jar /usr/lib/frc-spotter/frc-spotter.jar");
 
       coprocessor.configure(
           new AgentConfig("vision-front", "", 5808, List.of("java-helper"), List.of(), List.of()));

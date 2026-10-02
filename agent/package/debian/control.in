@@ -1,8 +1,10 @@
-Package: frc-coprocessor-agent
+Package: frc-spotter
 Version: @VERSION@
 Architecture: @ARCH@
 Maintainer: The robot's team <nobody@localhost>
 Depends: systemd, init-system-helpers, polkitd | policykit-1
+Conflicts: frc-coprocessor-agent
+Replaces: frc-coprocessor-agent
 Section: misc
 Priority: optional
 Installed-Size: @SIZE@
@@ -10,4 +12,4 @@ Description: health and checks of an FRC robot's coprocessor, for the robot to p
  A small web service an FRC robot's coprocessor runs: the computer's health
  (load, heat, memory, disks, the journal, the drive) and the checks its packs
  define, which the robot polls and judges. It bundles its own Java runtime.
- Configure it in /etc/frc-coprocessor/agent.json.
+ Configure it in /etc/frc-spotter/agent.json.

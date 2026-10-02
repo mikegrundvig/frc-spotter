@@ -12,13 +12,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.regex.Pattern;
 
 /**
- * The coprocessor agent: {@code java -jar frc-coprocessor-agent.jar [serve] [--port=N]
- * [--bind=ADDRESS] [--controller=ADDRESS] [--root=DIR]} serves the API (docs/agent.md) on the port
- * its configuration names ({@code /etc/frc-coprocessor/agent.json}), else the image's stamp file's,
- * else 5808, unless {@code --port} says. {@code --controller} names the one address a shutdown is
- * taken from, over the configuration's (a test's, where the robot is a test process behind the
- * container runtime's port forwarding). {@code --root} reads the computer's files from a folder
- * rather than {@code /}: a fixture tree, for tests.
+ * The coprocessor agent: {@code java -jar frc-spotter.jar [serve] [--port=N] [--bind=ADDRESS]
+ * [--controller=ADDRESS] [--root=DIR]} serves the API (docs/agent.md) on the port its configuration
+ * names ({@code /etc/frc-spotter/agent.json}), else the image's stamp file's, else 5808, unless
+ * {@code --port} says. {@code --controller} names the one address a shutdown is taken from, over
+ * the configuration's (a test's, where the robot is a test process behind the container runtime's
+ * port forwarding). {@code --root} reads the computer's files from a folder rather than {@code /}:
+ * a fixture tree, for tests.
  */
 public final class AgentMain {
   /** How long any one of the agent's own commands may take. */
@@ -105,7 +105,7 @@ public final class AgentMain {
    * answered) on a thread of its own, which doesn't keep the agent from exiting.
    */
   static void background(Runnable work) {
-    Thread thread = new Thread(work, "coprocessor-agent-work");
+    Thread thread = new Thread(work, "spotter-work");
     thread.setDaemon(true);
     thread.start();
   }
@@ -120,7 +120,7 @@ public final class AgentMain {
       int equals = arg.indexOf('=');
       if (!arg.startsWith("--") || equals < 0) {
         throw new IllegalArgumentException(
-            "Usage: frc-coprocessor-agent [serve] [--port=N] [--bind=ADDRESS]"
+            "Usage: frc-spotter [serve] [--port=N] [--bind=ADDRESS]"
                 + " [--controller=ADDRESS] [--root=DIR]");
       }
       options.put(arg.substring(2, equals), arg.substring(equals + 1));

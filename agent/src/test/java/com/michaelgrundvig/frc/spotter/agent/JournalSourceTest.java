@@ -83,8 +83,7 @@ class JournalSourceTest {
     JournalPage after =
         journal.page(JournalSource.Position.after("s=a1;i=103"), -1, AgentApi.JOURNAL_UNITS, 100);
     assertThat(fixture.commands.ran().get(1))
-        .contains(
-            "--after-cursor=s=a1;i=103", "_TRANSPORT=kernel", "UNIT=frc-coprocessor-agent.service");
+        .contains("--after-cursor=s=a1;i=103", "_TRANSPORT=kernel", "UNIT=frc-spotter.service");
     assertThat(after.entries()).hasSize(8);
     assertThat(after.more()).isFalse();
 

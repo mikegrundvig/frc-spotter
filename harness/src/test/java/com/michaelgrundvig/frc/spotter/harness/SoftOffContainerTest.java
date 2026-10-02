@@ -58,7 +58,7 @@ class SoftOffContainerTest {
       }
       assertThat(coprocessor.run("systemctl", "is-active", "vision.service").strip())
           .isEqualTo("active");
-      assertThat(coprocessor.run("journalctl", "-u", "frc-coprocessor-agent", "--no-pager"))
+      assertThat(coprocessor.run("journalctl", "-u", "frc-spotter", "--no-pager"))
           .contains("Refused a shutdown from " + Images.address(50) + ": not the robot controller");
 
       // The robot asks: taken, its step runs, and it powers off.
@@ -96,8 +96,8 @@ class SoftOffContainerTest {
       hung.start();
       killed.configure(controlledBy("vision-back", killed.robotAddress()));
       hung.configure(controlledBy("vision-side", hung.robotAddress()));
-      killed.run("systemctl", "stop", "frc-coprocessor-agent.service");
-      hung.run("systemctl", "kill", "--signal=SIGSTOP", "frc-coprocessor-agent.service");
+      killed.run("systemctl", "stop", "frc-spotter.service");
+      hung.run("systemctl", "kill", "--signal=SIGSTOP", "frc-spotter.service");
 
       List<AgentClient> clients = new ArrayList<>();
       try {

@@ -3,7 +3,7 @@
 // controller only. Each pack's rule (61 to 98) adds what that pack's steps need; the agent package's
 // 99 refuses its account everything else.
 polkit.addRule(function (action, subject) {
-  if (subject.user !== "frc-coprocessor-agent") {
+  if (subject.user !== "frc-spotter") {
     return polkit.Result.NOT_HANDLED;
   }
   if (action.id === "org.freedesktop.login1.power-off" ||

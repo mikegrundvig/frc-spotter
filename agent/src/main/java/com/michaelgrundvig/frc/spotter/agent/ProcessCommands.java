@@ -32,7 +32,7 @@ final class ProcessCommands implements Commands, AutoCloseable {
   private final ScheduledExecutorService timer =
       Executors.newSingleThreadScheduledExecutor(
           task -> {
-            Thread thread = new Thread(task, "coprocessor-agent-timer");
+            Thread thread = new Thread(task, "spotter-timer");
             thread.setDaemon(true);
             return thread;
           });
@@ -41,7 +41,7 @@ final class ProcessCommands implements Commands, AutoCloseable {
   private final ExecutorService errorReaders =
       Executors.newCachedThreadPool(
           task -> {
-            Thread thread = new Thread(task, "coprocessor-agent-stderr");
+            Thread thread = new Thread(task, "spotter-stderr");
             thread.setDaemon(true);
             return thread;
           });

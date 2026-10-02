@@ -4,13 +4,13 @@
 # it at its first boot.
 set -e
 if [ "$1" = configure ]; then
-  systemd-sysusers frc-coprocessor-agent.conf
-  mkdir -p /etc/frc-coprocessor
-  deb-systemd-helper unmask frc-coprocessor-agent.service >/dev/null || true
-  deb-systemd-helper enable frc-coprocessor-agent.service >/dev/null || true
+  systemd-sysusers frc-spotter.conf
+  mkdir -p /etc/frc-spotter
+  deb-systemd-helper unmask frc-spotter.service >/dev/null || true
+  deb-systemd-helper enable frc-spotter.service >/dev/null || true
   if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
-    deb-systemd-invoke restart frc-coprocessor-agent.service >/dev/null || true
+    deb-systemd-invoke restart frc-spotter.service >/dev/null || true
   fi
 fi
 exit 0

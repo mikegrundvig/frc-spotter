@@ -72,7 +72,7 @@ def packJson = tasks.register("packJson", JavaExec) {
     args "pack", source.absolutePath, out.get().asFile.absolutePath
 }
 
-// The pack as installed (/usr/lib/frc-coprocessor/packs/java-helper/), with its install script.
+// The pack as installed (/usr/lib/frc-spotter/packs/java-helper/), with its install script.
 def packFolderTask = tasks.register("packFolder", Sync) {
     group = "build"
     description = "Assemble the example pack as installed, in build/pack/java-helper."

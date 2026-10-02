@@ -19,8 +19,8 @@ import org.jspecify.annotations.Nullable;
  * com.michaelgrundvig.frc.spotter.probes.ProbeSet} (docs/agent.md, "Packs").
  *
  * <p>A pack is a folder: {@code pack.yaml}, and any helper programs its definitions name under its
- * {@code bin/}, installed at {@code /usr/lib/frc-coprocessor/packs/<name>/}. Spotter's own packs
- * are in its {@code packs/}; a team's own in its repository's {@code coprocessors/packs/}.
+ * {@code bin/}, installed at {@code /usr/lib/frc-spotter/packs/<name>/}. Spotter's own packs are in
+ * its {@code packs/}; a team's own in its repository's {@code coprocessors/packs/}.
  *
  * @param name its name: lowercase letters, digits, hyphens
  * @param probes its probes, as written

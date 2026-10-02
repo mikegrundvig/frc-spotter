@@ -14,7 +14,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 here=$(cd "$(dirname "$0")" && pwd)
-lib="$root/usr/lib/frc-coprocessor-agent"
+lib="$root/usr/lib/frc-spotter"
 # The tarball is laid out as installed (usr/...); the jar's files sit side by side.
 if [ -d "$here/usr" ]; then
   mkdir -p "$root"
@@ -22,28 +22,28 @@ if [ -d "$here/usr" ]; then
 else
   mkdir -p "$lib/bin" "$root/usr/lib/systemd/system" "$root/usr/lib/sysusers.d" \
     "$root/usr/share/polkit-1/rules.d"
-  jar=$(ls "$here"/frc-coprocessor-agent-*-all.jar | head -n 1)
-  install -m 0644 "$jar" "$lib/frc-coprocessor-agent.jar"
-  install -m 0755 "$here/frc-coprocessor-agent" "$lib/bin/frc-coprocessor-agent"
-  install -m 0644 "$here/frc-coprocessor-agent.service" "$root/usr/lib/systemd/system/"
-  install -m 0644 "$here/frc-coprocessor-agent.sysusers" \
-    "$root/usr/lib/sysusers.d/frc-coprocessor-agent.conf"
-  install -m 0644 "$here"/*-frc-coprocessor-agent.rules "$root/usr/share/polkit-1/rules.d/"
+  jar=$(ls "$here"/frc-spotter-*-all.jar | head -n 1)
+  install -m 0644 "$jar" "$lib/frc-spotter.jar"
+  install -m 0755 "$here/frc-spotter" "$lib/bin/frc-spotter"
+  install -m 0644 "$here/frc-spotter.service" "$root/usr/lib/systemd/system/"
+  install -m 0644 "$here/frc-spotter.sysusers" \
+    "$root/usr/lib/sysusers.d/frc-spotter.conf"
+  install -m 0644 "$here"/*-frc-spotter.rules "$root/usr/share/polkit-1/rules.d/"
   if [ -f "$here/pack.json" ]; then
-    mkdir -p "$root/usr/lib/frc-coprocessor/packs/builtin"
-    install -m 0644 "$here/pack.json" "$root/usr/lib/frc-coprocessor/packs/builtin/pack.json"
+    mkdir -p "$root/usr/lib/frc-spotter/packs/builtin"
+    install -m 0644 "$here/pack.json" "$root/usr/lib/frc-spotter/packs/builtin/pack.json"
   fi
 fi
-mkdir -p "$root/etc/frc-coprocessor"
+mkdir -p "$root/etc/frc-spotter"
 if [ "$root" = / ]; then
-  systemd-sysusers frc-coprocessor-agent.conf
-  systemctl enable frc-coprocessor-agent.service
+  systemd-sysusers frc-spotter.conf
+  systemctl enable frc-spotter.service
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
-    systemctl restart frc-coprocessor-agent.service
+    systemctl restart frc-spotter.service
   fi
 else
-  systemd-sysusers --root="$root" frc-coprocessor-agent.conf
-  systemctl --root="$root" enable frc-coprocessor-agent.service
+  systemd-sysusers --root="$root" frc-spotter.conf
+  systemctl --root="$root" enable frc-spotter.service
 fi
-echo "install.sh: the coprocessor agent is installed; configure it in /etc/frc-coprocessor/agent.json"
+echo "install.sh: the coprocessor agent is installed; configure it in /etc/frc-spotter/agent.json"

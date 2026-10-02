@@ -40,7 +40,7 @@ probes:
     path: /srv/vision/none
   - id: kinds.file-data
     kind: file
-    path: /data/frc-coprocessor/written
+    path: /data/frc-spotter/written
     test: text
     match: '^(\S+)$'
   - id: kinds.unit

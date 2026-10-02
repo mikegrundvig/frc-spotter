@@ -77,7 +77,7 @@ class PacksTest {
         .containsExactly("lidar.unit", "lidar.port.front-left");
     assertThat(((Check.Command) set.probes().get(1).check()).argv())
         .containsExactly(
-            "/usr/lib/frc-coprocessor/packs/lidar/bin/check",
+            "/usr/lib/frc-spotter/packs/lidar/bin/check",
             "vision-front",
             "front-left",
             "/dev/v4l/by-path/platform-a-usb-0:1:1.0-video-index0");
@@ -85,7 +85,7 @@ class PacksTest {
     assertThat(set.beforeShutdown().get(0).argv())
         .containsExactly("systemctl", "stop", "lidar.service");
     assertThat(set.downloads().get(0).argv())
-        .containsExactly("/usr/lib/frc-coprocessor/packs/lidar/bin/scan");
+        .containsExactly("/usr/lib/frc-spotter/packs/lidar/bin/scan");
     assertThat(set.journalUnits()).containsExactly("lidar.service");
   }
 

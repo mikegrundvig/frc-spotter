@@ -25,7 +25,7 @@ public final class AgentApi {
   public static final String JOURNAL = "/v1/journal";
 
   /** The agent's own systemd unit. */
-  public static final String AGENT_UNIT = "frc-coprocessor-agent.service";
+  public static final String AGENT_UNIT = "frc-spotter.service";
 
   /**
    * What {@link #JOURNAL} always shows, and the units it may be asked for: the kernel's messages,

@@ -1,6 +1,6 @@
 # The coprocessor agent (docs/agent.md): the web service the robot polls for the computer's
-# health and its packs' probes, on the port its configuration names (/etc/frc-coprocessor/agent.json,
-# else 5808). Installed by its package as /usr/lib/systemd/system/frc-coprocessor-agent.service.
+# health and its packs' probes, on the port its configuration names (/etc/frc-spotter/agent.json,
+# else 5808). Installed by its package as /usr/lib/systemd/system/frc-spotter.service.
 #
 # It stays out of the way of what it watches: a lower priority, a 64 MB heap with the serial
 # collector and the quick compiler only (in its launcher), and on an RK3588 the small cores (0-3:
@@ -15,14 +15,14 @@ Type=simple
 # Its own system user (its package makes it, with systemd-sysusers), in systemd-journal to read the
 # journal. Its one privilege, by its package's polkit rule, is powering off; each pack's rule adds
 # what that pack's steps need (stopping and restarting its software's unit, say).
-User=frc-coprocessor-agent
-Group=frc-coprocessor-agent
+User=frc-spotter
+Group=frc-spotter
 SupplementaryGroups=systemd-journal
 # Its launcher runs it on the package's own Java runtime, or the board's when the package has none.
 # Out of memory, it exits (and is restarted) rather than limping on.
-ExecStart=/usr/lib/frc-coprocessor-agent/bin/frc-coprocessor-agent
+ExecStart=/usr/lib/frc-spotter/bin/frc-spotter
 # Its packs' helpers unpack native libraries here (sqlite-jdbc's); /tmp may not allow running them.
-RuntimeDirectory=frc-coprocessor-agent
+RuntimeDirectory=frc-spotter
 Restart=always
 RestartSec=2
 Nice=10

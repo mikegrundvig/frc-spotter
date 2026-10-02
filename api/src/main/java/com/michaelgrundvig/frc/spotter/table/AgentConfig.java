@@ -34,10 +34,10 @@ public record AgentConfig(
     List<Camera> cameras,
     List<Pack.Written> probes) {
   /** Where a computer's configuration is, on a root that's written when the image is built. */
-  public static final String PATH = "/etc/frc-coprocessor/agent.json";
+  public static final String PATH = "/etc/frc-spotter/agent.json";
 
   /** Where it is when the root is read-only and the team writes it later. */
-  public static final String DATA_PATH = "/data/frc-coprocessor/agent.json";
+  public static final String DATA_PATH = "/data/frc-spotter/agent.json";
 
   /** Where a camera's stable paths are: what {@link Camera#port} names in. */
   public static final String BY_PATH = "/dev/v4l/by-path/";

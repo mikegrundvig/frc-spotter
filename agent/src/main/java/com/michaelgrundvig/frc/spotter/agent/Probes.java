@@ -65,7 +65,7 @@ final class Probes implements AutoCloseable {
         new ScheduledThreadPoolExecutor(
             RUNNING,
             work -> {
-              Thread thread = new Thread(work, "coprocessor-agent-probe");
+              Thread thread = new Thread(work, "spotter-probe");
               thread.setDaemon(true);
               return thread;
             });

@@ -69,7 +69,7 @@ class AgentServerTest {
           timeout: 5
       """;
 
-  static final String BACKUP = "/usr/lib/frc-coprocessor/packs/vision/bin/backup";
+  static final String BACKUP = "/usr/lib/frc-spotter/packs/vision/bin/backup";
 
   @BeforeEach
   void anAgent() throws IOException {

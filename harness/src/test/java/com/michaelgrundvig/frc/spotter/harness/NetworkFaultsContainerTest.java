@@ -109,8 +109,7 @@ class NetworkFaultsContainerTest {
     for (var toxic : proxy.toxics().getAll()) {
       toxic.remove();
     }
-    coprocessor.execInContainer(
-        "systemctl", "kill", "--signal=SIGCONT", "frc-coprocessor-agent.service");
+    coprocessor.execInContainer("systemctl", "kill", "--signal=SIGCONT", "frc-spotter.service");
     await(() -> !client.missing(), 10);
   }
 
@@ -215,11 +214,9 @@ class NetworkFaultsContainerTest {
   @Test
   void aStalledAgentGoesMissingAndRecovers() throws Exception {
     await(() -> client.latest().answered(), 5);
-    coprocessor.run("systemctl", "kill", "--signal=SIGSTOP", "frc-coprocessor-agent.service");
+    coprocessor.run("systemctl", "kill", "--signal=SIGSTOP", "frc-spotter.service");
     goesMissingThenRecovers(
-        () ->
-            coprocessor.run(
-                "systemctl", "kill", "--signal=SIGCONT", "frc-coprocessor-agent.service"),
+        () -> coprocessor.run("systemctl", "kill", "--signal=SIGCONT", "frc-spotter.service"),
         "timed out");
   }
 }

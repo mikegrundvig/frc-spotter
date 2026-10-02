@@ -69,7 +69,7 @@ final class AgentServer implements AutoCloseable {
   private final ExecutorService threads =
       Executors.newCachedThreadPool(
           work -> {
-            Thread thread = new Thread(work, "coprocessor-agent-request");
+            Thread thread = new Thread(work, "spotter-request");
             thread.setDaemon(true);
             return thread;
           });
@@ -207,7 +207,7 @@ final class AgentServer implements AutoCloseable {
             .download(name)
             .orElseThrow(
                 () -> new Refused(404, "this computer's packs serve no file named " + name));
-    Path file = Files.createTempFile("frc-coprocessor-download", ".part");
+    Path file = Files.createTempFile("frc-spotter-download", ".part");
     try {
       Commands.Output made = agent.download(download, file);
       if (made.timedOut() || made.truncated() || made.exit() != 0) {

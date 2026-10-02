@@ -25,10 +25,10 @@ import org.jspecify.annotations.Nullable;
  */
 public final class Packs {
   /** Where the agent's package installs the agent and its Java runtime. */
-  public static final String AGENT_DIR = "/usr/lib/frc-coprocessor-agent";
+  public static final String AGENT_DIR = "/usr/lib/frc-spotter";
 
   /** Where packs are installed, each in a folder of its name, holding its {@code pack.json}. */
-  public static final String PACKS_DIR = "/usr/lib/frc-coprocessor/packs";
+  public static final String PACKS_DIR = "/usr/lib/frc-spotter/packs";
 
   /** The pack the table's own probes count as. */
   public static final String TABLE = "table";

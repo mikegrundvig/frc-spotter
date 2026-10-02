@@ -84,16 +84,16 @@ class AgentContainerTest {
   @Test
   void itsInstalledFromItsPackageWithItsOwnJavaAndNoneOnTheSystem() {
     assertThat(coprocessor.runAsAgent("sh", "-c", "command -v java").getExitCode()).isNotZero();
-    assertThat(coprocessor.run("systemctl", "is-enabled", "frc-coprocessor-agent.service").strip())
+    assertThat(coprocessor.run("systemctl", "is-enabled", "frc-spotter.service").strip())
         .isEqualTo("enabled");
-    assertThat(coprocessor.run("id", "frc-coprocessor-agent")).contains("(systemd-journal)");
+    assertThat(coprocessor.run("id", "frc-spotter")).contains("(systemd-journal)");
     String java =
         coprocessor.run(
             "sh",
             "-c",
-            "tr '\\0' ' ' < /proc/$(systemctl show -p MainPID --value frc-coprocessor-agent)/cmdline");
-    assertThat(java).startsWith("/usr/lib/frc-coprocessor-agent/runtime/bin/java -Xmx64m");
-    assertThat(coprocessor.run("dpkg-query", "-W", "-f=${Status}", "frc-coprocessor-agent"))
+            "tr '\\0' ' ' < /proc/$(systemctl show -p MainPID --value frc-spotter)/cmdline");
+    assertThat(java).startsWith("/usr/lib/frc-spotter/runtime/bin/java -Xmx64m");
+    assertThat(coprocessor.run("dpkg-query", "-W", "-f=${Status}", "frc-spotter"))
         .isEqualTo("install ok installed");
   }
 
@@ -101,7 +101,7 @@ class AgentContainerTest {
   void itsRootIsReadOnlyAndDataWritable() throws Exception {
     Container.ExecResult root = coprocessor.execInContainer("touch", "/etc/written");
     assertThat(root.getExitCode()).isNotZero();
-    coprocessor.write("/data/frc-coprocessor/written", "yes\n");
+    coprocessor.write("/data/frc-spotter/written", "yes\n");
     Health health = health();
     assertThat(health.boot().rootReadOnly()).isTrue();
     assertThat(health.disks()).extracting(d -> d.mount()).contains("/", "/data");
@@ -173,7 +173,7 @@ class AgentContainerTest {
 
   @Test
   void eachKindOfProbeChecksTheRealThing() throws Exception {
-    coprocessor.write("/data/frc-coprocessor/written", "yes\n");
+    coprocessor.write("/data/frc-spotter/written", "yes\n");
     Map<String, String> expected =
         Map.ofEntries(
             Map.entry("kinds.command", "pass"),
@@ -224,8 +224,8 @@ class AgentContainerTest {
     coprocessor.run(
         "systemd-run",
         "--unit=fixture-agent",
-        "--uid=frc-coprocessor-agent",
-        "/usr/lib/frc-coprocessor-agent/bin/frc-coprocessor-agent",
+        "--uid=frc-spotter",
+        "/usr/lib/frc-spotter/bin/frc-spotter",
         "--root=/srv/fixture",
         "--port=5809",
         "--bind=127.0.0.1");
@@ -276,7 +276,7 @@ class AgentContainerTest {
 
     // The agent stopped, its software answering: an image builder's asker checks the software's
     // port when the agent doesn't answer, and says so.
-    coprocessor.run("systemctl", "stop", "frc-coprocessor-agent.service");
+    coprocessor.run("systemctl", "stop", "frc-spotter.service");
     try {
       DeployCheck.Asker builders =
           (address, port) -> {
@@ -298,7 +298,7 @@ class AgentContainerTest {
       assertThat(DeployCheck.judge(same, computer, agentless).verdict())
           .isEqualTo(DeployCheck.Verdict.FAIL);
     } finally {
-      coprocessor.run("systemctl", "start", "frc-coprocessor-agent.service");
+      coprocessor.run("systemctl", "start", "frc-spotter.service");
       coprocessor.awaitAgent();
     }
   }

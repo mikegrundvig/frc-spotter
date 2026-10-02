@@ -3,15 +3,15 @@
 # when the package has one (the .deb and the tarball do), else on the board's java (the -all.jar
 # install), Java 17 or newer. The JVM's settings keep it small: a 64 MB heap, the serial collector,
 # the quick compiler only, and out of memory it exits (systemd restarts it) rather than limping on.
-here=/usr/lib/frc-coprocessor-agent
+here=/usr/lib/frc-spotter
 if [ -x "$here/runtime/bin/java" ]; then
   java="$here/runtime/bin/java"
 elif command -v java >/dev/null 2>&1; then
   java=$(command -v java)
 else
-  echo "frc-coprocessor-agent: no Java: install Java 17 or newer, or the package with its own runtime" >&2
+  echo "frc-spotter: no Java: install Java 17 or newer, or the package with its own runtime" >&2
   exit 1
 fi
 exec "$java" -Xmx64m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:MaxMetaspaceSize=48m \
   -XX:ReservedCodeCacheSize=24m -XX:+ExitOnOutOfMemoryError \
-  -jar "$here/frc-coprocessor-agent.jar" "$@"
+  -jar "$here/frc-spotter.jar" "$@"

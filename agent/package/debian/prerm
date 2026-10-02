@@ -2,6 +2,6 @@
 # The coprocessor agent's package, being removed: stopped on a running system.
 set -e
 if [ -d /run/systemd/system ] && [ "$1" = remove ]; then
-  deb-systemd-invoke stop frc-coprocessor-agent.service >/dev/null || true
+  deb-systemd-invoke stop frc-spotter.service >/dev/null || true
 fi
 exit 0

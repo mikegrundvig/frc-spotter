@@ -108,7 +108,7 @@ standard error. `ranMicros` is on the agent's monotonic clock.
 viewer's "Older" asks `before=` its oldest entry, and a whole boot is `from=boot`, then `cursor=`
 until `more` is false. `priority` (0-7, or `emerg` to `debug`) gives that and worse; `limit` the
 page size (100 unless asked, at most 500). A message longer than 2048 characters is cut. **What's
-served** is the kernel's messages, the agent's (`frc-coprocessor-agent.service`), and those of the
+served** is the kernel's messages, the agent's (`frc-spotter.service`), and those of the
 units the configured packs name (`journalUnits`), and nothing else: logins and other services
 aren't served.
 
@@ -167,18 +167,18 @@ At most two probes run on schedule at once (the rest wait their turn), and two m
 ## Packs
 
 A pack is a folder: its definitions as `pack.json` (built from its `pack.yaml`), and whatever
-programs and polkit rules it brings. Installed, they sit under `/usr/lib/frc-coprocessor/packs/`:
+programs and polkit rules it brings. Installed, they sit under `/usr/lib/frc-spotter/packs/`:
 
 ```
-/usr/lib/frc-coprocessor/packs/
+/usr/lib/frc-spotter/packs/
   builtin/pack.json                     the agent package's: its measurements as probes
   java-helper/pack.json                 the example pack (examples/packs/java-helper)
   java-helper/bin/java-helper           its launcher: exec "${FRC_AGENT_JAVA:-java}" -jar ...
   java-helper/lib/java-helper.jar
 /usr/share/polkit-1/rules.d/
-  60-frc-coprocessor-agent.rules        the agent's account may power off
+  60-frc-spotter.rules                  the agent's account may power off
   61-...rules to 98-...rules            each pack's: what its steps need (stopping its unit, say)
-  99-frc-coprocessor-agent.rules        ... and nothing else
+  99-frc-spotter.rules                  ... and nothing else
 ```
 
 A pack's rule is numbered 61 to 98, so it runs after the agent's and before the agent's last, which
@@ -237,10 +237,10 @@ an image with its software and pack on top, and test them as the robot sees them
 `@ContainerTest`. They need the agent's package, as `-Dspotter.agentDeb=<.deb>` (a release's) or
 `-Dspotter.agentPackage=<folder>` (`./gradlew :agent:agentPackage`'s, with `DEBIAN/`).
 
-## Configuration: `/etc/frc-coprocessor/agent.json`
+## Configuration: `/etc/frc-spotter/agent.json`
 
 One file per computer, written into its image at stamping, or on a board whose root is read-only
-and was installed by hand, `/data/frc-coprocessor/agent.json`. The agent reads it once, at start.
+and was installed by hand, `/data/frc-spotter/agent.json`. The agent reads it once, at start.
 
 ```json
 {
@@ -259,7 +259,7 @@ plugged into (its `/dev/v4l/by-path/` entry), for `each: camera` probes. `probes
 own for this computer. Without a file, the agent runs the built-in pack alone, and takes a
 shutdown only from 10.TE.AM.2 by its stamp's team.
 
-`frc-coprocessor-agent [serve] [--port=N] [--bind=ADDRESS] [--controller=ADDRESS] [--root=DIR]`:
+`frc-spotter [serve] [--port=N] [--bind=ADDRESS] [--controller=ADDRESS] [--root=DIR]`:
 `--port` and `--controller` override the file; `--root` reads the computer's files from a folder
 (the tests' fixture trees).
 
@@ -322,22 +322,22 @@ GitHub release, with their checksums:
 
 | Artifact | For | Size |
 |---|---|---|
-| `frc-coprocessor-agent_<version>_<arch>.deb` (arm64, amd64) | Debian, Ubuntu, Armbian: carries its own Java runtime (jlink, JDK 25: `java.base` and `jdk.httpserver`) | 19.5 MB |
-| `frc-coprocessor-agent-<version>-linux-<arch>.tar.gz` | Systems without dpkg: the same files, with `install.sh [--root DIR]` | 23 MB |
-| `frc-coprocessor-agent-<version>-all.jar` | A board with its own Java 17 or newer | 0.26 MB |
-| `frc-coprocessor-agent-<version>-all.tar.gz` | The same, with its unit, launcher, polkit rules, sysusers file, built-in pack, and `install.sh` | 0.25 MB |
+| `frc-spotter_<version>_<arch>.deb` (arm64, amd64) | Debian, Ubuntu, Armbian: carries its own Java runtime (jlink, JDK 25: `java.base` and `jdk.httpserver`) | 19.5 MB |
+| `frc-spotter-<version>-linux-<arch>.tar.gz` | Systems without dpkg: the same files, with `install.sh [--root DIR]` | 23 MB |
+| `frc-spotter-<version>-all.jar` | A board with its own Java 17 or newer | 0.26 MB |
+| `frc-spotter-<version>-all.tar.gz` | The same, with its unit, launcher, polkit rules, sysusers file, built-in pack, and `install.sh` | 0.25 MB |
 
 The runtime is jlink's for the computer building it, so each architecture's `.deb` is built on it.
 
 ```
-/usr/lib/frc-coprocessor-agent/frc-coprocessor-agent.jar
-/usr/lib/frc-coprocessor-agent/bin/frc-coprocessor-agent    the launcher
-/usr/lib/frc-coprocessor-agent/runtime/                     the .deb's and tarball's Java
-/usr/lib/frc-coprocessor/packs/builtin/pack.json
-/usr/lib/systemd/system/frc-coprocessor-agent.service
-/usr/lib/sysusers.d/frc-coprocessor-agent.conf              its account, in systemd-journal
-/usr/share/polkit-1/rules.d/60-frc-coprocessor-agent.rules, 99-frc-coprocessor-agent.rules
-/etc/frc-coprocessor/                                        its configuration
+/usr/lib/frc-spotter/frc-spotter.jar
+/usr/lib/frc-spotter/bin/frc-spotter      the launcher
+/usr/lib/frc-spotter/runtime/             the .deb's and tarball's Java
+/usr/lib/frc-spotter/packs/builtin/pack.json
+/usr/lib/systemd/system/frc-spotter.service
+/usr/lib/sysusers.d/frc-spotter.conf      its account, in systemd-journal
+/usr/share/polkit-1/rules.d/60-frc-spotter.rules, 99-frc-spotter.rules
+/etc/frc-spotter/                         its configuration
 ```
 
 **Installed:** the `.deb`'s maintainer scripts (and `install.sh`) make its account with

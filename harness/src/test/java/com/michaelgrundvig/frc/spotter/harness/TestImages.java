@@ -46,9 +46,9 @@ final class TestImages {
         FROM %s
         %s
         # The test packs, as a pack's own install would put them.
-        COPY standin.json /usr/lib/frc-coprocessor/packs/standin/pack.json
-        COPY kinds.json /usr/lib/frc-coprocessor/packs/kinds/pack.json
-        COPY 61-standin.rules /usr/share/polkit-1/rules.d/61-frc-coprocessor-standin.rules
+        COPY standin.json /usr/lib/frc-spotter/packs/standin/pack.json
+        COPY kinds.json /usr/lib/frc-spotter/packs/kinds/pack.json
+        COPY 61-standin.rules /usr/share/polkit-1/rules.d/61-frc-spotter-standin.rules
         # The software the stand-in pack watches: a web server on 5800, as a vision program's page is.
         COPY vision.service broken.service /etc/systemd/system/
         RUN mkdir -p /srv/vision/api \\
@@ -58,18 +58,18 @@ final class TestImages {
          && systemctl enable vision.service broken.service
         # A fixture tree of USB devices, with real links, for an agent run with --root: front-left
         # on a USB 3 port, front-right not plugged in.
-        COPY fixture-agent.json /srv/fixture/etc/frc-coprocessor/agent.json
+        COPY fixture-agent.json /srv/fixture/etc/frc-spotter/agent.json
         RUN set -e; f=/srv/fixture; usb=$f/sys/devices/platform/xhci-hcd.0.auto/usb7/7-1 \\
          && mkdir -p $f/dev/v4l/by-path $f/sys/class/video4linux/video0 "$usb/7-1:1.0" \\
-              $f/usr/lib/frc-coprocessor/packs \\
-         && cp -R /usr/lib/frc-coprocessor/packs/builtin $f/usr/lib/frc-coprocessor/packs/ \\
+              $f/usr/lib/frc-spotter/packs \\
+         && cp -R /usr/lib/frc-spotter/packs/builtin $f/usr/lib/frc-spotter/packs/ \\
          && : > $f/dev/video0 \\
          && ln -s ../../video0 "$f/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0" \\
          && ln -s "../../../devices/platform/xhci-hcd.0.auto/usb7/7-1/7-1:1.0" $f/sys/class/video4linux/video0/device \\
          && echo 5000 > $usb/speed && echo 0c45 > $usb/idVendor && echo 6366 > $usb/idProduct \\
          && echo 'Arducam OV9281 USB Camera' > $usb/product
         COPY stamp.json /etc/coprocessor/stamp.json
-        RUN mkdir -p /data/frc-coprocessor
+        RUN mkdir -p /data/frc-spotter
         VOLUME /data
         """
             .formatted(Images.base(), installAgent),
@@ -103,11 +103,11 @@ final class TestImages {
         # running here, so it's enabled and not started.
         COPY jar /tmp/agent
         RUN sh /tmp/agent/install.sh && rm -rf /tmp/agent \\
-         && test ! -e /usr/lib/frc-coprocessor-agent/runtime
+         && test ! -e /usr/lib/frc-spotter/runtime
         COPY pack /tmp/pack
         RUN sh /tmp/pack/install.sh && rm -rf /tmp/pack
         COPY stamp.json /etc/coprocessor/stamp.json
-        RUN mkdir -p /data/frc-coprocessor
+        RUN mkdir -p /data/frc-spotter
         VOLUME /data
         STOPSIGNAL SIGRTMIN+3
         ENTRYPOINT ["/sbin/init"]

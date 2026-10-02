@@ -175,7 +175,7 @@ class ApiRecordsTest {
   @Test
   void theJournalIsServedForTheKernelAndTheAgentAndTheirPacksUnitsOnly() {
     // A computer's packs add their own (ProbeSet.journalUnits): the units they watch.
-    assertThat(AgentApi.JOURNAL_UNITS).containsExactly("kernel", "frc-coprocessor-agent.service");
+    assertThat(AgentApi.JOURNAL_UNITS).containsExactly("kernel", "frc-spotter.service");
   }
 
   @Test

@@ -1,4 +1,4 @@
 # The coprocessor agent's account (systemd-sysusers): a system user with no login and no home, in
 # systemd-journal so it can read the journal.
-u frc-coprocessor-agent - "FRC coprocessor agent" /nonexistent /usr/sbin/nologin
-m frc-coprocessor-agent systemd-journal
+u frc-spotter - "FRC coprocessor agent" /nonexistent /usr/sbin/nologin
+m frc-spotter systemd-journal

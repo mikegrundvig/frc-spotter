@@ -28,7 +28,8 @@ Each [release](https://github.com/mikegrundvig/frc-spotter/releases) has the age
 64-bit ARM and x86 Linux, with its own Java runtime; a tarball of the same for systems without
 dpkg; and the `-all.jar` for a board with Java 17 or newer, alone and with its unit, polkit rules,
 and install script. `SHA256SUMS` has their checksums. Configure a computer in
-`/etc/frc-coprocessor/agent.json` (`docs/agent.md`).
+`/etc/frc-spotter/agent.json` (`docs/agent.md`). It installs as `frc-spotter` (its package, unit,
+and account); releases before 0.2.0 installed it as `frc-coprocessor-agent`.
 
 ## Building
 

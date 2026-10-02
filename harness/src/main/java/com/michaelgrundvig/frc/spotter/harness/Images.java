@@ -73,19 +73,19 @@ public final class Images {
   public static String installAgent(Map<String, Object> context) {
     String deb = System.getProperty("spotter.agentDeb");
     if (deb != null) {
-      context.put("frc-coprocessor-agent.deb", Path.of(deb));
+      context.put("frc-spotter.deb", Path.of(deb));
       return """
-          COPY frc-coprocessor-agent.deb /tmp/frc-coprocessor-agent.deb
-          RUN dpkg -i /tmp/frc-coprocessor-agent.deb && rm /tmp/frc-coprocessor-agent.deb \\
+          COPY frc-spotter.deb /tmp/frc-spotter.deb
+          RUN dpkg -i /tmp/frc-spotter.deb && rm /tmp/frc-spotter.deb \\
            && ! command -v java
           """;
     }
     context.put("package", property("spotter.agentPackage"));
     return """
-        COPY package /tmp/frc-coprocessor-agent
-        RUN dpkg-deb --root-owner-group --build /tmp/frc-coprocessor-agent /tmp/frc-coprocessor-agent.deb \\
-         && dpkg -i /tmp/frc-coprocessor-agent.deb \\
-         && rm -rf /tmp/frc-coprocessor-agent /tmp/frc-coprocessor-agent.deb \\
+        COPY package /tmp/frc-spotter
+        RUN dpkg-deb --root-owner-group --build /tmp/frc-spotter /tmp/frc-spotter.deb \\
+         && dpkg -i /tmp/frc-spotter.deb \\
+         && rm -rf /tmp/frc-spotter /tmp/frc-spotter.deb \\
          && ! command -v java
         """;
   }

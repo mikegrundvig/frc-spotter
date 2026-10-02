@@ -1,6 +1,6 @@
 // The stand-in pack's rule: the agent's account may stop and restart vision.service.
 polkit.addRule(function (action, subject) {
-  if (subject.user === "frc-coprocessor-agent" &&
+  if (subject.user === "frc-spotter" &&
       action.id === "org.freedesktop.systemd1.manage-units" &&
       action.lookup("unit") === "vision.service" &&
       (action.lookup("verb") === "stop" || action.lookup("verb") === "restart")) {

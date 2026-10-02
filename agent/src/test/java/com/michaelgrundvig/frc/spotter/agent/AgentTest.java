@@ -215,7 +215,7 @@ class AgentTest {
     assertThat(broken.problems())
         .singleElement()
         .asString()
-        .startsWith("configuration: /etc/frc-coprocessor/agent.json: name \"Not A Hostname\"");
+        .startsWith("configuration: /etc/frc-spotter/agent.json: name \"Not A Hostname\"");
     // It runs the built-in pack, with no cameras it knows of.
     assertThat(broken.probes()).extracting(ProbeResult::id).doesNotContain("camera.front-left");
 
@@ -223,7 +223,7 @@ class AgentTest {
         new AgentConfig("vision-front", "", 5808, List.of("missing"), List.of(), List.of()));
     assertThat(fixture.agent().health().problems())
         .containsExactly(
-            "pack missing: not installed (no /usr/lib/frc-coprocessor/packs/missing/pack.json)");
+            "pack missing: not installed (no /usr/lib/frc-spotter/packs/missing/pack.json)");
 
     // Configured on /data when the root is read-only.
     fixture.delete(AgentConfig.PATH);

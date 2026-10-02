@@ -146,9 +146,7 @@ class CoprocessorBuildTest {
     Probe camera = front.probe("service.camera.front-right").orElseThrow();
     assertThat(((Check.Command) camera.check()).argv())
         .containsExactly(
-            "/usr/lib/frc-coprocessor/packs/service/bin/check-camera",
-            "vision-front",
-            "front-right");
+            "/usr/lib/frc-spotter/packs/service/bin/check-camera", "vision-front", "front-right");
     assertThat(front.download("backup.zip").orElseThrow().argv()).contains("vision-front");
     assertThat(front.beforeShutdown()).extracting(Step::name).containsExactly("service.stop");
     assertThat(front.journalUnits()).containsExactly("vision.service");

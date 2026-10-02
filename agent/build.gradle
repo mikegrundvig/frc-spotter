@@ -49,10 +49,10 @@ tasks.named("test") {
     .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
-// frc-coprocessor-agent.jar: the agent with everything it needs (the shared code), run with
+// frc-spotter.jar: the agent with everything it needs (the shared code), run with
 // `java -jar` on Java 17 or newer.
 tasks.named("jar") {
-    archiveFileName = "frc-coprocessor-agent.jar"
+    archiveFileName = "frc-spotter.jar"
     manifest {
         attributes("Main-Class": "com.michaelgrundvig.frc.spotter.agent.AgentMain")
     }
@@ -92,9 +92,9 @@ apply from: rootProject.file("gradle/quality.gradle")
 
 // ---- The agent's package (docs/agent.md, "The agent's package") ----
 //
-//   ./gradlew :coprocessor-agent:agentPackage   the package's files as installed: build/package/root
-//   ./gradlew :coprocessor-agent:agentRelease   build/distributions: the .deb (where dpkg-deb is), the
-//                                               tarball, and the -all.jar with its files
+//   ./gradlew :agent:agentPackage   the package's files as installed: build/package/root
+//   ./gradlew :agent:agentRelease   build/distributions: the .deb (where dpkg-deb is), the
+//                                   tarball, and the -all.jar with its files
 //
 // One set of files three ways: a .deb with its own Java runtime, a tarball of the same for systems
 // without dpkg, and the -all.jar alone, with its unit, polkit rules, and install script beside it,
@@ -139,18 +139,18 @@ def agentPackageTask = tasks.register("agentPackage", Sync) {
     group = "build"
     description = "Assemble the agent's package as installed, with DEBIAN/: build/package/root."
     into packageRoot
-    from(tasks.named("jar")) { into "usr/lib/frc-coprocessor-agent" }
-    from(agentRuntime) { into "usr/lib/frc-coprocessor-agent/runtime" }
+    from(tasks.named("jar")) { into "usr/lib/frc-spotter" }
+    from(agentRuntime) { into "usr/lib/frc-spotter/runtime" }
     // The launcher's source folder isn't named bin/, which Git ignores (an IDE's output).
     from("package/launcher") {
-        into "usr/lib/frc-coprocessor-agent/bin"
+        into "usr/lib/frc-spotter/bin"
         filePermissions { unix("0755") }
     }
-    from(builtinPack) { into "usr/lib/frc-coprocessor/packs/builtin" }
-    from("package/frc-coprocessor-agent.service") { into "usr/lib/systemd/system" }
-    from("package/frc-coprocessor-agent.sysusers") {
+    from(builtinPack) { into "usr/lib/frc-spotter/packs/builtin" }
+    from("package/frc-spotter.service") { into "usr/lib/systemd/system" }
+    from("package/frc-spotter.sysusers") {
         into "usr/lib/sysusers.d"
-        rename { "frc-coprocessor-agent.conf" }
+        rename { "frc-spotter.conf" }
     }
     from("package") {
         include "*.rules"
@@ -199,7 +199,7 @@ def distributions = layout.buildDirectory.dir("distributions")
 def agentDeb = tasks.register("agentDeb", Exec) {
     description = "Build the agent's .deb with dpkg-deb, where it's installed (Debian, Ubuntu, CI)."
     dependsOn agentPackageTask
-    def deb = distributions.map { it.file("frc-coprocessor-agent_${agentVersion}_${debianArch}.deb") }
+    def deb = distributions.map { it.file("frc-spotter_${agentVersion}_${debianArch}.deb") }
     outputs.file(deb)
     def dpkgDeb = [
         "/usr/bin/dpkg-deb",
@@ -214,10 +214,10 @@ def agentDeb = tasks.register("agentDeb", Exec) {
 
 def agentTarball = tasks.register("agentTarball", Tar) {
     description = "Pack the agent and its runtime for systems without dpkg, with its install script."
-    archiveFileName = "frc-coprocessor-agent-${agentVersion}-linux-${debianArch}.tar.gz"
+    archiveFileName = "frc-spotter-${agentVersion}-linux-${debianArch}.tar.gz"
     destinationDirectory = distributions
     compression = Compression.GZIP
-    into("frc-coprocessor-agent-${agentVersion}")
+    into("frc-spotter-${agentVersion}")
     from(agentPackageTask) { exclude "DEBIAN/**" }
     from("package/install.sh") {
         filePermissions {
@@ -231,10 +231,10 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
     into distributions.map { it.dir("jar") }
     from(tasks.named("jar")) {
         rename {
-            "frc-coprocessor-agent-${agentVersion}-all.jar"
+            "frc-spotter-${agentVersion}-all.jar"
         }
     }
-    from("package/launcher/frc-coprocessor-agent") {
+    from("package/launcher/frc-spotter") {
         filePermissions {
             unix("0755")
         }
@@ -251,10 +251,10 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
 // The -all.jar with its files, as one download: unpack it and run its install.sh.
 def agentJarTarball = tasks.register("agentJarTarball", Tar) {
     description = "Pack the -all.jar with its unit, rules, and install script, for a release."
-    archiveFileName = "frc-coprocessor-agent-${agentVersion}-all.tar.gz"
+    archiveFileName = "frc-spotter-${agentVersion}-all.tar.gz"
     destinationDirectory = distributions
     compression = Compression.GZIP
-    into("frc-coprocessor-agent-${agentVersion}-all")
+    into("frc-spotter-${agentVersion}-all")
     from(agentJarReleaseTask)
 }
 
