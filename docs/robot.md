@@ -44,7 +44,8 @@ List<Verdict> verdicts = Verdict.judge(needs, health);
 isn't defined on the computer (`is its pack installed?`), hasn't run yet, couldn't run, failed (with
 the probe's detail), or reported another value (naming both). The levels map onto the template's
 alerts. The probes are the packs' the team copied onto each computer (`docs/agent.md`, "Packs");
-the computer's own report (heat, load, memory, the drive, USB) is in each `Health` as it is.
+the computer's own report (heat, load, memory, the drive, the network link, USB devices, the
+clock) is in each `Health` as it is.
 
 ## Powering down before switching off
 

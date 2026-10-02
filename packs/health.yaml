@@ -1,0 +1,31 @@
+# The computer's own measurements held to limits, so the robot can require them like any other
+# probe: not about to throttle for heat, not throttled now, memory and the root disk not running
+# out. Any Linux board has these. Copy it to /etc/frc-spotter/packs/health.yaml (root's, chmod 644)
+# if your robot code requires them; the agent reports the measurements themselves either way.
+pack: health
+probes:
+  # Within 5 °C of a passive trip point, the kernel is about to slow the cores. Fails on a board
+  # whose thermal zones have no trip points (thermal.margin.celsius isn't measured there).
+  - id: health.thermal-margin
+    kind: threshold
+    metric: thermal.margin.celsius
+    min: 5
+    every: 1
+  # A CPU cluster held below its top clock: throttled, by heat or power.
+  - id: health.cpu-capped
+    kind: threshold
+    metric: cpu.capped
+    max: 0
+    every: 1
+  # Under a tenth of memory left, the kernel is close to killing something.
+  - id: health.memory
+    kind: threshold
+    metric: memory.available.percent
+    min: 10
+    every: 5
+  # A full root disk fails writes (logs, settings) quietly.
+  - id: health.root-free
+    kind: threshold
+    metric: disk.root.free.percent
+    min: 10
+    every: 30

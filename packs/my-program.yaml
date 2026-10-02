@@ -1,0 +1,19 @@
+# A template for your team's own program, run as a systemd service: it's running, and (if it has
+# one) its health page answers. Copy it to /etc/frc-spotter/packs/my-program.yaml (root's, chmod
+# 644), then change my-program to your program's name throughout, or the service's unit name and
+# URL to yours. A check of your own can run any installed program, a script included
+# ([python3, /opt/team/check.py]); it passes when the program exits 0.
+pack: my-program
+journalUnits: [my-program.service]
+probes:
+  # The service, as systemd sees it.
+  - id: my-program.unit
+    kind: unit
+    unit: my-program.service
+    every: 2
+  # Its health page, if it has one: a GET on this computer that must answer 200. Delete this probe
+  # if it has none. With field and equals, a member of its JSON answer must also say so.
+  - id: my-program.http
+    kind: http
+    url: http://localhost:5810/health
+    every: 5

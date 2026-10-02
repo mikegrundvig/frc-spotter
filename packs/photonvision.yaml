@@ -1,0 +1,30 @@
+# PhotonVision: its service is running, its web server answers, and a cheap signal that its
+# settings changed. Copy it to /etc/frc-spotter/packs/photonvision.yaml (root's, chmod 644) on a
+# computer that runs PhotonVision, as installed by its own installer or image.
+#
+# The settings signal is the hash of PhotonVision's database, rerun when its write-ahead log
+# changes, so it costs nothing while nothing changes. It says that they changed, not whether they
+# match what's in Git: that's for the robot or a laptop, through PhotonVision's own API.
+pack: photonvision
+journalUnits: [photonvision.service]
+probes:
+  # Its service, as systemd sees it: a crashed PhotonVision can't say so itself.
+  - id: photonvision.unit
+    kind: unit
+    unit: photonvision.service
+    every: 2
+  # Its web server answers once PhotonVision has started.
+  - id: photonvision.http
+    kind: http
+    url: http://localhost:5800/api/status
+    every: 5
+  # Its settings changed: the database's hash, rerun when the database or its write-ahead log does.
+  - id: photonvision.settings-changed
+    kind: file
+    path: /opt/photonvision/photonvision_config/photon.sqlite
+    test: sha256
+    every: 5
+    timeout: 20
+    watch:
+      - /opt/photonvision/photonvision_config/photon.sqlite
+      - /opt/photonvision/photonvision_config/photon.sqlite-wal

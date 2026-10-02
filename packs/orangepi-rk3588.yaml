@@ -1,0 +1,31 @@
+# An Orange Pi 5-family board (Rockchip RK3588 or RK3588S) on Rockchip's 6.1 kernel, as
+# PhotonVision's images run: what an unprivileged user can read of its accelerators. Copy it to
+# /etc/frc-spotter/packs/orangepi-rk3588.yaml (root's, chmod 644) on such a board. The agent's
+# own report already has every thermal zone with its trip points (the NPU's and GPU's included),
+# each cluster's clock against its top, and the drive; health.yaml holds them to limits.
+#
+# Read from Rockchip's kernel source (develop-6.1), not yet on a board: devfreq's load and cur_freq
+# are readable by anyone, and the GPU and NPU are devfreq devices fb000000.gpu and fdab0000.npu.
+#
+# What it can't read, as the agent runs unprivileged:
+# - The NPU's load: the rknpu driver keeps it in debugfs (/sys/kernel/debug/rknpu/load), root's
+#   alone. A kernel built with CONFIG_ROCKCHIP_RKNPU_PROC_FS (off by default) also has it at
+#   /proc/rknpu/load, readable by anyone; on such a kernel, a file probe can read it (test: text,
+#   match: 'Core0: *([0-9]+)%').
+# - The bootloader's version in SPI flash: reading /dev/mtdblock0 takes root.
+pack: orangepi-rk3588
+probes:
+  # The GPU's load, in percent, as devfreq measured it ("12@800000000Hz").
+  - id: rk3588.gpu-load
+    kind: file
+    path: /sys/class/devfreq/fb000000.gpu/load
+    test: text
+    match: '^([0-9]+)@'
+    every: 5
+  # The NPU's clock, in Hz: held low, it's throttled.
+  - id: rk3588.npu-clock
+    kind: file
+    path: /sys/class/devfreq/fdab0000.npu/cur_freq
+    test: text
+    match: '^([0-9]+)$'
+    every: 5

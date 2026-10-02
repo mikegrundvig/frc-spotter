@@ -2,7 +2,8 @@
 
 Each coprocessor on the robot runs the agent, a small web service the robot polls. The agent knows
 the computer, not the software on it: it reports the computer's health (load, heat, memory, disks,
-the journal, the drive, how it booted) and which computer it is, and runs **probes**, named checks
+the journal, the drive, how it booted, the network link, USB devices, the clock) and which computer
+it is, and runs **probes**, named checks
 that **packs** define. A pack is one YAML file of probes on one program or board; a team copies the
 ones it wants into `/etc/frc-spotter/packs/`. The agent needs nothing else configured. The robot
 decides what it needs of each probe; the agent only reports.
@@ -10,7 +11,8 @@ decides what it needs of each probe; the agent only reports.
 | Path | What |
 |---|---|
 | `api/` (Gradle `:api`) | What the agent and the robot share: the API's records and JSON, and the probes and packs the agent reads. Java 17 |
-| `agent/` (`:agent`) | The agent, its systemd unit, launcher, polkit rules, and package (`agent/package/`) |
+| `agent/` (`:agent`) | The agent, its systemd unit, launcher, drive-health timer, polkit rules, and package (`agent/package/`) |
+| `packs/` | The catalog of packs a team copies from (*Packs*) |
 | `client/` (`:client`) | The robot's side, plain Java (`docs/robot.md`) |
 | `harness/` (`:harness`) | The container harness, a library for container tests of the agent and packs, and Spotter's own container tests |
 
@@ -79,13 +81,16 @@ expects of it.
 | `memory` | Total and available MiB |
 | `disks` | The root's and `/data`'s size and free space, for those mounted |
 | `journal` | This boot's count of USB, UVC, filesystem, out-of-memory, thermal, and other errors, with the latest three, from the kernel, the agent, and the units the packs name |
-| `drive` | The NVMe drive's temperature, wear, unsafe shutdowns, power cycles, hours, media errors, and critical warnings; `null` without one |
+| `drive` | The NVMe drive's temperature, wear, unsafe shutdowns, power cycles, hours, media errors, and critical warnings; `null` without one (*The drive's health*) |
 | `probes` | Every probe's latest `ProbeResult`, in its packs' order |
+| `network` | Each interface but loopback (at most 16), from `/sys/class/net`: its name, whether a device is behind it (`physical`), its state (`up`, `down`, ...), the speed it negotiated (Mb/s; -1 when none, as for a virtual interface), its carrier changes since boot (each drop counts two), and its receive and transmit errors. A loose plug at the radio shows as carrier changes; a damaged cable as 100 Mb/s |
+| `usb` | Every USB device by its port path (`7-1`, `7-1.2` behind a hub; root hubs left out), from `/sys/bus/usb/devices`: its vendor and product IDs, what it calls itself, its link speed (Mb/s), and how often a device was unplugged from that port this boot, counted from the kernel's `USB disconnect` lines. A port whose device was unplugged and hasn't come back is there with `present: false`. At most 32 |
+| `clock` | `synced`: whether the kernel counts the clock synchronized (`timedatectl`'s `NTPSynchronized`, which chrony and systemd-timesyncd both set; `null` when unknown); `source` and `offsetMillis`: the daemon that measured the offset (`chrony`, by `chronyc -c tracking`, else `systemd-timesyncd`, by `timedatectl timesync-status`) and how far the clock is behind its time source (negative when ahead; NaN when neither says). Read at most every 10 s |
 | `problems` | What the agent couldn't read or ignored, each saying what and why (at most 10): a pack it doesn't trust or can't read, `agent.json` it can't read, `shutdown refused: ...` when it has no controller to take one from. `shutting down: asked for by the robot` comes first once a shutdown is under way |
 
 It's answered at once from the last reading; older than half a second, a new reading starts in the
-background. An RK3588's, with no packs, is about 3 KB (the unit tests' fixture); the container
-tests', with their 21 probes, 5.4 KB.
+background. An RK3588's, with no packs, is under 5 KB (the unit tests' fixture); the container
+tests', with their 21 probes and a laptop's 13 USB devices, 7.3 KB.
 
 ### `ProbeResult`
 
@@ -198,6 +203,15 @@ read, one whose name another pack took first, and one defining a probe another a
 others run. A pack being there means its software should be: a missing program fails its probes,
 it doesn't switch the pack off.
 
+**The catalog.** Spotter's repository keeps packs to copy in `packs/`, each file headed by what it
+checks and where it goes: `photonvision.yaml` (its service, web server, and a settings-changed
+signal), `health.yaml` (the agent's own measurements held to limits: thermal margin, CPU capped,
+memory, root disk free), `orangepi-rk3588.yaml` (what an unprivileged user can read of the
+RK3588's accelerators, and what can't be read), and `my-program.yaml` (a template for a team's own
+service). CI reads every one with the agent's own reader (`CatalogTest`), and copies them all onto
+one computer together, so the catalog can't drift from the format. The package installs none: a
+team copies the ones it wants, and pins them by doing so.
+
 **Reading it.** `Pack.parseYaml` (in the api jar) reads a pack without a YAML library, refusing
 anything it would read differently from yq: one key per line, `- ` lists or one-line `[a, b]`
 lists, plain or quoted values, `#` comments. `{...}` mappings, anchors, tags, and multi-line values
@@ -243,15 +257,17 @@ GitHub release, with their checksums:
 | `frc-spotter_<version>_<arch>.deb` (arm64, amd64) | Debian, Ubuntu, Armbian: carries its own Java runtime (jlink, JDK 25: `java.base` and `jdk.httpserver`) | 19.5 MB |
 | `frc-spotter-<version>-linux-<arch>.tar.gz` | Systems without dpkg: the same files, with `install.sh [--root DIR]` | 23 MB |
 | `frc-spotter-<version>-all.jar` | A board with its own Java 17 or newer | 0.26 MB |
-| `frc-spotter-<version>-all.tar.gz` | The same, with its unit, launcher, polkit rules, sysusers file, and `install.sh` | 0.25 MB |
+| `frc-spotter-<version>-all.tar.gz` | The same, with its unit, launcher, drive-health timer, polkit rules, sysusers file, and `install.sh` | 0.25 MB |
 
 The runtime is jlink's for the computer building it, so each architecture's `.deb` is built on it.
 
 ```
 /usr/lib/frc-spotter/frc-spotter.jar
 /usr/lib/frc-spotter/bin/frc-spotter      the launcher
+/usr/lib/frc-spotter/bin/frc-spotter-drive   the drive-health job, run as root by its timer
 /usr/lib/frc-spotter/runtime/             the .deb's and tarball's Java
 /usr/lib/systemd/system/frc-spotter.service
+/usr/lib/systemd/system/frc-spotter-drive.service, frc-spotter-drive.timer
 /usr/lib/sysusers.d/frc-spotter.conf      its account, in systemd-journal
 /usr/share/polkit-1/rules.d/60-frc-spotter.rules   its account may power off
 /usr/share/polkit-1/rules.d/99-frc-spotter.rules   ... and nothing else
@@ -260,9 +276,9 @@ The runtime is jlink's for the computer building it, so each architecture's `.de
 ```
 
 **Installed:** the `.deb`'s maintainer scripts (and `install.sh`) make its account with
-systemd-sysusers, make `/etc/frc-spotter/packs/`, and enable its unit; on a running system they
-start it, and in a chroot building an image (no systemd running) they start nothing. No pack is
-installed. It depends on systemd and polkitd. **The
+systemd-sysusers, make `/etc/frc-spotter/packs/`, and enable its unit and its drive-health timer;
+on a running system they start them, and in a chroot building an image (no systemd running) they
+start nothing. No pack is installed. It depends on systemd and polkitd, and recommends nvme-cli. **The
 launcher** runs the package's own runtime when there is one, else the board's `java`, with a 64 MB
 heap, the serial collector, the quick compiler only, and `-XX:+ExitOnOutOfMemoryError`. **The
 unit** runs it unprivileged with no capabilities, on the small cores (`AllowedCPUs=0-3`) at
@@ -272,28 +288,36 @@ network, link-local addresses, and itself, with systemd's other sandboxing on.
 **What it costs**, measured in the container tests (x86, rootless Podman): the agent's unit at 34
 to 38 MiB on its own runtime, 28 MiB from the `-all.jar` on Temurin 17.
 
-**The drive's health** takes root to read, so a root job writes nvme-cli's reports (`nvme
-smart-log` and `nvme id-ctrl`, as JSON) to `/run/frc-spotter/` every minute, and the agent reads
-those. Without them, `drive` is `null`.
+**The drive's health** takes root to read, so the package's own timer (`frc-spotter-drive.timer`,
+15 s after boot and then each minute) runs a small root job, `frc-spotter-drive`, that writes
+nvme-cli's reports of `/dev/nvme0` (`nvme smart-log` and `nvme id-ctrl`, as JSON) to
+`/run/frc-spotter/`, root's and readable by anyone, each written whole and then renamed. The agent
+reads those files and nothing else of the drive. Without a drive, or without nvme-cli, the job
+leaves no files (and says why in its journal, for nvme-cli), and `drive` is `null`. Its unit
+sandboxes it (no network, a read-only system but its runtime directory) and logs only its warnings,
+not systemd's line each minute. Tested in a container with nvme-cli stood in for; on a board's
+real drive, unverified.
 
 ## Tests
 
 `./gradlew ci` runs every check. The unit tests need nothing of the computer they run on: the
-agent's read fixture trees (an RK3588's sysfs, canned command output).
+agent's read fixture trees (an RK3588's sysfs, its network interfaces and USB devices, canned
+command output for the journal, systemd, and the clock), and the catalog's every pack.
 
 **The container tests** (`harness/`, tagged `container`) need Docker or rootless Podman, and skip
 without one but in CI on Linux, where they must run. `./gradlew test -Pquick` leaves them out unless
 `--tests` names them. They build their images once, named by a hash of what they're built from:
 the agent's (Debian 13, pinned by digest, under systemd as its first process, with no Java, the
 agent installed from its `.deb`, test packs copied in with two it mustn't trust, a stand-in for the
-software it watches, labels in os-release, and a fixture tree of USB devices; the root read-only
-and `/data` a volume, as on a board), and Java 17's (stock Temurin 17 on Ubuntu under systemd, the
+software it watches, labels in os-release, a stand-in for nvme-cli, and a fixture tree of USB
+devices; the root read-only and `/data` a volume, as on a board), and Java 17's (stock Temurin 17 on Ubuntu under systemd, the
 agent installed from the `-all.jar` with its `install.sh`). Each coprocessor has a hostname and a
 fixed address on a test network, 10.99.71.x (team 9971).
 
 The tests play the robot with the client: every endpoint on the wire, each kind of probe against
-real files, units, a shell, and a web server, the packs it mustn't trust, the deploy check against
-its identity, Toxiproxy between the client and the agent (latency under and past its timeouts,
+real files, units, a shell, and a web server, the packs it mustn't trust, its network link, USB
+devices (a container sees its host's, or none), and clock, the drive-health timer writing for it
+as root, the deploy check against its identity, Toxiproxy between the client and the agent (latency under and past its timeouts,
 dropped and reset connections, a stalled connection, a stopped agent: each goes missing after 3 s
 and recovers within a poll), soft-off (taken with nothing configured from a robot container at
 10.99.71.2, refused from one at .50, taken from the test through port forwarding when named with
