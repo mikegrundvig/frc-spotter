@@ -1,0 +1,30 @@
+#!/bin/sh
+# The NVMe drive's health, for the coprocessor agent (docs/agent.md): nvme-cli's SMART log and
+# controller identity of /dev/nvme0, as JSON, in /run/frc-spotter/, each time its timer runs (a
+# minute apart). Reading them takes root, which the agent hasn't: it reads these files. Without a
+# drive or without nvme-cli it leaves none (removing old ones), and the agent reports no drive.
+# Each file is written whole, then renamed, so the agent never reads half of one.
+set -u
+dir=/run/frc-spotter
+device=/dev/nvme0
+if [ ! -e "$device" ]; then
+  rm -f "$dir"/nvme-*.json
+  exit 0
+fi
+if ! command -v nvme >/dev/null 2>&1; then
+  rm -f "$dir"/nvme-*.json
+  echo "<4>frc-spotter-drive: nvme-cli isn't installed, so the drive's health isn't read" >&2
+  exit 0
+fi
+status=0
+for report in smart-log id-ctrl; do
+  file="$dir/nvme-$report.json"
+  if nvme "$report" "$device" --output-format=json > "$file.part" 2>/dev/null; then
+    mv -f "$file.part" "$file"
+  else
+    rm -f "$file.part" "$file"
+    echo "<4>frc-spotter-drive: nvme $report $device failed" >&2
+    status=1
+  fi
+done
+exit $status

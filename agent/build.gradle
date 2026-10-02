@@ -111,7 +111,10 @@ def agentPackageTask = tasks.register("agentPackage", Sync) {
         into "usr/lib/frc-spotter/bin"
         filePermissions { unix("0755") }
     }
-    from("package/frc-spotter.service") { into "usr/lib/systemd/system" }
+    from("package") {
+        include "*.service", "*.timer"
+        into "usr/lib/systemd/system"
+    }
     from("package/frc-spotter.sysusers") {
         into "usr/lib/sysusers.d"
         rename { "frc-spotter.conf" }
@@ -200,7 +203,8 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
             "frc-spotter-${agentVersion}-all.jar"
         }
     }
-    from("package/launcher/frc-spotter") {
+    from("package/launcher") {
+        include "frc-spotter", "frc-spotter-drive"
         filePermissions {
             unix("0755")
         }
@@ -210,7 +214,7 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
             unix("0755")
         }
     }
-    from("package") { include "*.rules", "*.service", "*.sysusers" }
+    from("package") { include "*.rules", "*.service", "*.timer", "*.sysusers" }
 }
 
 // The -all.jar with its files, as one download: unpack it and run its install.sh.

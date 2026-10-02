@@ -1,17 +1,19 @@
 #!/bin/sh
 # The coprocessor agent's package, installed: its account made, its packs' folder made (empty: a
-# team copies in the packs it wants), its unit enabled, and on a running system (not a chroot
-# building an image) started. In a chroot, nothing is started: the image starts it at its first
-# boot.
+# team copies in the packs it wants), its unit and its drive-health timer enabled, and on a running
+# system (not a chroot building an image) started. In a chroot, nothing is started: the image
+# starts them at its first boot.
 set -e
 if [ "$1" = configure ]; then
   systemd-sysusers frc-spotter.conf
   mkdir -p /etc/frc-spotter/packs
-  deb-systemd-helper unmask frc-spotter.service >/dev/null || true
-  deb-systemd-helper enable frc-spotter.service >/dev/null || true
+  for unit in frc-spotter.service frc-spotter-drive.timer; do
+    deb-systemd-helper unmask "$unit" >/dev/null || true
+    deb-systemd-helper enable "$unit" >/dev/null || true
+  done
   if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
-    deb-systemd-invoke restart frc-spotter.service >/dev/null || true
+    deb-systemd-invoke restart frc-spotter.service frc-spotter-drive.timer >/dev/null || true
   fi
 fi
 exit 0

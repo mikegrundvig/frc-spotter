@@ -1,8 +1,9 @@
 #!/bin/sh
 # Installs the coprocessor agent without its .deb (docs/agent.md): from the tarball, which
 # carries its own Java runtime, or from the -all.jar and its files, which run on the board's java
-# (17 or newer). On a running system it's started; with --root, into an image being built (a
-# chroot), it's only enabled. Needs systemd and polkit.
+# (17 or newer). On a running system it's started, with its drive-health timer; with --root, into
+# an image being built (a chroot), they're only enabled. Needs systemd and polkit, and nvme-cli to
+# read an NVMe drive's health.
 #
 #   install.sh [--root DIR]
 set -eu
@@ -24,8 +25,9 @@ else
     "$root/usr/share/polkit-1/rules.d"
   jar=$(ls "$here"/frc-spotter-*-all.jar | head -n 1)
   install -m 0644 "$jar" "$lib/frc-spotter.jar"
-  install -m 0755 "$here/frc-spotter" "$lib/bin/frc-spotter"
-  install -m 0644 "$here/frc-spotter.service" "$root/usr/lib/systemd/system/"
+  install -m 0755 "$here/frc-spotter" "$here/frc-spotter-drive" "$lib/bin/"
+  install -m 0644 "$here/frc-spotter.service" "$here/frc-spotter-drive.service" \
+    "$here/frc-spotter-drive.timer" "$root/usr/lib/systemd/system/"
   install -m 0644 "$here/frc-spotter.sysusers" \
     "$root/usr/lib/sysusers.d/frc-spotter.conf"
   install -m 0644 "$here"/*-frc-spotter.rules "$root/usr/share/polkit-1/rules.d/"
@@ -33,13 +35,13 @@ fi
 mkdir -p "$root/etc/frc-spotter/packs"
 if [ "$root" = / ]; then
   systemd-sysusers frc-spotter.conf
-  systemctl enable frc-spotter.service
+  systemctl enable frc-spotter.service frc-spotter-drive.timer
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
-    systemctl restart frc-spotter.service
+    systemctl restart frc-spotter.service frc-spotter-drive.timer
   fi
 else
   systemd-sysusers --root="$root" frc-spotter.conf
-  systemctl --root="$root" enable frc-spotter.service
+  systemctl --root="$root" enable frc-spotter.service frc-spotter-drive.timer
 fi
 echo "install.sh: the coprocessor agent is installed; copy the packs you want into /etc/frc-spotter/packs/"

@@ -6,6 +6,6 @@ if [ -d /run/systemd/system ]; then
   systemctl --system daemon-reload >/dev/null || true
 fi
 if [ "$1" = purge ]; then
-  deb-systemd-helper purge frc-spotter.service >/dev/null || true
+  deb-systemd-helper purge frc-spotter.service frc-spotter-drive.timer >/dev/null || true
 fi
 exit 0

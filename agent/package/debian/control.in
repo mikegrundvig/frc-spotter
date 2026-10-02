@@ -3,6 +3,7 @@ Version: @VERSION@
 Architecture: @ARCH@
 Maintainer: The robot's team <nobody@localhost>
 Depends: systemd, init-system-helpers, polkitd | policykit-1
+Recommends: nvme-cli
 Conflicts: frc-coprocessor-agent
 Replaces: frc-coprocessor-agent
 Section: misc
@@ -13,4 +14,5 @@ Description: health and checks of an FRC robot's coprocessor, for the robot to p
  (load, heat, memory, disks, the journal, the drive) and the checks its packs
  define, which the robot polls and judges. It bundles its own Java runtime.
  It needs no configuration: copy the packs you want into
- /etc/frc-spotter/packs/.
+ /etc/frc-spotter/packs/. With nvme-cli, a timer reads an NVMe drive's health
+ for it.

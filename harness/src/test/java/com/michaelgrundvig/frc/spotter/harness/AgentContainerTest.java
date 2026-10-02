@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.spotter.harness;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
+import com.michaelgrundvig.frc.spotter.api.Drive;
 import com.michaelgrundvig.frc.spotter.api.Health;
 import com.michaelgrundvig.frc.spotter.api.JournalPage;
 import com.michaelgrundvig.frc.spotter.api.ProbeResult;
@@ -117,6 +118,62 @@ class AgentContainerTest {
         .contains("vision.unit", "kinds.command");
     String json = Json.compact(health.toJson());
     System.out.printf("A health answer: %d bytes%n", json.getBytes(StandardCharsets.UTF_8).length);
+  }
+
+  @Test
+  void itReportsItsLinkItsUsbAndItsClock() throws Exception {
+    Health health = health();
+    System.out.println("Its links: " + health.network());
+    System.out.println("Its USB devices: " + health.usb());
+    System.out.println("Its clock: " + health.clock());
+    // A container's interface is virtual: up, with no device behind it.
+    assertThat(health.network()).anyMatch(link -> link.up() && !link.physical());
+    // A container sees the host's USB devices, or none: either way, read without a problem.
+    assertThat(health.problems())
+        .noneMatch(p -> p.startsWith("network:") || p.startsWith("usb:") || p.startsWith("clock:"));
+    // Synchronized is the kernel's (the host's, in a container); no NTP daemon runs here.
+    assertThat(health.clock().synced()).isNotNull();
+    assertThat(health.clock().source()).isEmpty();
+  }
+
+  @Test
+  void theDriveTimerReadsTheDriveAsRootForTheAgent() throws Exception {
+    assertThat(coprocessor.run("systemctl", "is-enabled", "frc-spotter-drive.timer").strip())
+        .isEqualTo("enabled");
+    assertThat(coprocessor.run("systemctl", "is-active", "frc-spotter-drive.timer").strip())
+        .isEqualTo("active");
+    // No drive: nothing written, and the agent reports none.
+    coprocessor.run("systemctl", "start", "frc-spotter-drive.service");
+    assertThat(coprocessor.run("stat", "-c", "%U %a", "/run/frc-spotter").strip())
+        .isEqualTo("root 755");
+    assertThat(health().drive()).isNull();
+    // A drive (nvme-cli stood in for): its reports written whole, root's, and read by the agent.
+    coprocessor.run("touch", "/dev/nvme0");
+    try {
+      coprocessor.run("systemctl", "start", "frc-spotter-drive.service");
+      assertThat(coprocessor.run("stat", "-c", "%U %a", "/run/frc-spotter/nvme-smart-log.json"))
+          .isEqualTo("root 644\n");
+      Drive drive = null;
+      for (int i = 0; i < 50 && drive == null; i++) {
+        Thread.sleep(100);
+        Health latest = client.latest().answer();
+        drive = latest == null ? null : latest.drive();
+      }
+      assertThat(drive).isNotNull();
+      assertThat(Objects.requireNonNull(drive).device())
+          .isEqualTo("/dev/nvme0 (Spotter Test NVMe)");
+      assertThat(drive.celsius()).isEqualTo(40.9);
+      assertThat(drive.unsafeShutdowns()).isEqualTo(23);
+    } finally {
+      coprocessor.run("rm", "-f", "/dev/nvme0");
+    }
+    // The drive gone: its reports go too.
+    coprocessor.run("systemctl", "start", "frc-spotter-drive.service");
+    assertThat(coprocessor.run("sh", "-c", "ls /run/frc-spotter | wc -l").strip()).isEqualTo("0");
+    System.out.println(
+        "The drive timer's journal: "
+            + coprocessor.run(
+                "journalctl", "-u", "frc-spotter-drive.service", "--no-pager", "-o", "cat"));
   }
 
   @Test

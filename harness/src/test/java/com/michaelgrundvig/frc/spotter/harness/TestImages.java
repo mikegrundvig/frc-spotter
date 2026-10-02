@@ -13,8 +13,8 @@ import java.util.Objects;
  *
  * <ul>
  *   <li>{@link #agent}: Debian 13 under systemd with no Java, the agent installed from its .deb,
- *       the test packs, a stand-in for the software it watches, its image labeled in os-release,
- *       and a fixture tree of USB devices;
+ *       the test packs, a stand-in for the software it watches, its image labeled in os-release, a
+ *       stand-in for nvme-cli, and a fixture tree of USB devices;
  *   <li>{@link #agentOnJava17}: a stock Java 17 with the agent installed from its -all.jar.
  * </ul>
  */
@@ -42,6 +42,7 @@ final class TestImages {
     context.put("vision.service", resource("vision.service"));
     context.put("broken.service", resource("broken.service"));
     context.put("usb.yaml", resource("usb.yaml"));
+    context.put("nvme", resource("nvme"));
     StringBuilder labels = new StringBuilder();
     LABELS.forEach((key, value) -> labels.append(key).append("=\"").append(value).append("\"\\n"));
     return Images.build(
@@ -76,7 +77,9 @@ final class TestImages {
          && ln -s "../../../devices/platform/xhci-hcd.0.auto/usb7/7-1/7-1:1.0" $f/sys/class/video4linux/video0/device \\
          && echo 5000 > $usb/speed && echo 0c45 > $usb/idVendor && echo 6366 > $usb/idProduct \\
          && echo 'Arducam OV9281 USB Camera' > $usb/product
-        RUN mkdir -p /data/frc-spotter
+        # A stand-in for nvme-cli, which the drive-health timer runs when there's a drive.
+        COPY nvme /usr/local/bin/nvme
+        RUN chmod 0755 /usr/local/bin/nvme && mkdir -p /data/frc-spotter
         VOLUME /data
         """
             .formatted(Images.base(), installAgent, installPacks, labels),

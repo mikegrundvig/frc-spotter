@@ -1,0 +1,13 @@
+# Reads the NVMe drive's health for the coprocessor agent soon after boot, then each minute
+# (frc-spotter-drive.service, docs/agent.md).
+
+[Unit]
+Description=FRC coprocessor agent: read the NVMe drive's health each minute
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

@@ -1,7 +1,8 @@
 #!/bin/sh
-# The coprocessor agent's package, being removed: stopped on a running system.
+# The coprocessor agent's package, being removed: stopped on a running system, its drive-health
+# timer with it.
 set -e
 if [ -d /run/systemd/system ] && [ "$1" = remove ]; then
-  deb-systemd-invoke stop frc-spotter.service >/dev/null || true
+  deb-systemd-invoke stop frc-spotter-drive.timer frc-spotter.service >/dev/null || true
 fi
 exit 0
