@@ -24,12 +24,12 @@ import org.testcontainers.containers.Network;
 import org.testcontainers.toxiproxy.ToxiproxyContainer;
 
 /**
- * The robot's client polling the agent through Toxiproxy, as over a robot's network that misbehaves:
- * latency under and past its timeouts (250 ms to connect, 500 ms to answer), dropped and reset
- * connections, a connection that stops passing data, and an agent that stalls. Each time the latest
- * answer goes stale and the coprocessor reads missing after 3 s, the robot's loop never waits (a
- * loop thread reads the client every 20 ms and times each read), and the client recovers once the
- * fault clears.
+ * The robot's client polling the agent through Toxiproxy, as over a robot's network that
+ * misbehaves: latency under and past its timeouts (250 ms to connect, 500 ms to answer), dropped
+ * and reset connections, a connection that stops passing data, and an agent that stalls. Each time
+ * the latest answer goes stale and the coprocessor reads missing after 3 s, the robot's loop never
+ * waits (a loop thread reads the client every 20 ms and times each read), and the client recovers
+ * once the fault clears.
  *
  * <p>Toxiproxy accepts every connection itself, so a connect timeout can't be made here: a fault
  * shows as no answer in time. A computer that's gone from the network entirely (no SYN answered) is
@@ -92,7 +92,9 @@ class NetworkFaultsContainerTest {
     }
   }
 
-  /** The robot's loop: reads the client every 20 ms, as a robot's periodic does, timing each read. */
+  /**
+   * The robot's loop: reads the client every 20 ms, as a robot's periodic does, timing each read.
+   */
   @BeforeEach
   void theRobotsLoop() {
     slowestReadNanos.set(0);
@@ -127,7 +129,8 @@ class NetworkFaultsContainerTest {
     for (var toxic : proxy.toxics().getAll()) {
       toxic.remove();
     }
-    coprocessor.execInContainer("systemctl", "kill", "--signal=SIGCONT", "frc-coprocessor-agent.service");
+    coprocessor.execInContainer(
+        "systemctl", "kill", "--signal=SIGCONT", "frc-coprocessor-agent.service");
     await(() -> !client.missing(), 10);
   }
 
@@ -153,7 +156,8 @@ class NetworkFaultsContainerTest {
     long cleared = System.nanoTime();
     clear.run();
     await(() -> !client.missing() && client.latest().answered(), 4);
-    System.out.printf("  answered again %.1f s after it cleared%n", (System.nanoTime() - cleared) / 1e9);
+    System.out.printf(
+        "  answered again %.1f s after it cleared%n", (System.nanoTime() - cleared) / 1e9);
   }
 
   @Test

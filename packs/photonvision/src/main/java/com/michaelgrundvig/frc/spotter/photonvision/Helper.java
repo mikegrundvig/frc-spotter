@@ -34,8 +34,8 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * PhotonVision's pack helper: the one program the pack's definitions name, each use a fixed command
- * line (docs/agent.md, "Packs"). It reads what the agent itself mustn't (PhotonVision's
- * SQLite database, its jar) with the code the robot's build uses, so the two never disagree:
+ * line (docs/agent.md, "Packs"). It reads what the agent itself mustn't (PhotonVision's SQLite
+ * database, its jar) with the code the robot's build uses, so the two never disagree:
  *
  * <ul>
  *   <li>{@code version JAR}: PhotonVision's version, as its jar says it (its {@code

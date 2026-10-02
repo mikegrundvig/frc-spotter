@@ -86,7 +86,8 @@ class AgentContainerTest {
     for (int i = 0; i < 100 && client.latest().answer() == null; i++) {
       Thread.sleep(100);
     }
-    return Objects.requireNonNull(client.latest().answer(), "no answer: " + client.latest().error());
+    return Objects.requireNonNull(
+        client.latest().answer(), "no answer: " + client.latest().error());
   }
 
   @Test
@@ -126,7 +127,9 @@ class AgentContainerTest {
     assertThat(health.memory().totalMb()).isPositive();
     assertThat(health.boot().uptimeSeconds()).isPositive();
     assertThat(health.problems()).noneMatch(problem -> problem.startsWith("configuration"));
-    assertThat(health.probes()).extracting(ProbeResult::id).contains("vision.unit", "kinds.command");
+    assertThat(health.probes())
+        .extracting(ProbeResult::id)
+        .contains("vision.unit", "kinds.command");
     // The stamp carries the hash of the probes it runs: the ones the robot's build compiles.
     ProbeSet compiled = Packs.compile(STANDIN, packs());
     assertThat(stamp.probesHash()).isEqualTo(compiled.hash());
@@ -159,7 +162,8 @@ class AgentContainerTest {
         .isEqualTo("PK stand-in backup");
     AgentHttp.Streamed streamed = client.download("settings.zip");
     try (InputStream in = streamed.body()) {
-      assertThat(new String(in.readAllBytes(), StandardCharsets.UTF_8)).isEqualTo("PK stand-in backup");
+      assertThat(new String(in.readAllBytes(), StandardCharsets.UTF_8))
+          .isEqualTo("PK stand-in backup");
     }
     assertThat(statusOf(() -> http.get(AgentApi.SETTINGS))).isEqualTo(404);
   }
@@ -239,7 +243,8 @@ class AgentContainerTest {
     String left = "";
     for (int i = 0; i < 100 && left.isEmpty(); i++) {
       Container.ExecResult got =
-          coprocessor.execInContainer("curl", "-sf", "http://127.0.0.1:5809/v1/probes/camera.front-left");
+          coprocessor.execInContainer(
+              "curl", "-sf", "http://127.0.0.1:5809/v1/probes/camera.front-left");
       left = got.getExitCode() == 0 ? got.getStdout() : "";
       if (left.isEmpty()) {
         Thread.sleep(100);
@@ -250,7 +255,9 @@ class AgentContainerTest {
     assertThat(present.value()).isEqualTo("7-1 5000 Mb/s Arducam OV9281 USB Camera");
     ProbeResult absent =
         ProbeResult.fromJson(
-            Json.parse(coprocessor.run("curl", "-sf", "http://127.0.0.1:5809/v1/probes/camera.front-right")));
+            Json.parse(
+                coprocessor.run(
+                    "curl", "-sf", "http://127.0.0.1:5809/v1/probes/camera.front-right")));
     assertThat(absent.status()).isEqualTo(ProbeResult.FAIL);
     assertThat(absent.detail()).startsWith("nothing at /dev/v4l/by-path/platform-fc880000");
     coprocessor.run("systemctl", "stop", "fixture-agent");
@@ -264,21 +271,26 @@ class AgentContainerTest {
     CompiledTable same =
         new CompiledTable(table, "v-standin", "", Map.of(), Map.of("vision-front", probes));
     DeployCheck.Asked asked =
-        DeployCheck.ask(coprocessor.agentHost(), coprocessor.agentPort(), coprocessor.softwarePort());
+        DeployCheck.ask(
+            coprocessor.agentHost(), coprocessor.agentPort(), coprocessor.softwarePort());
     assertThat(asked).isInstanceOf(DeployCheck.Asked.Stamped.class);
-    assertThat(DeployCheck.judge(same, computer, asked).verdict()).isEqualTo(DeployCheck.Verdict.WARN);
-    assertThat(DeployCheck.judge(same, computer, asked).text()).contains("its recipe can't be checked");
+    assertThat(DeployCheck.judge(same, computer, asked).verdict())
+        .isEqualTo(DeployCheck.Verdict.WARN);
+    assertThat(DeployCheck.judge(same, computer, asked).text())
+        .contains("its recipe can't be checked");
     CompiledTable other =
         new CompiledTable(table, "v2027.1.0", "", Map.of(), Map.of("vision-front", probes));
     DeployCheck.Finding wrong = DeployCheck.judge(other, computer, asked);
     assertThat(wrong.verdict()).isEqualTo(DeployCheck.Verdict.FAIL);
-    assertThat(wrong.text()).contains("\"v-standin\" on the coprocessor and \"v2027.1.0\" in this build");
+    assertThat(wrong.text())
+        .contains("\"v-standin\" on the coprocessor and \"v2027.1.0\" in this build");
 
     // The agent stopped, its software answering: not this repository's image, or the agent's down.
     coprocessor.run("systemctl", "stop", "frc-coprocessor-agent.service");
     try {
       DeployCheck.Asked agentless =
-          DeployCheck.ask(coprocessor.agentHost(), coprocessor.agentPort(), coprocessor.softwarePort());
+          DeployCheck.ask(
+              coprocessor.agentHost(), coprocessor.agentPort(), coprocessor.softwarePort());
       assertThat(agentless).isInstanceOf(DeployCheck.Asked.PhotonVisionOnly.class);
       assertThat(DeployCheck.judge(same, computer, agentless).verdict())
           .isEqualTo(DeployCheck.Verdict.FAIL);

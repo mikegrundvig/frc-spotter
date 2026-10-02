@@ -31,12 +31,12 @@ import org.testcontainers.images.builder.ImageFromDockerfile;
  * from, so an image already built is reused and a change builds a new one:
  *
  * <ul>
- *   <li>{@link #agent}: Debian 13 under systemd with no Java, the agent installed from its .deb as a
- *       board's image build would (the package's maintainer scripts run with no systemd running,
+ *   <li>{@link #agent}: Debian 13 under systemd with no Java, the agent installed from its .deb as
+ *       a board's image build would (the package's maintainer scripts run with no systemd running,
  *       as in a chroot), and the test packs, a stand-in for the software it watches, and a fixture
  *       tree of USB devices;
- *   <li>{@link #photonVision}: the same with PhotonVision itself (on a Java of its own, as its image
- *       has) and PhotonVision's pack.
+ *   <li>{@link #photonVision}: the same with PhotonVision itself (on a Java of its own, as its
+ *       image has) and PhotonVision's pack.
  * </ul>
  *
  * <p>Built images are kept (named {@code localhost/spotter-test-*}); a runtime's own prune removes
@@ -144,9 +144,9 @@ final class Images {
       """;
 
   /**
-   * PhotonVision's image: the base, the agent from its .deb, PhotonVision's jar on a Java of its own
-   * (its smoke test run, so its native libraries are in place on the read-only root), its unit with
-   * {@code -n} (the network is the image's), its settings on /data, and PhotonVision's pack.
+   * PhotonVision's image: the base, the agent from its .deb, PhotonVision's jar on a Java of its
+   * own (its smoke test run, so its native libraries are in place on the read-only root), its unit
+   * with {@code -n} (the network is the image's), its settings on /data, and PhotonVision's pack.
    */
   static String photonVision() {
     Map<String, Object> context = new LinkedHashMap<>();
@@ -286,7 +286,9 @@ final class Images {
             }
           } else {
             // A large file (PhotonVision's jar) is known by its size and time: it's pinned anyway.
-            digest.update((Files.size(path) + "@" + Files.getLastModifiedTime(path)).getBytes(StandardCharsets.UTF_8));
+            digest.update(
+                (Files.size(path) + "@" + Files.getLastModifiedTime(path))
+                    .getBytes(StandardCharsets.UTF_8));
           }
         } else {
           digest.update(((String) content).getBytes(StandardCharsets.UTF_8));
@@ -325,7 +327,8 @@ final class Images {
         if (!Files.isRegularFile(jar)) {
           Files.createDirectories(jar.getParent());
           Path part = jar.resolveSibling(sha256 + ".part");
-          HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
+          HttpClient client =
+              HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
           HttpResponse<Path> got =
               client.send(
                   HttpRequest.newBuilder(URI.create(pin.string("url", ""))).build(),

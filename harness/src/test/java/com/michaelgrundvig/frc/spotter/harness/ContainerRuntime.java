@@ -14,8 +14,8 @@ import org.testcontainers.DockerClientFactory;
 /**
  * Whether the container tests can run here, and what they need to know of the runtime: a container
  * runtime that runs Linux containers (Docker on Linux, or Podman), or the tests skip, unless the
- * build says they must run ({@code spotter.requireContainers}, in CI on Linux), when they fail instead.
- * Rootless Podman runs a container's systemd as is; Docker needs privileged mode for it.
+ * build says they must run ({@code spotter.requireContainers}, in CI on Linux), when they fail
+ * instead. Rootless Podman runs a container's systemd as is; Docker needs privileged mode for it.
  */
 final class ContainerRuntime implements ExecutionCondition {
   /** The label every container a test starts carries, so a crashed run's are found and removed. */
@@ -28,8 +28,7 @@ final class ContainerRuntime implements ExecutionCondition {
       return ConditionEvaluationResult.enabled("a container runtime runs Linux containers here");
     }
     if (Boolean.getBoolean("spotter.requireContainers")) {
-      throw new IllegalStateException(
-          "Container tests must run in CI on Linux, and can't: " + why);
+      throw new IllegalStateException("Container tests must run in CI on Linux, and can't: " + why);
     }
     return ConditionEvaluationResult.disabled("No container runtime for Linux containers: " + why);
   }

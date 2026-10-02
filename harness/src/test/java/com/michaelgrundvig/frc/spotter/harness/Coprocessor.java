@@ -123,7 +123,16 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
   /** Writes a file inside, as root: on /data, or a tmpfs. */
   void write(String path, String text) {
     String encoded = Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
-    run("sh", "-c", "mkdir -p \"$(dirname '" + path + "')\" && echo " + encoded + " | base64 -d > '" + path + "'");
+    run(
+        "sh",
+        "-c",
+        "mkdir -p \"$(dirname '"
+            + path
+            + "')\" && echo "
+            + encoded
+            + " | base64 -d > '"
+            + path
+            + "'");
   }
 
   /**
@@ -141,7 +150,8 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
     for (int i = 0; i < 300; i++) {
       try {
         Container.ExecResult stamp =
-            execInContainer("curl", "-sf", "-o", "/dev/null", "http://127.0.0.1:" + AGENT + "/v1/stamp");
+            execInContainer(
+                "curl", "-sf", "-o", "/dev/null", "http://127.0.0.1:" + AGENT + "/v1/stamp");
         if (stamp.getExitCode() == 0) {
           return;
         }
@@ -153,7 +163,9 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
         throw new IllegalStateException(e);
       }
     }
-    throw new IllegalStateException("its agent didn't answer within 30 s: " + run("systemctl", "status", "frc-coprocessor-agent", "--no-pager"));
+    throw new IllegalStateException(
+        "its agent didn't answer within 30 s: "
+            + run("systemctl", "status", "frc-coprocessor-agent", "--no-pager"));
   }
 
   /**
@@ -193,7 +205,13 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
    */
   static String address(String hex) {
     long value = Long.parseLong(hex, 16);
-    return (value & 0xff) + "." + ((value >> 8) & 0xff) + "." + ((value >> 16) & 0xff) + "." + ((value >> 24) & 0xff);
+    return (value & 0xff)
+        + "."
+        + ((value >> 8) & 0xff)
+        + "."
+        + ((value >> 16) & 0xff)
+        + "."
+        + ((value >> 24) & 0xff);
   }
 
   /** How much memory it uses now and has at most, its cgroup's, in MiB. */
@@ -205,7 +223,9 @@ final class Coprocessor extends GenericContainer<Coprocessor> {
 
   /** The agent's own memory: its unit's cgroup, in MiB, now. */
   long agentMemoryMb() {
-    String value = run("systemctl", "show", "frc-coprocessor-agent", "--property=MemoryCurrent", "--value").strip();
+    String value =
+        run("systemctl", "show", "frc-coprocessor-agent", "--property=MemoryCurrent", "--value")
+            .strip();
     return value.matches("\\d+") ? Long.parseLong(value) >> 20 : -1;
   }
 }

@@ -18,8 +18,8 @@ import org.testcontainers.utility.DockerImageName;
  * Soft-off end to end: the robot's client asks; the agent takes it only from its controller's
  * address (a second container on the same network is refused); it runs its pack's step (stopping
  * the software it watches), powers its container off through polkit, and the client sees both ports
- * go. An agent that's been killed, or that hangs, never takes it: after the client's 30 s it's still
- * not gone, and says why, for the robot to name it.
+ * go. An agent that's been killed, or that hangs, never takes it: after the client's 30 s it's
+ * still not gone, and says why, for the robot to name it.
  */
 @ContainerTest
 class SoftOffContainerTest {
@@ -79,7 +79,8 @@ class SoftOffContainerTest {
           state = client.powerDownState();
         }
         double seconds = (System.nanoTime() - asked) / 1e9;
-        System.out.printf("Powered down: gone from both ports %.1f s after it was asked%n", seconds);
+        System.out.printf(
+            "Powered down: gone from both ports %.1f s after it was asked%n", seconds);
         assertThat(state.accepted()).isTrue();
         assertThat(state.answer()).isEqualTo("accepted");
         assertThat(state.gone()).as("%s", state).isTrue();
