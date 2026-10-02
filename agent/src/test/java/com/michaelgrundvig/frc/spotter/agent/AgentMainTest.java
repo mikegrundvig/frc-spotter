@@ -3,88 +3,20 @@ package com.michaelgrundvig.frc.spotter.agent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.michaelgrundvig.frc.spotter.settings.PhotonVisionDatabase;
-import com.michaelgrundvig.frc.spotter.settings.Settings;
-import com.michaelgrundvig.frc.spotter.settings.SettingsDatabase;
-import com.michaelgrundvig.frc.spotter.settings.SettingsFiles;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
+import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Connection;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** The command line: serving, and building a settings database for stamping. */
+/** The command line: what it serves, on which port, and from which root. */
 class AgentMainTest {
   @TempDir Path dir;
-
-  private final ByteArrayOutputStream out = new ByteArrayOutputStream();
-  private final ByteArrayOutputStream err = new ByteArrayOutputStream();
-
-  private int settingsDb(String... args) {
-    return AgentMain.settingsDb(
-        List.of(args),
-        new PrintStream(out, true, StandardCharsets.UTF_8),
-        new PrintStream(err, true, StandardCharsets.UTF_8));
-  }
-
-  @Test
-  void settingsDbBuildsTheDatabaseFromCommittedRowsAndPrintsTheirHash() throws Exception {
-    Settings settings;
-    try (Connection connection =
-        PhotonVisionDatabase.open(PhotonVisionDatabase.configured(dir.resolve("live")))) {
-      settings = SettingsDatabase.read(connection);
-    }
-    Path rows = dir.resolve("coprocessors/vision-front/settings");
-    SettingsFiles.write(settings, rows);
-    Path empty = PhotonVisionDatabase.empty(dir.resolve("empty"));
-    Path built = dir.resolve("photon.sqlite");
-
-    assertThat(settingsDb(rows.toString(), empty.toString(), built.toString())).isZero();
-    assertThat(out.toString(StandardCharsets.UTF_8).strip()).isEqualTo(settings.hash());
-    try (Connection connection = PhotonVisionDatabase.open(built)) {
-      assertThat(SettingsDatabase.read(connection)).isEqualTo(settings);
-    }
-    // The empty database is copied, not changed.
-    try (Connection connection = PhotonVisionDatabase.open(empty)) {
-      assertThat(SettingsDatabase.read(connection).rows()).isEmpty();
-    }
-  }
-
-  @Test
-  void settingsDbSaysWhatsWrong() throws Exception {
-    assertThat(settingsDb("one")).isEqualTo(2);
-    assertThat(err.toString(StandardCharsets.UTF_8)).startsWith("Usage:");
-
-    Path empty = PhotonVisionDatabase.empty(dir.resolve("empty"));
-    assertThat(
-            settingsDb(
-                dir.resolve("none").toString(), empty.toString(), dir.resolve("x").toString()))
-        .isEqualTo(1);
-    assertThat(err.toString(StandardCharsets.UTF_8)).contains("there are no settings in");
-
-    Path rows = dir.resolve("rows");
-    Files.createDirectories(rows);
-    Files.writeString(rows.resolve("database.json"), "{\"userVersion\": 9}");
-    assertThat(
-            settingsDb(
-                rows.toString(),
-                dir.resolve("missing.sqlite").toString(),
-                dir.resolve("x").toString()))
-        .isEqualTo(1);
-    assertThat(err.toString(StandardCharsets.UTF_8)).contains("there's no database at");
-    assertThat(settingsDb(rows.toString(), empty.toString(), dir.resolve("x.sqlite").toString()))
-        .isEqualTo(1);
-    assertThat(err.toString(StandardCharsets.UTF_8)).contains("schema version 9");
-  }
 
   @Test
   void optionsAreNamedAndAnythingElseShowsTheUsage() {
@@ -93,6 +25,65 @@ class AgentMainTest {
     assertThatThrownBy(() -> AgentMain.options(List.of("--port")))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageStartingWith("Usage:");
+  }
+
+  @Test
+  void theControllerCanBeNamedAndThenAShutdownIsTakenFromItAlone() throws Exception {
+    Fixture fixture = new Fixture(dir);
+    // The stamp's team is 1234, whose controller is 10.12.34.2; this test asks from 127.0.0.1.
+    HttpRequest shutdown =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:0/v1/shutdown"))
+            .POST(HttpRequest.BodyPublishers.noBody())
+            .build();
+    try (AgentServer named =
+        AgentMain.serve(
+            fixture.host,
+            List.of("--port=0", "--bind=127.0.0.1", "--controller=127.0.0.1"),
+            Runnable::run)) {
+      assertThat(send(named, shutdown).statusCode()).isEqualTo(202);
+    }
+    assertThat(fixture.log()).contains("Shutdown asked for by 127.0.0.1: powering off");
+    try (AgentServer derived =
+        AgentMain.serve(fixture.host, List.of("--port=0", "--bind=127.0.0.1"), Runnable::run)) {
+      HttpResponse<String> refused = send(derived, shutdown);
+      assertThat(refused.statusCode()).isEqualTo(403);
+      assertThat(refused.body()).contains("(10.12.34.2)");
+    }
+  }
+
+  @Test
+  void theControllerIsAnAddressNeverAName() {
+    for (String bad : List.of("robot.local", "10.12.34", "10.12.34.256", "::1", "")) {
+      assertThatThrownBy(() -> AgentMain.checkAddress(bad))
+          .as(bad)
+          .hasMessageContaining("--controller must be an IPv4 address");
+    }
+    AgentMain.checkAddress("10.12.34.2");
+  }
+
+  private static HttpResponse<String> send(AgentServer server, HttpRequest request)
+      throws Exception {
+    URI at = request.uri();
+    return HttpClient.newHttpClient()
+        .send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + at.getPath()))
+                .method(request.method(), HttpRequest.BodyPublishers.noBody())
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+  }
+
+  @Test
+  void itServesOnTheConfigurationsPortElseTheStamps() throws Exception {
+    Fixture fixture = new Fixture(dir);
+    fixture.config(new AgentConfig("vision-front", "", 5809, List.of(), List.of(), List.of()));
+    Configuration configured = Configuration.read(fixture.host);
+    assertThat(AgentMain.port(Map.of(), configured, 5808)).isEqualTo(5809);
+    assertThat(AgentMain.port(Map.of("port", "5807"), configured, 5808)).isEqualTo(5807);
+    fixture.write(AgentConfig.PATH, "{\"port\": 80}");
+    assertThat(AgentMain.port(Map.of(), Configuration.read(fixture.host), 5808)).isEqualTo(5808);
+    fixture.delete(AgentConfig.PATH);
+    assertThat(AgentMain.port(Map.of(), Configuration.read(fixture.host), 5806)).isEqualTo(5806);
+    assertThat(AgentMain.options(List.of("--root=/x"))).containsEntry("root", "/x");
   }
 
   @Test

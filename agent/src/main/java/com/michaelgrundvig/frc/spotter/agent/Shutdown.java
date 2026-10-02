@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
+import com.michaelgrundvig.frc.spotter.probes.Step;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -9,25 +10,26 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * The agent's one action: a soft power-off, so a coprocessor kept powered after the robot is
  * switched off (by a battery pack, say) shuts down cleanly rather than losing power mid-write. It
- * stops PhotonVision first, so its settings are saved, then powers the computer off. It happens
- * once: asking again while it's under way does nothing more.
+ * runs the steps the computer's packs define first (PhotonVision's pack stops PhotonVision, so its
+ * settings are saved), each within its own time, then powers the computer off, whether the steps
+ * succeeded or not. It happens once: asking again while it's under way does nothing more.
  *
- * <p>The agent runs unprivileged; a polkit rule on the image lets its user stop PhotonVision's unit
- * and power off, and nothing else (coprocessor/README.md).
+ * <p>The agent runs unprivileged; a polkit rule its package installs lets its user power off, and
+ * each pack's rule lets it do what that pack's steps need (coprocessor/README.md).
  */
 final class Shutdown {
-  /** How long PhotonVision may take to stop before the computer powers off anyway. */
-  static final Duration STOP_TIMEOUT = Duration.ofSeconds(120);
+  /** How long powering off may take to be accepted. */
+  static final Duration POWEROFF_TIMEOUT = Duration.ofSeconds(30);
 
   private final Host host;
-  private final String unit;
+  private final List<Step> steps;
   private final Executor executor;
   private final AtomicBoolean requested = new AtomicBoolean();
   private volatile String failure = "";
 
-  Shutdown(Host host, String unit, Executor executor) {
+  Shutdown(Host host, List<Step> steps, Executor executor) {
     this.host = host;
-    this.unit = unit;
+    this.steps = List.copyOf(steps);
     this.executor = executor;
   }
 
@@ -51,25 +53,37 @@ final class Shutdown {
       return false;
     }
     failure = "";
-    host.log("Shutdown asked for by " + from + ": stopping " + unit + ", then powering off");
+    host.log(
+        "Shutdown asked for by "
+            + from
+            + ": "
+            + (steps.isEmpty()
+                ? ""
+                : "running "
+                    + String.join(", ", steps.stream().map(Step::name).toList())
+                    + ", then ")
+            + "powering off");
     executor.execute(this::run);
     return true;
   }
 
   private void run() {
-    try {
-      Commands.Output stopped =
-          host.commands().run(List.of("systemctl", "stop", unit), STOP_TIMEOUT, 16, 4096);
-      if (stopped.exit() != 0) {
-        host.log("Stopping " + unit + " failed (" + describe(stopped) + "); powering off anyway");
+    for (Step step : steps) {
+      Duration timeout = Duration.ofMillis(Math.round(step.timeoutSeconds() * 1000));
+      try {
+        Commands.Output output = host.commands().run(step.argv(), timeout, 16, 4096);
+        if (output.exit() != 0) {
+          host.log(
+              "Step " + step.name() + " failed (" + describe(output) + "); powering off anyway");
+        }
+      } catch (IOException e) {
+        host.log("Step " + step.name() + " failed (" + e.getMessage() + "); powering off anyway");
       }
-    } catch (IOException e) {
-      host.log("Stopping " + unit + " failed (" + e.getMessage() + "); powering off anyway");
     }
     String failed;
     try {
       Commands.Output off =
-          host.commands().run(List.of("systemctl", "poweroff"), Duration.ofSeconds(30), 16, 4096);
+          host.commands().run(List.of("systemctl", "poweroff"), POWEROFF_TIMEOUT, 16, 4096);
       failed = off.exit() == 0 ? "" : describe(off);
     } catch (IOException e) {
       failed = String.valueOf(e.getMessage());

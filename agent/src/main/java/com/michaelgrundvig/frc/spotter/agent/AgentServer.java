@@ -1,28 +1,21 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
+import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.ShutdownAnswer;
 import com.michaelgrundvig.frc.spotter.json.Json;
 import com.michaelgrundvig.frc.spotter.json.JsonValue;
-import com.michaelgrundvig.frc.spotter.settings.SettingsFiles;
-import com.michaelgrundvig.frc.spotter.settings.SettingsRow;
-import com.michaelgrundvig.frc.spotter.settings.SettingsText;
+import com.michaelgrundvig.frc.spotter.probes.Download;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import java.io.BufferedWriter;
-import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.security.DigestOutputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -32,21 +25,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.regex.Pattern;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 import org.jspecify.annotations.Nullable;
 
 /**
  * The agent's HTTP API, version 1, on the JDK's own server: JSON answers, each bounded; nothing a
- * request says is run. The one action, {@code POST /v1/shutdown}, is the robot controller's alone.
- * The only class that touches the web server.
+ * request says is run, only probes and downloads its packs define, by name. The one action, {@code
+ * POST /v1/shutdown}, is the controller's alone. The only class that touches the web server.
  *
  * <p>Each request has a thread of its own, so a client that's slow to send (or never finishes)
- * holds up nobody else. The heavy requests (the journal and the settings) take turns, and a request
+ * holds up nobody else. The heavy requests (the journal and downloads) take turns, and a request
  * that finds one under way is refused as busy (503) at once, so the light ones (health, stamp,
- * shutdown) never wait behind them. It answers only requests addressed to it (by a robot-network,
- * link-local, or loopback address, or its own name), so a web page elsewhere can't reach it through
- * a name that resolves to it.
+ * probes, shutdown) never wait behind them. It answers only requests addressed to it (by a
+ * robot-network, link-local, or loopback address, or its own name), so a web page elsewhere can't
+ * reach it through a name that resolves to it.
  */
 final class AgentServer implements AutoCloseable {
   /** How many heavy requests are answered at once. */
@@ -60,12 +51,17 @@ final class AgentServer implements AutoCloseable {
           AgentApi.STAMP,
           AgentApi.HEALTH,
           AgentApi.JOURNAL,
+          AgentApi.PROBES,
           AgentApi.SETTINGS,
           AgentApi.SETTINGS_ZIP,
           AgentApi.SHUTDOWN);
 
-  private static final Set<String> HEAVY_PATHS =
-      Set.of(AgentApi.JOURNAL, AgentApi.SETTINGS, AgentApi.SETTINGS_ZIP);
+  /**
+   * API version 1's settings paths, each now a download PhotonVision's pack defines: kept so a
+   * robot program built before packs still finds its settings backup.
+   */
+  static final Map<String, String> ALIASES =
+      Map.of(AgentApi.SETTINGS, "settings.json", AgentApi.SETTINGS_ZIP, "settings.zip");
 
   private static final Map<String, Integer> PRIORITIES =
       Map.of(
@@ -126,6 +122,7 @@ final class AgentServer implements AutoCloseable {
   public void close() {
     server.stop(0);
     threads.shutdownNow();
+    agent.close();
   }
 
   private void handle(HttpExchange exchange) throws IOException {
@@ -138,7 +135,9 @@ final class AgentServer implements AutoCloseable {
         if (!addressedHere(exchange.getRequestHeaders().getFirst("Host"))) {
           throw new Refused(421, "this agent answers requests addressed to it only");
         }
-        if (!PATHS.contains(path)) {
+        String probe = under(path, AgentApi.PROBES);
+        String download = under(path, AgentApi.DOWNLOADS);
+        if (!PATHS.contains(path) && probe == null && download == null) {
           throw new Refused(404, "no such resource: " + path);
         }
         boolean shutdown = path.equals(AgentApi.SHUTDOWN);
@@ -146,10 +145,23 @@ final class AgentServer implements AutoCloseable {
           exchange.getResponseHeaders().set("Allow", shutdown ? "POST" : "GET");
           throw new Refused(405, path + " takes " + (shutdown ? "POST" : "GET") + " only");
         }
-        if (HEAVY_PATHS.contains(path)) {
-          heavy(exchange, path);
-        } else if (shutdown) {
+        String alias = ALIASES.get(path);
+        if (shutdown) {
           shutdown(exchange);
+        } else if (path.equals(AgentApi.JOURNAL)) {
+          heavy(exchange, () -> journal(exchange));
+        } else if (download != null || alias != null) {
+          String name = download != null ? download : java.util.Objects.requireNonNull(alias);
+          heavy(exchange, () -> download(exchange, name));
+        } else if (probe != null) {
+          probe(exchange, probe);
+        } else if (path.equals(AgentApi.PROBES)) {
+          json(
+              exchange,
+              200,
+              JsonValue.Obj.builder()
+                  .put("probes", JsonValue.array(agent.probes().results(), ProbeResult::toJson))
+                  .build());
         } else {
           json(
               exchange,
@@ -168,18 +180,96 @@ final class AgentServer implements AutoCloseable {
     }
   }
 
-  /** Answers a heavy request, if none is under way; refuses it as busy otherwise. */
-  private void heavy(HttpExchange exchange, String path) throws IOException, Refused {
-    if (!heavy.tryAcquire()) {
-      exchange.getResponseHeaders().set("Retry-After", "1");
-      throw new Refused(503, "busy with another journal or settings request; ask again shortly");
+  /**
+   * The name after a path's folder ({@code /v1/probes/<name>}), decoded; null when it isn't one.
+   */
+  private static @Nullable String under(String path, String folder) throws Refused {
+    if (!path.startsWith(folder + "/") || path.length() == folder.length() + 1) {
+      return null;
     }
     try {
-      switch (path) {
-        case AgentApi.JOURNAL -> journal(exchange);
-        case AgentApi.SETTINGS -> settings(exchange);
-        default -> settingsZip(exchange);
+      return URLDecoder.decode(
+          path.substring(folder.length() + 1).replace("+", "%2B"), StandardCharsets.UTF_8);
+    } catch (IllegalArgumentException e) {
+      throw new Refused(400, "the path isn't URL-encoded");
+    }
+  }
+
+  /**
+   * Runs one probe now, unless it ran within the last couple of seconds, and answers its result.
+   */
+  private void probe(HttpExchange exchange, String id) throws IOException, Refused {
+    try {
+      ProbeResult result =
+          agent
+              .probes()
+              .runNow(id)
+              .orElseThrow(() -> new Refused(404, "this computer has no probe named " + id));
+      json(exchange, 200, result.toJson());
+    } catch (Probes.Busy e) {
+      exchange.getResponseHeaders().set("Retry-After", "1");
+      throw new Refused(503, String.valueOf(e.getMessage()));
+    }
+  }
+
+  /**
+   * Makes a download its packs define, then sends it whole, with its length: made into a file
+   * first, so a download that fails or runs over its bound is an error, never a file cut short.
+   */
+  private void download(HttpExchange exchange, String name) throws IOException, Refused {
+    Download download =
+        agent
+            .probeSet()
+            .download(name)
+            .orElseThrow(
+                () -> new Refused(404, "this computer's packs serve no file named " + name));
+    Path file = Files.createTempFile("frc-coprocessor-download", ".part");
+    try {
+      Commands.Output made = agent.download(download, file);
+      if (made.timedOut() || made.truncated() || made.exit() != 0) {
+        agent.log(
+            "Download "
+                + name
+                + " failed: "
+                + (made.timedOut()
+                    ? "timed out"
+                    : made.truncated()
+                        ? "larger than " + download.maxBytes() + " bytes"
+                        : "exit " + made.exit()));
+        throw new Refused(500, "making " + name + " failed; the agent's journal says why");
       }
+      exchange.getResponseHeaders().set("Content-Type", download.contentType());
+      exchange
+          .getResponseHeaders()
+          .set("Content-Disposition", "attachment; filename=\"" + filename(name) + "\"");
+      exchange.sendResponseHeaders(200, Files.size(file));
+      try (OutputStream out = exchange.getResponseBody()) {
+        Files.copy(file, out);
+      }
+    } finally {
+      Files.deleteIfExists(file);
+    }
+  }
+
+  /** A download's file name: the computer's name before it, as a backup is named. */
+  private String filename(String name) throws IOException {
+    List<String> names = agent.names();
+    return names.isEmpty() ? name : names.get(0) + "-" + name;
+  }
+
+  /** Work a heavy request does, once it has its turn. */
+  private interface Heavy {
+    void answer() throws IOException, Refused;
+  }
+
+  /** Answers a heavy request, if none is under way; refuses it as busy otherwise. */
+  private void heavy(HttpExchange exchange, Heavy work) throws IOException, Refused {
+    if (!heavy.tryAcquire()) {
+      exchange.getResponseHeaders().set("Retry-After", "1");
+      throw new Refused(503, "busy with another journal or download request; ask again shortly");
+    }
+    try {
+      work.answer();
     } finally {
       heavy.release();
     }
@@ -211,8 +301,9 @@ final class AgentServer implements AutoCloseable {
     Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
     JournalSource.Position position = position(query);
     String unit = query.getOrDefault("unit", "");
-    if (!unit.isEmpty() && !AgentApi.JOURNAL_UNITS.contains(unit)) {
-      throw new Refused(400, "unit must be one of " + String.join(", ", AgentApi.JOURNAL_UNITS));
+    List<String> served = agent.journalUnits();
+    if (!unit.isEmpty() && !served.contains(unit)) {
+      throw new Refused(400, "unit must be one of " + String.join(", ", served));
     }
     int priority = -1;
     String level = query.getOrDefault("priority", "").toLowerCase(Locale.ROOT);
@@ -224,7 +315,7 @@ final class AgentServer implements AutoCloseable {
     if (query.containsKey("limit")) {
       limit = number(query.getOrDefault("limit", ""), 1, AgentApi.MAX_JOURNAL_PAGE, "limit");
     }
-    List<String> units = unit.isEmpty() ? AgentApi.JOURNAL_UNITS : List.of(unit);
+    List<String> units = unit.isEmpty() ? served : List.of(unit);
     json(exchange, 200, agent.journal(position, priority, units, limit).toJson());
   }
 
@@ -256,148 +347,15 @@ final class AgentServer implements AutoCloseable {
     return from.isEmpty() ? JournalSource.Position.LATEST : JournalSource.Position.BOOT;
   }
 
-  /**
-   * The settings as JSON, the same as {@code Settings.toJson()}, written a row at a time: the hash
-   * first (a pass over the rows), then each row, parsed one at a time.
-   */
-  private void settings(HttpExchange exchange) throws IOException, Refused {
-    Optional<Boolean> sent =
-        send(
-            text -> {
-              String hash = text.hash();
-              exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-              exchange.sendResponseHeaders(200, 0);
-              try (Writer out =
-                  new BufferedWriter(
-                      new OutputStreamWriter(exchange.getResponseBody(), StandardCharsets.UTF_8))) {
-                out.write("{\"hash\":" + Json.compact(JsonValue.of(hash)));
-                out.write(",\"userVersion\":" + text.userVersion() + ",\"rows\":[");
-                boolean first = true;
-                for (SettingsText.Row row : text.rows()) {
-                  SettingsRow parsed = row.parse();
-                  out.write(first ? "" : ",");
-                  first = false;
-                  Json.writeCompact(
-                      JsonValue.Obj.builder()
-                          .put("table", parsed.table())
-                          .put("key", parsed.key())
-                          .put("columns", parsed.columns())
-                          .build(),
-                      out);
-                }
-                out.write("]}");
-              }
-              return true;
-            });
-    if (sent.isEmpty()) {
-      throw new Refused(404, "PhotonVision has no settings database yet");
-    }
-  }
-
-  /**
-   * The settings as a zip laid out like the repository: {@code coprocessors/<computer>/settings/}
-   * and its files, so unzipping it at the repository's root puts them in place; and last, beside
-   * that folder, {@code settings.sha256}: every file's SHA-256, as {@code sha256sum} writes them,
-   * so a zip that was cut short shows it ({@code sha256sum -c} from the repository's root).
-   */
-  private void settingsZip(HttpExchange exchange) throws IOException, Refused {
-    String name = agent.stampFile().stamp().name();
-    String computer = name.isEmpty() ? "coprocessor" : name;
-    String folder = SettingsFiles.folder(computer);
-    Optional<Boolean> sent =
-        send(
-            text -> {
-              List<String> paths =
-                  text.rows().stream()
-                      .map(row -> SettingsFiles.path(row.table(), row.key()))
-                      .toList();
-              SettingsFiles.checkCase(paths);
-              exchange.getResponseHeaders().set("Content-Type", "application/zip");
-              exchange
-                  .getResponseHeaders()
-                  .set(
-                      "Content-Disposition",
-                      "attachment; filename=\"" + computer + "-settings.zip\"");
-              exchange.sendResponseHeaders(200, 0);
-              StringBuilder sums = new StringBuilder();
-              try (ZipOutputStream zip = new ZipOutputStream(exchange.getResponseBody())) {
-                String database = folder + "/" + SettingsFiles.DATABASE_FILE;
-                sums.append(
-                        entry(
-                            zip,
-                            database,
-                            out -> out.append(SettingsFiles.database(text.userVersion()))))
-                    .append("  ")
-                    .append(database)
-                    .append('\n');
-                for (int i = 0; i < paths.size(); i++) {
-                  SettingsRow row = text.rows().get(i).parse();
-                  String path = folder + "/" + paths.get(i);
-                  sums.append(entry(zip, path, out -> SettingsFiles.write(row, out)))
-                      .append("  ")
-                      .append(path)
-                      .append('\n');
-                }
-                entry(zip, folder + ".sha256", out -> out.append(sums));
-              }
-              return true;
-            });
-    if (sent.isEmpty()) {
-      throw new Refused(404, "PhotonVision has no settings database yet");
-    }
-  }
-
-  private interface Content {
-    void write(Appendable out) throws IOException;
-  }
-
-  /** Writes one zip entry as UTF-8 text; its SHA-256. */
-  private static String entry(ZipOutputStream zip, String path, Content content)
-      throws IOException {
-    MessageDigest sha256;
-    try {
-      sha256 = MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("every Java has SHA-256", e);
-    }
-    zip.putNextEntry(new ZipEntry(path));
-    // Not closing the zip when the entry's writer is done.
-    OutputStream entry =
-        new FilterOutputStream(zip) {
-          @Override
-          public void write(byte[] bytes, int offset, int length) throws IOException {
-            out.write(bytes, offset, length);
-          }
-
-          @Override
-          public void close() throws IOException {
-            flush();
-          }
-        };
-    Writer out =
-        new BufferedWriter(
-            new OutputStreamWriter(new DigestOutputStream(entry, sha256), StandardCharsets.UTF_8));
-    content.write(out);
-    out.close();
-    zip.closeEntry();
-    return HexFormat.of().formatHex(sha256.digest());
-  }
-
-  private <T> Optional<T> send(SettingsSource.Sending<T> sending) throws IOException, Refused {
-    try {
-      return agent.sendSettings(sending);
-    } catch (SettingsSource.Busy e) {
-      throw new Refused(503, "busy sending the settings; ask again shortly");
-    }
-  }
-
   private void shutdown(HttpExchange exchange) throws IOException, Refused {
     String from = exchange.getRemoteAddress().getAddress().getHostAddress();
     Optional<String> controller = agent.controller();
     if (controller.isEmpty()) {
-      refusals.log("Refused a shutdown from " + from + ": this computer has no stamp");
+      refusals.log("Refused a shutdown from " + from + ": no controller is configured");
       throw new Refused(
-          403, "this computer has no stamp, so no robot controller to take a shutdown from");
+          403,
+          "no controller is configured, and this computer has no stamp to find the robot"
+              + " controller by, so a shutdown is taken from nobody");
     }
     if (!from.equals(controller.get())) {
       refusals.log("Refused a shutdown from " + from + ": not the robot controller");

@@ -5,19 +5,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.michaelgrundvig.frc.spotter.api.Cpu;
 import com.michaelgrundvig.frc.spotter.api.CpuCluster;
 import com.michaelgrundvig.frc.spotter.api.Drive;
-import com.michaelgrundvig.frc.spotter.api.ExpectedCamera;
 import com.michaelgrundvig.frc.spotter.api.Health;
+import com.michaelgrundvig.frc.spotter.api.Memory;
+import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.ThermalZone;
 import com.michaelgrundvig.frc.spotter.api.TripPoint;
-import com.michaelgrundvig.frc.spotter.api.UsbCamera;
 import com.michaelgrundvig.frc.spotter.json.Json;
-import com.michaelgrundvig.frc.spotter.settings.PhotonVisionDatabase;
-import com.michaelgrundvig.frc.spotter.settings.SettingsDatabase;
+import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -25,7 +22,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** The agent's health of an RK3588 coprocessor, read from a fixture tree. */
+/**
+ * The agent's health of an RK3588 coprocessor, read from a fixture tree: the computer's own, which
+ * knows nothing of the software it runs, and the built-in pack's probes on it.
+ */
 class AgentTest {
   @TempDir Path dir;
   Fixture fixture;
@@ -40,13 +40,15 @@ class AgentTest {
   }
 
   @Test
-  void healthReadsEverythingAndIsAboutTwoKilobytes() throws SQLException {
-    Health health = fixture.agent().health();
+  void healthReadsTheComputerAndIsAFewKilobytes() {
+    Agent agent = fixture.agent();
+    Health health = agent.health();
 
     assertThat(health.problems()).isEmpty();
     assertThat(health.stamp().name()).isEqualTo("vision-front");
     assertThat(health.stamp().bootId()).isEqualTo("3c1e6a2e-6f6c-4a1d-9a53-8c1f0c7b8e21");
     assertThat(health.stamp().mac()).isEqualTo("c0:74:2b:fe:12:34");
+    assertThat(health.stamp().probesHash()).isEqualTo(agent.probeSet().hash());
 
     assertThat(health.boot().uptimeSeconds()).isEqualTo(1234.56);
     assertThat(health.boot().monotonicMicros()).isEqualTo(1_234_560_000L);
@@ -77,25 +79,9 @@ class AgentTest {
             new TripPoint("critical", 115));
     assertThat(health.hottest().orElseThrow().type()).isEqualTo("bigcore0-thermal");
 
-    assertThat(health.photonvision().running()).isTrue();
-    assertThat(health.photonvision().restarts()).isEqualTo(1);
-    assertThat(health.photonvision().activeSinceMicros()).isEqualTo(9_000_000);
-
-    assertThat(health.cameras().present()).hasSize(2);
-    assertThat(health.cameras().present().get(1).speedMbps()).isEqualTo(5000);
-    assertThat(health.cameras().present().get(1).port()).isEqualTo("7-1");
-    assertThat(health.cameras().present().get(0).speedMbps()).isEqualTo(480);
-    // front-left is where its settings expect it; front-right's settings name another port.
-    assertThat(health.cameras().expected())
-        .containsExactly(
-            new ExpectedCamera(
-                "front-left",
-                "/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0",
-                true),
-            new ExpectedCamera(
-                "front-right",
-                "/dev/v4l/by-path/platform-xhci-hcd.1.auto-usb-0:1:1.0-video-index0",
-                false));
+    assertThat(health.memory()).isEqualTo(new Memory(7927, 5101));
+    // The fixture's root is a folder on this computer; it has no /data.
+    assertThat(health.disks()).extracting(d -> d.mount()).containsExactly("/");
 
     assertThat(health.journal().counts())
         .containsEntry("usb", 1)
@@ -106,24 +92,64 @@ class AgentTest {
         .containsEntry("error", 1);
     assertThat(health.journal().latest()).hasSize(3);
     assertThat(health.journal().latest().get(2).message()).isEqualTo("Error é");
-    assertThat(health.journal().latest().get(2).bootId()).isEmpty();
 
     Drive drive = Objects.requireNonNull(health.drive());
     assertThat(drive.device()).isEqualTo("/dev/nvme0 (Samsung SSD 980 250GB)");
     assertThat(drive.celsius()).isEqualTo(40.9);
-    assertThat(drive.percentUsed()).isEqualTo(1);
     assertThat(drive.unsafeShutdowns()).isEqualTo(23);
 
-    String liveHash;
-    try (Connection connection = PhotonVisionDatabase.open(fixture.host.path(Fixture.DATABASE))) {
-      liveHash = SettingsDatabase.read(connection).hash();
-    }
-    assertThat(health.settings().liveHash()).isEqualTo(liveHash);
-    assertThat(health.settings().stampedHash()).isEmpty();
-    assertThat(health.settings().matches()).isFalse();
+    // Nothing of PhotonVision's: API version 1's members are empty.
+    assertThat(health.photonvision().activeState()).isEmpty();
+    assertThat(health.cameras().expected()).isEmpty();
+    assertThat(health.settings().liveHash()).isEmpty();
+
+    // The built-in pack's probes, not yet run.
+    assertThat(health.probes())
+        .extracting(ProbeResult::id)
+        .containsExactly(
+            "camera.front-left",
+            "camera.front-right",
+            "builtin.thermal-margin",
+            "builtin.cpu-capped",
+            "builtin.memory",
+            "builtin.data-free",
+            "builtin.root-read-only");
+    assertThat(health.probes()).allMatch(probe -> probe.status().equals(ProbeResult.PENDING));
 
     assertThat(Json.compact(health.toJson()).getBytes(StandardCharsets.UTF_8).length)
-        .isBetween(2000, 4000);
+        .isBetween(2500, 5000);
+  }
+
+  @Test
+  void theBuiltInPackHoldsTheComputersMeasurementsAndCamerasToTheirLimits() {
+    Agent agent = fixture.agent();
+    agent.probes().runAll();
+    fixture.micros.addAndGet(1_000_000);
+    Health health = agent.health();
+    assertThat(result(health, "camera.front-left"))
+        .isEqualTo(pass("7-1 5000 Mb/s Arducam OV9281 USB Camera"));
+    assertThat(result(health, "camera.front-right"))
+        .isEqualTo(pass("3-1 480 Mb/s Arducam OV9281 USB Camera"));
+    assertThat(result(health, "builtin.thermal-margin")).isEqualTo(pass("12.2"));
+    // Its big cores are held to 2016 of 2400 MHz.
+    ProbeResult capped = result(health, "builtin.cpu-capped");
+    assertThat(capped.status()).isEqualTo(ProbeResult.FAIL);
+    assertThat(capped.detail()).isEqualTo("cpu.capped is 1, above 0");
+    assertThat(result(health, "builtin.memory")).isEqualTo(pass("64.3"));
+    ProbeResult data = result(health, "builtin.data-free");
+    assertThat(data.status()).isEqualTo(ProbeResult.ERROR);
+    assertThat(data.detail()).isEqualTo("disk.data.free.percent isn't measured on this computer");
+    assertThat(result(health, "builtin.root-read-only")).isEqualTo(pass("1"));
+  }
+
+  /** A result's status, value, and detail: when it ran and how long it took left out. */
+  private static ProbeResult result(Health health, String id) {
+    ProbeResult result = health.probe(id).orElseThrow();
+    return new ProbeResult("", "", result.status(), result.value(), result.detail(), 0, 0);
+  }
+
+  private static ProbeResult pass(String value) {
+    return new ProbeResult("", "", ProbeResult.PASS, value, "", 0, 0);
   }
 
   @Test
@@ -158,26 +184,26 @@ class AgentTest {
   @Test
   void whatCantBeReadIsUnknownAndSaysWhy() throws IOException {
     fixture.commands.answer(
-        List.of("systemctl", "show"), new Commands.Output(-1, List.of(), false, true));
-    fixture.commands.answer(
         List.of("journalctl", "-b", "-o"), new Commands.Output(1, List.of(), false, false));
     fixture.commands.answer(
         List.of("journalctl", "-b", "-1"), new Commands.Output(1, List.of(), false, false));
     fixture.delete("/run/coprocessor/nvme-smart-log.json");
     fixture.delete("/etc/coprocessor/stamp.json");
+    fixture.delete(MemorySource.MEMINFO);
     fixture.write("/run/coprocessor/nvme-smart-log.json", "{broken");
-    fixture.delete(Fixture.DATABASE);
 
     Agent agent = fixture.agent();
     Health health = agent.health();
     assertThat(health.problems())
         .containsExactly(
-            "photonvision: systemctl show photonvision.service timed out",
+            "memory: /proc/meminfo isn't there",
             "journal: journalctl failed",
             "drive: line 1, column 2: expected a member's name in quotes");
     assertThat(health.boot().lastShutdownClean()).isNull();
-    assertThat(health.stamp().name()).isEmpty();
-    assertThat(health.settings().liveHash()).isEmpty();
+    // Without its stamp, it's named from its configuration.
+    assertThat(health.stamp().name()).isEqualTo("vision-front");
+    assertThat(health.stamp().team()).isZero();
+    assertThat(health.memory()).isEqualTo(Memory.UNKNOWN);
     assertThat(health.drive()).isNull();
     assertThat(fixture.log).hasSize(3);
 
@@ -188,20 +214,44 @@ class AgentTest {
   }
 
   @Test
-  void aComputerWithoutCamerasOrADriveHasNone() throws IOException {
-    fixture.delete("/run/coprocessor/nvme-smart-log.json");
-    fixture.write("/run/coprocessor/nvme-id-ctrl.json", "");
-    for (String name : fixture.host.list(CameraSource.BY_PATH)) {
-      fixture.delete(CameraSource.BY_PATH + "/" + name);
-    }
-    Health health = fixture.agent().health();
-    assertThat(health.drive()).isNull();
-    assertThat(health.cameras().present()).isEmpty();
-    assertThat(health.cameras().missing()).hasSize(2);
+  void aConfigurationOrPackThatCantBeReadIsAProblemAndTheAgentRunsOn() throws IOException {
+    fixture.write(AgentConfig.PATH, "{\"name\": \"Not A Hostname\"}");
+    Health broken = fixture.agent().health();
+    assertThat(broken.problems())
+        .singleElement()
+        .asString()
+        .startsWith("configuration: /etc/frc-coprocessor/agent.json: name \"Not A Hostname\"");
+    // It runs the built-in pack, with no cameras it knows of.
+    assertThat(broken.probes()).extracting(ProbeResult::id).doesNotContain("camera.front-left");
+
+    fixture.config(
+        new AgentConfig("vision-front", "", 5808, List.of("missing"), List.of(), List.of()));
+    assertThat(fixture.agent().health().problems())
+        .containsExactly(
+            "pack missing: not installed (no /usr/lib/frc-coprocessor/packs/missing/pack.json)");
+
+    // Configured on /data when the root is read-only.
+    fixture.delete(AgentConfig.PATH);
+    fixture.write(
+        AgentConfig.DATA_PATH,
+        new AgentConfig("vision-back", "10.12.34.2", 5809, List.of(), List.of(), List.of()).text());
+    Configuration configuration = Configuration.read(fixture.host);
+    assertThat(configuration.source()).isEqualTo(AgentConfig.DATA_PATH);
+    assertThat(configuration.config().port()).isEqualTo(5809);
   }
 
   @Test
-  void aCameraWhoseDeviceCantBeFollowedIsStillPresent() throws IOException {
+  void aCameraThatIsntPluggedInFailsAtItsPort() throws IOException {
+    fixture.delete("/dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0");
+    Agent agent = fixture.agent();
+    agent.probes().runAll();
+    ProbeResult right = agent.health().probe("camera.front-right").orElseThrow();
+    assertThat(right.status()).isEqualTo(ProbeResult.FAIL);
+    assertThat(right.detail()).isEqualTo("nothing at " + Fixture.FRONT_RIGHT);
+  }
+
+  @Test
+  void aDeviceThatCantBeFollowedIsStillPresent() throws IOException {
     Host host =
         fixture.host(
             fixture.root,
@@ -211,17 +261,16 @@ class AgentTest {
               }
               return Fixture.LINKS.getOrDefault(path, path);
             });
-    List<UsbCamera> present = new CameraSource(host).present();
-    assertThat(present).hasSize(2);
-    assertThat(present.get(1))
-        .isEqualTo(
-            new UsbCamera(
-                "/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0",
-                "",
-                0,
-                "",
-                "",
-                ""));
+    assertThat(new UsbDevices(host).at(Fixture.FRONT_LEFT))
+        .contains(new UsbDevices.Found("", 0, "", "", ""));
+    Host gone =
+        fixture.host(
+            fixture.root,
+            path -> {
+              throw new IOException("unplugged as it was read");
+            });
+    assertThat(new UsbDevices(gone).at(Fixture.FRONT_LEFT))
+        .contains(new UsbDevices.Found("", 0, "", "", ""));
   }
 
   @Test
@@ -249,5 +298,15 @@ class AgentTest {
     fixture.write("/sys/class/net/end0/operstate", "down\n");
     fixture.write("/sys/class/net/wlan0/address", "AA:BB:CC:DD:EE:FF\n");
     assertThat(new StampSource(fixture.host).mac()).isEqualTo("c0:74:2b:fe:12:34");
+  }
+
+  @Test
+  void memoryThatSaysNothingUsableIsAProblem() throws IOException {
+    fixture.write(MemorySource.MEMINFO, "MemTotal: 100 kB\n");
+    assertThat(fixture.agent().health().problems())
+        .contains("memory: /proc/meminfo has no MemTotal or MemAvailable");
+    fixture.write(MemorySource.MEMINFO, "MemTotal: x kB\nMemAvailable: 1 kB\n");
+    assertThat(fixture.agent().health().problems())
+        .contains("memory: /proc/meminfo: not a number of kB: x");
   }
 }

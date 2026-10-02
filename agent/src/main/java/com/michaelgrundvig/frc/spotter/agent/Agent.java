@@ -4,16 +4,22 @@ import com.michaelgrundvig.frc.spotter.api.AgentApi;
 import com.michaelgrundvig.frc.spotter.api.Boot;
 import com.michaelgrundvig.frc.spotter.api.Cameras;
 import com.michaelgrundvig.frc.spotter.api.Cpu;
+import com.michaelgrundvig.frc.spotter.api.Disk;
 import com.michaelgrundvig.frc.spotter.api.Drive;
 import com.michaelgrundvig.frc.spotter.api.Health;
 import com.michaelgrundvig.frc.spotter.api.JournalPage;
 import com.michaelgrundvig.frc.spotter.api.JournalSummary;
+import com.michaelgrundvig.frc.spotter.api.Memory;
+import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.Service;
 import com.michaelgrundvig.frc.spotter.api.SettingsState;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.api.ThermalZone;
+import com.michaelgrundvig.frc.spotter.probes.Download;
+import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
 import com.michaelgrundvig.frc.spotter.table.Table;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,33 +28,38 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.IntFunction;
 import org.jspecify.annotations.Nullable;
 
 /**
- * What the agent knows, assembled from its sources: the answers to the API's requests. A source
- * that fails costs only its part, which reads as unknown, with the failure in the health's
- * problems; nothing one source does stops the others.
+ * What the agent knows, assembled from its sources: the answers to the API's requests. It knows the
+ * computer (load, heat, memory, disks, the journal, the drive, what booted) and nothing of the
+ * software on it: that's its packs' probes (coprocessor/README.md, "Packs"). A source that fails
+ * costs only its part, which reads as unknown, with the failure in the health's problems; nothing
+ * one source does stops the others.
  */
-final class Agent {
+final class Agent implements AutoCloseable {
   /** Health asked for again within this long is answered from the last reading. */
   static final long HEALTH_MICROS = 500_000;
 
   /** The most problems a health answer carries. */
   static final int MAX_PROBLEMS = 10;
 
+  /** API version 1's service, which no agent fills since probes: PhotonVision's pack has it. */
+  static final Service NO_SERVICE = new Service("", "", "", "", 0, 0);
+
   private final Host host;
+  private final Configuration configuration;
   private final StampSource stamp;
   private final BootSource boot;
   private final CpuSource cpu;
   private final ThermalSource thermal;
-  private final ServiceSource service;
-  private final CameraSource cameras;
+  private final MemorySource memory;
+  private final DiskSource disks;
   private final JournalSource journal;
   private final DriveSource drive;
-  private final SettingsSource settings;
+  private final Probes probes;
   private final Shutdown shutdown;
-  private final IntFunction<String> controller;
+  private final @Nullable String controllerOverride;
   private final Executor background;
   private final Object first = new Object();
   private final AtomicBoolean refreshing = new AtomicBoolean();
@@ -61,38 +72,75 @@ final class Agent {
    * An agent reporting on a host.
    *
    * @param host the computer
-   * @param database PhotonVision's settings database, as a path on the computer
-   * @param unit PhotonVision's systemd unit
-   * @param timeout how long any one command may take
+   * @param configuration its configuration, and the probes compiled from it
+   * @param timeout how long any one of the agent's own commands may take
    * @param executor where work that outlasts a request runs: reading health afresh, and the
    *     shutdown once its request is answered
-   * @param controller the robot controller's address, from the team number: 10.TE.AM.2
+   * @param controllerOverride the one address a shutdown is taken from, given on the command line;
+   *     null to take the configuration's (or the robot controller's, 10.TE.AM.2, from the stamp)
    */
   Agent(
       Host host,
-      String database,
-      String unit,
+      Configuration configuration,
       Duration timeout,
       Executor executor,
-      IntFunction<String> controller) {
+      @Nullable String controllerOverride) {
     this.host = host;
-    this.controller = controller;
+    this.configuration = configuration;
+    this.controllerOverride = controllerOverride;
     this.stamp = new StampSource(host);
     this.journal = new JournalSource(host, timeout);
     this.boot = new BootSource(host, stamp, journal);
     this.cpu = new CpuSource(host);
     this.thermal = new ThermalSource(host);
-    this.service = new ServiceSource(host, unit, timeout);
-    this.cameras = new CameraSource(host);
+    this.memory = new MemorySource(host);
+    this.disks = new DiskSource(host);
     this.drive = new DriveSource(host);
-    this.settings = new SettingsSource(host, database, host.limits());
-    this.shutdown = new Shutdown(host, unit, executor);
+    this.probes =
+        new Probes(
+            host, configuration.probes(), new ProbeRunner(host, () -> Measurements.of(health())));
+    this.shutdown = new Shutdown(host, configuration.probes().beforeShutdown(), executor);
     this.background = executor;
   }
 
-  /** The stamp, with this boot and the MAC address. */
+  /** Starts running the probes on their schedules. */
+  void start() {
+    probes.start();
+  }
+
+  /** The probes compiled for this computer. */
+  ProbeSet probeSet() {
+    return configuration.probes();
+  }
+
+  /** The probes, for the server and tests. */
+  Probes probes() {
+    return probes;
+  }
+
+  /**
+   * The stamp, with this boot, the MAC address, and the hash of the probes it runs. Without a stamp
+   * file (an agent installed outside the image), it's named from its configuration.
+   */
   Stamp stamp() throws IOException {
-    return stamp.stamp();
+    Stamp file = stamp.file().stamp();
+    if (file.name().isEmpty() && !configuration.config().name().isEmpty()) {
+      file =
+          new Stamp(
+              configuration.config().name(),
+              0,
+              "",
+              "",
+              configuration.config().cameraNames(),
+              "",
+              "",
+              "",
+              "",
+              "",
+              "");
+    }
+    return file.withRuntime(stamp.bootId(), stamp.mac())
+        .withProbesHash(configuration.probes().hash());
   }
 
   /** The stamp file as the image wrote it, with the port it says to serve on. */
@@ -100,11 +148,16 @@ final class Agent {
     return stamp.file();
   }
 
+  /** The configuration this agent read, and where from. */
+  Configuration configuration() {
+    return configuration;
+  }
+
   /**
    * The computer's health, at once. Asked again within half a second, the same answer; older than
    * that, the last answer still, while a reading afresh starts in the background (which can take
-   * seconds, if a command is slow or the settings changed), so no request waits for a reading. Only
-   * the very first request waits, for the first reading.
+   * seconds, if a command is slow), so no request waits for a reading. Only the very first request
+   * waits, for the first reading.
    */
   Health health() {
     Health last = lastHealth;
@@ -138,7 +191,7 @@ final class Agent {
   private Health read() {
     long now = host.monotonicMicros();
     List<String> problems = new ArrayList<>();
-    Stamp stamped = part("stamp", stamp::stamp, Stamp.NONE, problems);
+    Stamp stamped = part("stamp", this::stamp, Stamp.NONE, problems);
     Boot booted =
         part(
             "boot",
@@ -147,46 +200,67 @@ final class Agent {
             problems);
     Cpu load = part("cpu", cpu::read, Cpu.UNKNOWN, problems);
     List<ThermalZone> zones = part("thermal", thermal::read, List.of(), problems);
-    Service photonvision =
-        part("photonvision", service::read, new Service("", "", "", "", 0, 0), problems);
-    Optional<SettingsSource.Summary> live =
-        part("settings", settings::summary, Optional.empty(), problems);
-    Map<String, String> usbPaths = live.map(SettingsSource.Summary::usbPaths).orElse(Map.of());
-    Cameras plugged =
-        part("cameras", () -> cameras.read(stamped.cameras(), usbPaths), Cameras.UNKNOWN, problems);
+    Memory memoryNow = part("memory", memory::read, Memory.UNKNOWN, problems);
+    List<Disk> space = part("disks", disks::read, List.of(), problems);
     JournalSummary trouble =
         part("journal", () -> journal.summary(stamped.bootId()), JournalSummary.EMPTY, problems);
     Optional<Drive> nvme = part("drive", drive::read, Optional.empty(), problems);
+    problems.addAll(configuration.problems());
     if (shutdown.requested()) {
       problems.add(0, "shutting down: asked for by the robot");
     } else if (!shutdown.failure().isEmpty()) {
       problems.add(0, "shutdown failed: " + shutdown.failure() + "; ask again to retry");
     }
+    List<ProbeResult> results = probes.results();
     Health health =
         new Health(
             stamped,
             booted,
             load,
             zones,
-            photonvision,
-            plugged,
+            NO_SERVICE,
+            Cameras.UNKNOWN,
             trouble,
             nvme.orElse(null),
-            new SettingsState(
-                stamped.settingsHash(), live.map(SettingsSource.Summary::hash).orElse("")),
+            new SettingsState(stamped.settingsHash(), ""),
             problems.subList(0, Math.min(problems.size(), MAX_PROBLEMS)),
-            com.michaelgrundvig.frc.spotter.api.Memory.UNKNOWN,
-            List.of(),
-            List.of());
+            memoryNow,
+            space,
+            results);
     lastHealthMicros = now;
     lastHealth = health;
     return health;
+  }
+
+  /** The units whose journal it serves: the kernel's and its own, and its packs'. */
+  List<String> journalUnits() {
+    List<String> units = new ArrayList<>(AgentApi.JOURNAL_UNITS);
+    for (String unit : configuration.probes().journalUnits()) {
+      if (!units.contains(unit)) {
+        units.add(unit);
+      }
+    }
+    return units;
   }
 
   /** A page of the journal, of some of the units it's served for. */
   JournalPage journal(JournalSource.Position position, int priority, List<String> units, int limit)
       throws IOException {
     return journal.page(position, priority, units, limit);
+  }
+
+  /**
+   * Makes a download its packs define into {@code file}: what it printed, or why it failed.
+   *
+   * @throws IOException when its program couldn't be started, or the file written
+   */
+  Commands.Output download(Download download, Path file) throws IOException {
+    return host.commands()
+        .toFile(
+            download.argv(),
+            Duration.ofMillis(Math.round(download.timeoutSeconds() * 1000)),
+            download.maxBytes(),
+            file);
   }
 
   /** Writes a line to the agent's log. */
@@ -200,38 +274,38 @@ final class Agent {
   }
 
   /**
-   * Reads PhotonVision's live settings and sends them; empty when it has no database yet.
-   *
-   * @throws SettingsSource.Busy when another send is under way
-   */
-  <T> Optional<T> sendSettings(SettingsSource.Sending<T> sending)
-      throws IOException, SettingsSource.Busy {
-    return settings.send(sending);
-  }
-
-  /**
-   * Asks for a shutdown on behalf of {@code from}: whether this request started it. Only the robot
-   * controller, 10.TE.AM.2, may ask; the caller checks with {@link #controller}.
+   * Asks for a shutdown on behalf of {@code from}: whether this request started it. Only the
+   * controller may ask; the caller checks with {@link #controller}.
    */
   boolean shutdown(String from) {
     return shutdown.request(from);
   }
 
   /**
-   * The robot controller's address on this computer's team's network, 10.TE.AM.2; empty when the
-   * computer has no stamp (no name or team), so no robot to take a shutdown from.
+   * The one address a shutdown is taken from: the command line's, else the configuration's, else
+   * the robot controller's on the stamp's team (10.TE.AM.2). Empty when there's none: no
+   * configuration naming one, and no stamp (no name or team), so no robot to take one from.
    */
   Optional<String> controller() throws IOException {
+    if (controllerOverride != null) {
+      return Optional.of(controllerOverride);
+    }
+    if (!configuration.config().controller().isEmpty()) {
+      return Optional.of(configuration.config().controller());
+    }
     Stamp stamped = stamp.file().stamp();
     if (stamped.name().isEmpty() || stamped.team() <= 0) {
       return Optional.empty();
     }
-    return Optional.of(controller.apply(stamped.team()));
+    return Optional.of(controllerOf(stamped.team()));
   }
 
   /** The names this computer answers to: its name, and its name in .local. */
   List<String> names() throws IOException {
     String name = stamp.file().stamp().name();
+    if (name.isEmpty()) {
+      name = configuration.config().name();
+    }
     return name.isEmpty() ? List.of() : List.of(name, name + ".local");
   }
 
@@ -247,15 +321,26 @@ final class Agent {
   private <T> T part(String name, Reading<T> reading, T unknown, List<String> problems) {
     try {
       T read = reading.read();
-      logged.remove(name);
+      synchronized (logged) {
+        logged.remove(name);
+      }
       return read;
     } catch (IOException | RuntimeException e) {
       String problem = name + ": " + e.getMessage();
       problems.add(problem);
-      if (!problem.equals(logged.put(name, problem))) {
+      boolean fresh;
+      synchronized (logged) {
+        fresh = !problem.equals(logged.put(name, problem));
+      }
+      if (fresh) {
         host.log("Couldn't read " + name + ": " + e);
       }
       return unknown;
     }
+  }
+
+  @Override
+  public void close() {
+    probes.close();
   }
 }

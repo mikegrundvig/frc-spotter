@@ -5,14 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
 import com.michaelgrundvig.frc.spotter.api.Health;
 import com.michaelgrundvig.frc.spotter.api.JournalPage;
+import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.ShutdownAnswer;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.json.Json;
-import com.michaelgrundvig.frc.spotter.settings.PhotonVisionDatabase;
-import com.michaelgrundvig.frc.spotter.settings.Settings;
-import com.michaelgrundvig.frc.spotter.settings.SettingsDatabase;
-import com.michaelgrundvig.frc.spotter.settings.SettingsFiles;
-import java.io.ByteArrayInputStream;
+import com.michaelgrundvig.frc.spotter.table.AgentConfig;
+import com.michaelgrundvig.frc.spotter.table.Pack;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -23,22 +21,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,13 +39,59 @@ class AgentServerTest {
   AgentServer server;
   final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
+  /** A pack for some vision software: its unit, its journal, a stop before power-off, backups. */
+  static final String VISION =
+      """
+      pack: vision
+      journalUnits: [vision.service]
+      probes:
+        - id: vision.unit
+          kind: unit
+          unit: vision.service
+          every: 2
+        - id: vision.front left
+          kind: usb
+          path: /dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0
+      beforeShutdown:
+        - name: vision.stop
+          argv: [systemctl, stop, vision.service]
+          timeout: 120
+      downloads:
+        - name: settings.json
+          argv: ['{pack}/bin/backup', json]
+          contentType: application/json; charset=utf-8
+          maxBytes: 64
+          timeout: 5
+        - name: settings.zip
+          argv: ['{pack}/bin/backup', zip, '{computer}']
+          contentType: application/zip
+          maxBytes: 64
+          timeout: 5
+      """;
+
+  static final String BACKUP = "/usr/lib/frc-coprocessor/packs/vision/bin/backup";
+
   @BeforeEach
   void anAgent() throws IOException {
     fixture = new Fixture(dir);
     fixture.commands.answer(List.of("journalctl"), Fixture.lines("journal-this-boot.json"));
     fixture.commands.answer(List.of("systemctl", "stop"), List.of());
     fixture.commands.answer(List.of("systemctl", "poweroff"), List.of());
+    fixture.commands.answer(List.of(BACKUP, "json"), List.of("{\"hash\":\"abc\"}"));
+    fixture.commands.answer(List.of(BACKUP, "zip", "vision-front"), List.of("PK"));
+    fixture.pack(Pack.parseYaml(VISION, "vision"));
+    fixture.config(withPacks(List.of("vision")));
     serve(fixture.agent());
+  }
+
+  static AgentConfig withPacks(List<String> packs) {
+    return new AgentConfig(
+        Fixture.CONFIG.name(),
+        Fixture.CONFIG.controller(),
+        Fixture.CONFIG.port(),
+        packs,
+        Fixture.CONFIG.cameras(),
+        List.of());
   }
 
   private void serve(Agent agent) throws IOException {
@@ -117,14 +151,13 @@ class AgentServerTest {
 
   @Test
   void theJournalIsPagedAndItsQueryChecked() throws Exception {
-    HttpResponse<byte[]> page =
-        get(AgentApi.JOURNAL + "?priority=err&unit=photonvision.service&limit=2");
+    HttpResponse<byte[]> page = get(AgentApi.JOURNAL + "?priority=err&unit=vision.service&limit=2");
     assertThat(page.statusCode()).isEqualTo(200);
     JournalPage read = JournalPage.parse(text(page));
     assertThat(read.entries()).hasSize(2);
     assertThat(read.more()).isTrue();
     assertThat(fixture.commands.ran().get(fixture.commands.ran().size() - 1))
-        .contains("--priority=3", "_SYSTEMD_UNIT=photonvision.service", "--lines=2");
+        .contains("--priority=3", "_SYSTEMD_UNIT=vision.service", "--lines=2");
 
     assertThat(get(AgentApi.JOURNAL + "?cursor=" + "s%3Da1%3Bi%3D101&priority=4").statusCode())
         .isEqualTo(200);
@@ -160,41 +193,74 @@ class AgentServerTest {
   }
 
   @Test
-  void theSettingsAreTheDatabasesRowsAndTheirHash() throws Exception {
-    Settings settings;
-    try (Connection connection = PhotonVisionDatabase.open(fixture.host.path(Fixture.DATABASE))) {
-      settings = SettingsDatabase.read(connection);
-    } catch (SQLException e) {
-      throw new IOException(e);
-    }
-    HttpResponse<byte[]> json = get(AgentApi.SETTINGS);
+  void aPacksDownloadsAreServedWholeAndVersionOnesSettingsPathsAreTheirAliases() throws Exception {
+    HttpResponse<byte[]> json = get(AgentApi.DOWNLOADS + "/settings.json");
     assertThat(json.statusCode()).isEqualTo(200);
-    assertThat(text(json)).isEqualTo(Json.compact(settings.toJson()));
-    assertThat(Settings.parse(text(json))).isEqualTo(settings);
+    assertThat(text(json)).isEqualTo("{\"hash\":\"abc\"}\n");
+    assertThat(json.headers().firstValue("Content-Type"))
+        .contains("application/json; charset=utf-8");
+    assertThat(text(get(AgentApi.SETTINGS))).isEqualTo(text(json));
 
     HttpResponse<byte[]> zip = get(AgentApi.SETTINGS_ZIP);
     assertThat(zip.statusCode()).isEqualTo(200);
+    assertThat(zip.headers().firstValue("Content-Type")).contains("application/zip");
     assertThat(zip.headers().firstValue("Content-Disposition"))
         .contains("attachment; filename=\"vision-front-settings.zip\"");
-    Map<String, String> files = new TreeMap<>();
-    try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(zip.body()))) {
-      ZipEntry entry;
-      while ((entry = in.getNextEntry()) != null) {
-        files.put(entry.getName(), new String(in.readAllBytes(), StandardCharsets.UTF_8));
-      }
-    }
-    Map<String, String> expected = new TreeMap<>();
-    SettingsFiles.render(settings)
-        .forEach((path, text) -> expected.put("coprocessors/vision-front/settings/" + path, text));
-    assertThat(files.remove("coprocessors/vision-front/settings.sha256")).isNotNull();
-    assertThat(files).isEqualTo(expected);
+    assertThat(text(zip)).isEqualTo("PK\n");
+
+    assertThat(get(AgentApi.DOWNLOADS + "/nothing").statusCode()).isEqualTo(404);
+    assertThat(get(AgentApi.DOWNLOADS + "/").statusCode()).isEqualTo(404);
   }
 
   @Test
-  void withoutADatabaseThereAreNoSettings() throws Exception {
-    fixture.delete(Fixture.DATABASE);
-    assertThat(get(AgentApi.SETTINGS).statusCode()).isEqualTo(404);
+  void aDownloadThatFailsOrRunsOverIsAnErrorNeverAFileCutShort() throws Exception {
+    fixture.commands.answer(
+        List.of(BACKUP, "json"), new Commands.Output(2, List.of("{"), false, false));
+    assertThat(get(AgentApi.SETTINGS).statusCode()).isEqualTo(500);
+    fixture.commands.answer(List.of(BACKUP, "json"), List.of("x".repeat(100)));
+    HttpResponse<byte[]> over = get(AgentApi.SETTINGS);
+    assertThat(over.statusCode()).isEqualTo(500);
+    assertThat(text(over)).contains("making settings.json failed");
+    assertThat(fixture.log())
+        .contains(
+            "Download settings.json failed: exit 2",
+            "Download settings.json failed: larger than 64 bytes");
+    // Without a pack that defines them, version one's paths have nothing behind them.
+    fixture.config(withPacks(List.of()));
+    serve(fixture.agent());
     assertThat(get(AgentApi.SETTINGS_ZIP).statusCode()).isEqualTo(404);
+  }
+
+  @Test
+  void probesAreListedAndRunWhenAskedAtMostOnceInTwoSeconds() throws Exception {
+    HttpResponse<byte[]> listed = get(AgentApi.PROBES);
+    assertThat(listed.statusCode()).isEqualTo(200);
+    List<ProbeResult> all =
+        Json.parse(text(listed)).asObject("probes").list("probes", ProbeResult::fromJson);
+    assertThat(all).extracting(ProbeResult::id).contains("camera.front-left", "vision.unit");
+    assertThat(all).allMatch(result -> result.status().equals(ProbeResult.PENDING));
+
+    HttpResponse<byte[]> ran = get(AgentApi.PROBES + "/vision.unit");
+    assertThat(ran.statusCode()).isEqualTo(200);
+    ProbeResult unit = ProbeResult.fromJson(Json.parse(text(ran)));
+    assertThat(unit.status()).isEqualTo(ProbeResult.PASS);
+    assertThat(unit.value()).isEqualTo("active/running, restarts 1");
+    int commands = fixture.commands.ran().size();
+    // Asked again at once: its last result, not another run.
+    assertThat(ProbeResult.fromJson(Json.parse(text(get(AgentApi.PROBES + "/vision.unit")))))
+        .isEqualTo(unit);
+    assertThat(fixture.commands.ran()).hasSize(commands);
+    fixture.micros.addAndGet(AgentApi.PROBE_RUN_SECONDS * 1_000_000L);
+    get(AgentApi.PROBES + "/vision.unit");
+    assertThat(fixture.commands.ran()).hasSize(commands + 1);
+
+    // An id with a space, encoded.
+    assertThat(
+            ProbeResult.fromJson(Json.parse(text(get(AgentApi.PROBES + "/vision.front%20left"))))
+                .status())
+        .isEqualTo(ProbeResult.PASS);
+    assertThat(get(AgentApi.PROBES + "/nothing").statusCode()).isEqualTo(404);
+    assertThat(post(AgentApi.PROBES + "/vision.unit").statusCode()).isEqualTo(405);
   }
 
   @Test
@@ -218,7 +284,7 @@ class AgentServerTest {
   }
 
   @Test
-  void aShutdownStopsPhotonVisionThenPowersOffOnce() throws Exception {
+  void aShutdownRunsItsPacksStepsThenPowersOffOnce() throws Exception {
     serve(fixture.agent("127.0.0.1"));
     HttpResponse<byte[]> first = post(AgentApi.SHUTDOWN);
     assertThat(first.statusCode()).isEqualTo(202);
@@ -226,10 +292,9 @@ class AgentServerTest {
     List<List<String>> ran = fixture.commands.ran();
     assertThat(ran.subList(ran.size() - 2, ran.size()))
         .containsExactly(
-            List.of("systemctl", "stop", "photonvision.service"), List.of("systemctl", "poweroff"));
+            List.of("systemctl", "stop", "vision.service"), List.of("systemctl", "poweroff"));
     assertThat(fixture.log.get(0))
-        .isEqualTo(
-            "Shutdown asked for by 127.0.0.1: stopping photonvision.service, then powering off");
+        .isEqualTo("Shutdown asked for by 127.0.0.1: running vision.stop, then powering off");
 
     HttpResponse<byte[]> again = post(AgentApi.SHUTDOWN);
     assertThat(again.statusCode()).isEqualTo(202);
@@ -243,7 +308,16 @@ class AgentServerTest {
   }
 
   @Test
-  void aShutdownGoesOnWhenStoppingPhotonVisionFails() throws Exception {
+  void theControllerIsTheConfigurationsWhenItNamesOne() throws Exception {
+    fixture.config(
+        new AgentConfig("vision-front", "127.0.0.1", 5808, List.of(), List.of(), List.of()));
+    serve(fixture.agent());
+    assertThat(post(AgentApi.SHUTDOWN).statusCode()).isEqualTo(202);
+    assertThat(fixture.log.get(0)).isEqualTo("Shutdown asked for by 127.0.0.1: powering off");
+  }
+
+  @Test
+  void aShutdownGoesOnWhenAStepFails() throws Exception {
     fixture.commands.answer(
         List.of("systemctl", "stop"), new Commands.Output(1, List.of(), false, false));
     fixture.commands.answer(
@@ -252,7 +326,7 @@ class AgentServerTest {
     assertThat(post(AgentApi.SHUTDOWN).statusCode()).isEqualTo(202);
     assertThat(fixture.log)
         .contains(
-            "Stopping photonvision.service failed (exit 1); powering off anyway",
+            "Step vision.stop failed (exit 1); powering off anyway",
             "Powering off failed (timed out); a shutdown may be asked for again");
   }
 
@@ -274,17 +348,11 @@ class AgentServerTest {
             path -> {
               throw new AssertionError("not a link anyone expected");
             });
-    serve(
-        new Agent(
-            host,
-            Fixture.DATABASE,
-            AgentMain.UNIT,
-            Duration.ofSeconds(2),
-            Runnable::run,
-            Agent::controllerOf));
-    assertThat(get(AgentApi.HEALTH).statusCode()).isEqualTo(500);
-    // The health lock was let go: the next request is answered (and fails) the same way.
-    assertThat(get(AgentApi.HEALTH).statusCode()).isEqualTo(500);
+    serve(new Agent(host, Configuration.read(host), Duration.ofSeconds(2), Runnable::run, null));
+    assertThat(get(AgentApi.PROBES + "/camera.front-left").statusCode()).isEqualTo(500);
+    // The probes' turns were let go: the next request is answered (and fails) the same way.
+    assertThat(get(AgentApi.PROBES + "/camera.front-left").statusCode()).isEqualTo(500);
+    assertThat(get(AgentApi.HEALTH).statusCode()).isEqualTo(200);
   }
 
   @Test
@@ -359,7 +427,7 @@ class AgentServerTest {
     try {
       awaitWaiting();
       // A journal page is under way, held: another heavy request is refused at once.
-      HttpResponse<byte[]> busy = get(AgentApi.SETTINGS);
+      HttpResponse<byte[]> busy = get(AgentApi.SETTINGS_ZIP);
       assertThat(busy.statusCode()).isEqualTo(503);
       assertThat(busy.headers().firstValue("Retry-After")).contains("1");
       long start = System.nanoTime();
@@ -369,7 +437,7 @@ class AgentServerTest {
       slow.countDown();
     }
     assertThat(first.get(20, TimeUnit.SECONDS).statusCode()).isEqualTo(200);
-    assertThat(get(AgentApi.SETTINGS).statusCode()).isEqualTo(200);
+    assertThat(get(AgentApi.SETTINGS_ZIP).statusCode()).isEqualTo(200);
   }
 
   @Test
@@ -377,7 +445,7 @@ class AgentServerTest {
     Health first = Health.parse(text(get(AgentApi.HEALTH)));
     fixture.micros.addAndGet(1_000_000);
     CountDownLatch slow = new CountDownLatch(1);
-    fixture.commands.hold(List.of("systemctl", "show"), slow);
+    fixture.commands.hold(List.of("journalctl", "-b"), slow);
     CompletableFuture<HttpResponse<byte[]>> refreshing =
         client.sendAsync(
             HttpRequest.newBuilder(uri(AgentApi.HEALTH)).timeout(Duration.ofSeconds(20)).build(),
@@ -403,7 +471,7 @@ class AgentServerTest {
 
   @Test
   void anAnswerOverItsLimitIsRefused() throws Exception {
-    Fixture small = new Fixture(dir.resolve("small"), limits(2000, 1 << 25, 1 << 24, 1 << 22));
+    Fixture small = new Fixture(dir.resolve("small"), new Limits(256 * 1024, 4 << 20, 2000));
     small.commands.answer(List.of("journalctl"), Fixture.lines("journal-this-boot.json"));
     fixture = small;
     serve(small.agent());
@@ -411,46 +479,11 @@ class AgentServerTest {
     HttpResponse<byte[]> health = get(AgentApi.HEALTH);
     assertThat(health.statusCode()).isEqualTo(500);
     assertThat(text(health)).contains("larger than the agent sends");
-    // The settings are sent a row at a time, by their own limits.
-    assertThat(get(AgentApi.SETTINGS).statusCode()).isEqualTo(200);
-  }
-
-  private static Limits limits(int maxAnswer, long maxDatabase, long maxSettings, int maxValue) {
-    return new Limits(256 * 1024, 4 << 20, maxAnswer, maxDatabase, maxSettings, maxValue);
-  }
-
-  @Test
-  void settingsTooLargeToReadAreRefusedAndSaySo() throws Exception {
-    Map<String, Limits> cases =
-        Map.of(
-            "database", limits(4 << 20, 4096, 1 << 24, 1 << 22),
-            "all of them", limits(4 << 20, 1 << 25, 2000, 1 << 22),
-            "a value", limits(4 << 20, 1 << 25, 1 << 24, 1500),
-            "a value, by SQLite", limits(4 << 20, 1 << 25, 1 << 24, 500));
-    for (Map.Entry<String, Limits> limit : cases.entrySet()) {
-      Fixture small = new Fixture(dir.resolve(limit.getKey().replace(" ", "")), limit.getValue());
-      small.commands.answer(List.of("journalctl"), Fixture.lines("journal-this-boot.json"));
-      fixture = small;
-      serve(small.agent());
-      assertThat(get(AgentApi.SETTINGS).statusCode()).as(limit.getKey()).isEqualTo(500);
-      assertThat(get(AgentApi.SETTINGS_ZIP).statusCode()).as(limit.getKey()).isEqualTo(500);
-      Health health = Health.parse(text(get(AgentApi.HEALTH)));
-      assertThat(health.settings().liveHash()).as(limit.getKey()).isEmpty();
-      assertThat(health.problems())
-          .as(limit.getKey())
-          .anySatisfy(
-              problem ->
-                  assertThat(problem)
-                      .startsWith("settings: ")
-                      .containsAnyOf("more than the", "too big"));
-    }
   }
 
   @Test
   void aFileOverItsLimitIsCutShort() throws Exception {
-    Fixture small =
-        new Fixture(
-            dir.resolve("small"), new Limits(64, 4 << 20, 4 << 20, 1 << 25, 1 << 24, 1 << 22));
+    Fixture small = new Fixture(dir.resolve("small"), new Limits(64, 4 << 20, 4 << 20));
     small.commands.answer(List.of("journalctl"), Fixture.lines("journal-this-boot.json"));
     fixture = small;
     serve(small.agent());
@@ -460,9 +493,9 @@ class AgentServerTest {
   }
 
   @Test
-  void aComputerWithoutAStampTakesNoShutdown() throws Exception {
+  void aComputerWithoutAStampOrAControllerTakesNoShutdown() throws Exception {
     fixture.delete("/etc/coprocessor/stamp.json");
-    serve(fixture.agent("127.0.0.1"));
+    serve(fixture.agent());
     HttpResponse<byte[]> refused = post(AgentApi.SHUTDOWN);
     assertThat(refused.statusCode()).isEqualTo(403);
     assertThat(text(refused)).contains("no stamp");
@@ -503,29 +536,5 @@ class AgentServerTest {
     assertThat(ShutdownAnswer.parse(text(again)).alreadyRequested()).isFalse();
     assertThat(fixture.commands.ran().stream().filter(c -> c.contains("poweroff")).count())
         .isEqualTo(2);
-  }
-
-  @Test
-  void theZipSaysEveryFilesHashLast() throws Exception {
-    HttpResponse<byte[]> zip = get(AgentApi.SETTINGS_ZIP);
-    Map<String, byte[]> files = new LinkedHashMap<>();
-    try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(zip.body()))) {
-      ZipEntry entry;
-      while ((entry = in.getNextEntry()) != null) {
-        files.put(entry.getName(), in.readAllBytes());
-      }
-    }
-    List<String> names = new ArrayList<>(files.keySet());
-    assertThat(names.get(names.size() - 1)).isEqualTo("coprocessors/vision-front/settings.sha256");
-    String sums =
-        new String(files.get("coprocessors/vision-front/settings.sha256"), StandardCharsets.UTF_8);
-    assertThat(sums.lines()).hasSize(files.size() - 1);
-    for (String line : sums.lines().toList()) {
-      String[] parts = line.split("  ", 2);
-      byte[] content = Objects.requireNonNull(files.get(parts[1]), parts[1]);
-      assertThat(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)))
-          .as(parts[1])
-          .isEqualTo(parts[0]);
-    }
   }
 }

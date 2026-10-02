@@ -195,9 +195,9 @@ class ApiRecordsTest {
   }
 
   @Test
-  void theJournalIsServedForTheKernelPhotonVisionAndTheAgentOnly() {
-    assertThat(AgentApi.JOURNAL_UNITS)
-        .containsExactly("kernel", "photonvision.service", "coprocessor-agent.service");
+  void theJournalIsServedForTheKernelAndTheAgentAndTheirPacksUnitsOnly() {
+    // A computer's packs add their own (ProbeSet.journalUnits): PhotonVision's adds its unit.
+    assertThat(AgentApi.JOURNAL_UNITS).containsExactly("kernel", "frc-coprocessor-agent.service");
   }
 
   @Test

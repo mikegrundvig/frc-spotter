@@ -1,13 +1,14 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
-import com.michaelgrundvig.frc.spotter.settings.PhotonVisionDatabase;
+import com.michaelgrundvig.frc.spotter.table.AgentConfig;
+import com.michaelgrundvig.frc.spotter.table.Pack;
+import com.michaelgrundvig.frc.spotter.table.Packs;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,11 +23,32 @@ import java.util.stream.Stream;
 /**
  * An RK3588 coprocessor for tests: a copy of the fixture tree in {@code src/test/resources/rk3588}
  * (eight cores in three clusters, seven thermal zones, two USB cameras, an NVMe drive, a stamp),
- * PhotonVision's settings database with the example rows, canned command output, a clock the test
- * moves, and the log the agent writes.
+ * its agent configured with its two cameras at their ports and the template's built-in pack
+ * installed, canned command output, a clock the test moves, and the log the agent writes.
  */
 final class Fixture {
-  static final String DATABASE = AgentMain.DATABASE;
+  /** The template's own repository, whose packs the fixture installs. */
+  static final Path PROJECT = Path.of(System.getProperty("frc.projectDir", "../.."));
+
+  /** front-left's port: the camera on the USB 3 port, 7-1. */
+  static final String FRONT_LEFT =
+      "/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0";
+
+  /** front-right's port: the camera on the USB 2 port, 3-1. */
+  static final String FRONT_RIGHT =
+      "/dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0";
+
+  /** The computer's configuration: its cameras at their ports, no packs beyond the built-in one. */
+  static final AgentConfig CONFIG =
+      new AgentConfig(
+          "vision-front",
+          "",
+          5808,
+          List.of(),
+          List.of(
+              new AgentConfig.Camera("front-left", FRONT_LEFT),
+              new AgentConfig.Camera("front-right", FRONT_RIGHT)),
+          List.of());
 
   /** The sysfs links the cameras' paths resolve through, as on a coprocessor. */
   static final Map<String, String> LINKS =
@@ -57,13 +79,29 @@ final class Fixture {
     this.limits = limits;
     root = dir.resolve("root");
     copy(resource("rk3588"), root);
-    try {
-      PhotonVisionDatabase.configured(host(root).path("/opt/photonvision/photonvision_config"));
-    } catch (SQLException e) {
-      throw new IOException(e);
-    }
     host = host(root);
     commands.answer(List.of("systemctl", "show"), Fixture.lines("systemctl-show.txt"));
+    pack(Pack.parseYaml(templatePack(Pack.BUILTIN), Pack.BUILTIN));
+    config(CONFIG);
+  }
+
+  /** A pack of the template's, as written in its folder. */
+  static String templatePack(String name) throws IOException {
+    return Files.readString(
+        PROJECT.resolve(Pack.TEMPLATE_PACKS).resolve(name).resolve(Pack.FILE),
+        StandardCharsets.UTF_8);
+  }
+
+  /** Installs a pack on the computer, as its package would: its pack.json in its folder. */
+  void pack(Pack pack) throws IOException {
+    write(
+        Packs.PACKS_DIR + "/" + pack.name() + "/" + Pack.JSON_FILE,
+        com.michaelgrundvig.frc.spotter.json.Json.pretty(pack.toJson()));
+  }
+
+  /** Writes the computer's configuration. */
+  void config(AgentConfig config) throws IOException {
+    write(AgentConfig.PATH, config.text());
   }
 
   private Host host(Path at) {
@@ -93,16 +131,18 @@ final class Fixture {
     }
   }
 
-  /** An agent on this computer; the robot controller at {@code controller}. */
+  /** An agent on this computer, as configured now; the robot controller at {@code controller}. */
   Agent agent(String controller) {
     return new Agent(
-        host, DATABASE, AgentMain.UNIT, Duration.ofSeconds(2), Runnable::run, team -> controller);
+        host, Configuration.read(host), Duration.ofSeconds(2), Runnable::run, controller);
   }
 
-  /** An agent whose robot controller is where it is on the team's network. */
+  /**
+   * An agent on this computer, as configured now, whose controller is its configuration's, else the
+   * robot controller where it is on the stamp's team's network.
+   */
   Agent agent() {
-    return new Agent(
-        host, DATABASE, AgentMain.UNIT, Duration.ofSeconds(2), Runnable::run, Agent::controllerOf);
+    return new Agent(host, Configuration.read(host), Duration.ofSeconds(2), Runnable::run, null);
   }
 
   /** Writes a file of the computer, as a path on it. */
@@ -171,6 +211,19 @@ final class Fixture {
 
     void answer(List<String> start, Output output) {
       answers.put(start, output);
+    }
+
+    @Override
+    public Output toFile(List<String> command, Duration timeout, long maxBytes, Path file)
+        throws IOException {
+      Output output = run(command, timeout, Integer.MAX_VALUE, Integer.MAX_VALUE);
+      String text = output.lines().isEmpty() ? "" : String.join("\n", output.lines()) + "\n";
+      if (text.length() > maxBytes) {
+        Files.writeString(file, text.substring(0, (int) maxBytes), StandardCharsets.UTF_8);
+        return new Output(-1, List.of(), true, false);
+      }
+      Files.writeString(file, text, StandardCharsets.UTF_8);
+      return new Output(output.exit(), List.of(), false, output.timedOut());
     }
 
     @Override

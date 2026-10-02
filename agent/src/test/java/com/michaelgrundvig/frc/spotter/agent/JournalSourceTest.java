@@ -88,7 +88,7 @@ class JournalSourceTest {
         journal.page(JournalSource.Position.after("s=a1;i=103"), -1, AgentApi.JOURNAL_UNITS, 100);
     assertThat(fixture.commands.ran().get(1))
         .contains(
-            "--after-cursor=s=a1;i=103", "_TRANSPORT=kernel", "UNIT=coprocessor-agent.service");
+            "--after-cursor=s=a1;i=103", "_TRANSPORT=kernel", "UNIT=frc-coprocessor-agent.service");
     assertThat(after.entries()).hasSize(8);
     assertThat(after.more()).isFalse();
 
@@ -220,16 +220,17 @@ class JournalSourceTest {
             "_SYSTEMD_UNIT=photonvision.service",
             "+",
             "UNIT=photonvision.service");
-    assertThatThrownBy(() -> JournalSource.matches(List.of("sshd.service")))
+    // Which units are served is the server's to check; a name that isn't a unit's never reaches
+    // journalctl.
+    assertThatThrownBy(() -> JournalSource.matches(List.of("--since=x")))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> JournalSource.matches(List.of("a b.service")))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
   void aPageReadsNoMoreThanItsLimitAllows() throws IOException {
-    Fixture small =
-        new Fixture(
-            dir.resolve("small"),
-            new Limits(256 * 1024, 700, 4 * 1024 * 1024, 1 << 25, 1 << 24, 1 << 22));
+    Fixture small = new Fixture(dir.resolve("small"), new Limits(256 * 1024, 700, 4 * 1024 * 1024));
     small.commands.answer(List.of("journalctl", "-o"), Fixture.lines("journal-this-boot.json"));
     JournalPage page =
         new JournalSource(small.host, Duration.ofSeconds(2))

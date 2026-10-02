@@ -62,13 +62,28 @@ final class Host {
 
   /** The coprocessor itself: the root filesystem, real links, the process clock. */
   static Host system(Commands commands, Consumer<String> log) {
-    Path root = Path.of("/");
+    return system(Path.of("/"), commands, log);
+  }
+
+  /**
+   * The computer's files from {@code root} rather than {@code /} (a fixture tree with real links,
+   * as a container test writes one), its commands and clock its own. A link is followed within the
+   * tree: one that leads out of it is as if it led nowhere.
+   */
+  static Host system(Path root, Commands commands, Consumer<String> log) {
     return new Host(
         root,
         Limits.DEFAULT,
         false,
         commands,
-        path -> root.resolve(path.substring(1)).toRealPath().toString(),
+        path -> {
+          Path top = root.toRealPath();
+          Path real = root.resolve(path.substring(1)).toRealPath();
+          if (!real.startsWith(top)) {
+            throw new IOException(path + " leads out of " + root);
+          }
+          return "/" + top.relativize(real).toString().replace(java.io.File.separatorChar, '/');
+        },
         () -> System.nanoTime() / 1000,
         log);
   }

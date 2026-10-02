@@ -40,6 +40,9 @@ final class JournalSource {
   /** The longest a summary's entry's message is: a page of the journal has them whole. */
   static final int SUMMARY_MESSAGE = 200;
 
+  /** A unit's name, as the agent serves a unit's entries by. */
+  static final Pattern UNIT = Pattern.compile("[A-Za-z0-9:_.\\\\@-]{1,200}\\.[a-z]+");
+
   /** A cursor a request may give: journald's own characters only. */
   static final Pattern CURSOR = Pattern.compile("[A-Za-z0-9=;_+/.:-]{1,512}");
 
@@ -114,8 +117,8 @@ final class JournalSource {
   static List<String> matches(List<String> units) {
     List<String> matches = new ArrayList<>();
     for (String unit : units) {
-      if (!AgentApi.JOURNAL_UNITS.contains(unit)) {
-        throw new IllegalArgumentException("not a unit the journal is served for: " + unit);
+      if (!unit.equals("kernel") && !UNIT.matcher(unit).matches()) {
+        throw new IllegalArgumentException("not a unit's name: " + unit);
       }
       if (!matches.isEmpty()) {
         matches.add("+");
@@ -172,10 +175,10 @@ final class JournalSource {
 
   /**
    * A page of the journal, as {@code GET /v1/journal} asks: the latest entries, those after or
-   * before a cursor, or the first of this boot; at a priority or worse, of some of {@link
-   * AgentApi#JOURNAL_UNITS}; at most {@code limit} entries, oldest first. Its cursor is the one to
-   * ask with to go on the same way: the newest entry's for later pages, the oldest's for earlier
-   * ones ({@code before}).
+   * before a cursor, or the first of this boot; at a priority or worse, of some of the units it
+   * serves (the caller checks which); at most {@code limit} entries, oldest first. Its cursor is
+   * the one to ask with to go on the same way: the newest entry's for later pages, the oldest's for
+   * earlier ones ({@code before}).
    */
   JournalPage page(Position position, int priority, List<String> units, int limit)
       throws IOException {

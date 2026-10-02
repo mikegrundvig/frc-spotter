@@ -42,14 +42,15 @@ class ArchitectureTest {
   }
 
   @Test
-  void onlySqliteOpensTheDatabase() {
+  void theAgentKnowsTheComputerNotTheSoftwareOnIt() {
     noClasses()
-        .that()
-        .doNotHaveSimpleName("Sqlite")
         .should()
         .dependOnClassesThat()
-        .resideInAPackage("org.sqlite..")
-        .because("PhotonVision's live database is only ever opened read-only, in one place")
+        .resideInAnyPackage(
+            "com.michaelgrundvig.frc.spotter.settings..", "java.sql..", "org.sqlite..")
+        .because(
+            "what the agent knows of a computer's software (PhotonVision's settings, its database)"
+                + " is a pack's, run as a probe: the agent itself serves any computer")
         .check(AGENT);
   }
 
