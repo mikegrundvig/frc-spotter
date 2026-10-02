@@ -14,17 +14,17 @@ import java.util.function.LongSupplier;
 /**
  * One coprocessor's agent, as the robot sees it: asked for its health once a period on a thread of
  * this client's own, so the robot loop only ever reads the latest answer and never waits on the
- * network; asked for more (a probe run now, a download, a page of its journal) on the caller's
- * thread; and asked to power down, watched until it's gone from its agent's port and its
- * software's. Nothing here knows what the coprocessor runs: what the robot needs of it is a list of
- * {@link Requirement}s, judged against each answer.
+ * network; asked for more (a probe run now, a page of its journal) on the caller's thread; and
+ * asked to power down, watched until it's gone from its agent's port and its software's. Nothing
+ * here knows what the coprocessor runs: what the robot needs of it is a list of {@link
+ * Requirement}s, judged against each answer.
  */
 public final class AgentClient implements AutoCloseable {
   /** The most a health answer may hold: a computer's 64 probes keep it well under. */
   public static final int MAX_HEALTH_BYTES = 64 * 1024;
 
-  /** The most a download may hold: a settings backup, calibrations included. */
-  public static final int MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+  /** The most a probe's result may hold: its value and detail are bounded far below. */
+  public static final int MAX_PROBE_BYTES = 64 * 1024;
 
   /** The most a page of the journal may hold: twice what the agent sends at most. */
   public static final int MAX_JOURNAL_BYTES = 8 * 1024 * 1024;
@@ -33,7 +33,7 @@ public final class AgentClient implements AutoCloseable {
   private final ClientSettings settings;
   private final LongSupplier robotNanos;
   private final AgentHttp agent;
-  private final AgentHttp downloads;
+  private final AgentHttp probes;
   private final Poller<Health> poller;
   private final PowerDowner powerDowner;
 
@@ -65,11 +65,9 @@ public final class AgentClient implements AutoCloseable {
             settings.connectTimeoutSeconds(),
             settings.answerTimeoutSeconds(),
             MAX_HEALTH_BYTES);
-    downloads =
+    probes =
         agent.with(
-            settings.connectTimeoutSeconds(),
-            settings.downloadTimeoutSeconds(),
-            MAX_DOWNLOAD_BYTES);
+            settings.connectTimeoutSeconds(), settings.requestTimeoutSeconds(), MAX_PROBE_BYTES);
     poller = new Poller<>(name, this::fetch, settings.pollPeriodSeconds(), robotNanos);
     powerDowner =
         new PowerDowner(
@@ -140,22 +138,12 @@ public final class AgentClient implements AutoCloseable {
    *     no answer in time
    */
   public ProbeResult runProbe(String id) throws IOException {
-    byte[] body =
-        AgentHttp.onceMoreIfBusy(() -> downloads.get(AgentApi.PROBES + "/" + encoded(id)));
+    byte[] body = AgentHttp.onceMoreIfBusy(() -> probes.get(AgentApi.PROBES + "/" + encoded(id)));
     try {
       return ProbeResult.fromJson(Json.parse(new String(body, StandardCharsets.UTF_8)));
     } catch (JsonException | IllegalArgumentException e) {
       throw new IOException("its probe's result can't be read: " + e.getMessage(), e);
     }
-  }
-
-  /**
-   * One of its packs' downloads ({@code /v1/downloads/<name>}) as it arrives: close it once read.
-   * Asked once more, a second on, when the agent is busy with another download.
-   */
-  public AgentHttp.Streamed download(String file) throws IOException {
-    return AgentHttp.onceMoreIfBusy(
-        () -> downloads.stream(AgentApi.DOWNLOADS + "/" + encoded(file)));
   }
 
   /**
@@ -165,7 +153,7 @@ public final class AgentClient implements AutoCloseable {
   public JournalPage journal(String query) throws IOException {
     AgentHttp journals =
         agent.with(
-            settings.connectTimeoutSeconds(), settings.downloadTimeoutSeconds(), MAX_JOURNAL_BYTES);
+            settings.connectTimeoutSeconds(), settings.requestTimeoutSeconds(), MAX_JOURNAL_BYTES);
     byte[] body =
         AgentHttp.onceMoreIfBusy(
             () -> journals.get(AgentApi.JOURNAL + (query.isEmpty() ? "" : "?" + query)));

@@ -4,7 +4,6 @@ import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.HostConfig;
 import com.michaelgrundvig.frc.spotter.client.AgentClient;
 import com.michaelgrundvig.frc.spotter.client.ClientSettings;
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -21,9 +20,9 @@ import org.testcontainers.utility.DockerImageName;
  * A coprocessor in a container, as close to a board as a container gets: systemd as its first
  * process, so the agent's unit, its sandboxing, polkit, and a power-off are real; its root
  * read-only, with {@code /data} a writable volume and the rest that's written in RAM, as on a
- * board's image; at a fixed address on the tests' network. Rootless Podman runs it as is, given
- * SYS_ADMIN (its user namespace's, for systemd's sandboxing) and no SELinux labels; Docker needs
- * privileged mode.
+ * board's image; with its hostname, at a fixed address on the tests' network. Rootless Podman runs
+ * it as is, given SYS_ADMIN (its user namespace's, for systemd's sandboxing) and no SELinux labels;
+ * Docker needs privileged mode.
  */
 public final class Coprocessor extends GenericContainer<Coprocessor> {
   /** The agent's port. */
@@ -48,11 +47,23 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
           "/var/lib/systemd", "rw,mode=755");
 
   /**
+   * A coprocessor named {@code coprocessor-<last>}.
+   *
    * @param image the image, from {@link Images}
    * @param network the tests' network
    * @param last the last number of its address: 10.99.71.last
    */
   public Coprocessor(String image, Network network, int last) {
+    this(image, network, last, "coprocessor-" + last);
+  }
+
+  /**
+   * @param image the image, from {@link Images}
+   * @param network the tests' network
+   * @param last the last number of its address: 10.99.71.last
+   * @param hostname its hostname, which is its agent's name for it
+   */
+  public Coprocessor(String image, Network network, int last, String hostname) {
     super(DockerImageName.parse(image));
     boolean podman = ContainerRuntime.podman();
     withNetwork(network);
@@ -61,7 +72,7 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
     withTmpFs(TMPFS);
     withCreateContainerCmdModifier(
         cmd -> {
-          cmd.withIpv4Address(Images.address(last));
+          cmd.withIpv4Address(Images.address(last)).withHostName(hostname);
           HostConfig host = cmd.getHostConfig();
           if (host == null) {
             return;
@@ -154,11 +165,18 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
   }
 
   /**
-   * Configures its agent as a team would on a board whose root is read-only ({@code
-   * /data/frc-spotter/agent.json}), and restarts it to read it.
+   * Restarts its agent with these command-line options, by a drop-in in {@code
+   * /run/systemd/system}, which the read-only root leaves writable and a reboot forgets: {@code
+   * --controller=<address>} for a test whose robot reaches the agent through the runtime's port
+   * forwarding, from an address the computer can't know.
    */
-  public void configure(AgentConfig config) {
-    write(AgentConfig.DATA_PATH, config.text());
+  public void restartAgent(String... options) {
+    write(
+        "/run/systemd/system/frc-spotter.service.d/harness.conf",
+        "[Service]\nExecStart=\nExecStart=/usr/lib/frc-spotter/bin/frc-spotter "
+            + String.join(" ", options)
+            + "\n");
+    run("systemctl", "daemon-reload");
     run("systemctl", "restart", "frc-spotter.service");
     awaitAgent();
   }

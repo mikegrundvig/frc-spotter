@@ -48,7 +48,7 @@ public final class AgentHttp {
     this.maxBytes = maxBytes;
   }
 
-  /** The same agent, with other timeouts and another size limit: for a download, say. */
+  /** The same agent, with other timeouts and another size limit: for a journal page, say. */
   public AgentHttp with(double connectTimeoutSeconds, double answerTimeoutSeconds, int maxBytes) {
     return new AgentHttp(host, port, connectTimeoutSeconds, answerTimeoutSeconds, maxBytes);
   }
@@ -78,33 +78,6 @@ public final class AgentHttp {
       }
     } finally {
       connection.disconnect();
-    }
-  }
-
-  /**
-   * An answer's body, to read as it arrives, with its length when the agent gave it (-1 when not):
-   * for a download passed on without being held whole. Reading it past the size limit or the
-   * timeout on the whole answer fails; closing it closes the connection.
-   *
-   * @throws IOException saying why there's none: no connection or answer in time, an answer other
-   *     than 200, or one longer than the limit by its own length
-   */
-  public Streamed stream(String pathAndQuery) throws IOException {
-    HttpURLConnection connection = open(pathAndQuery);
-    long deadline = System.nanoTime() + answerTimeoutMillis * 1_000_000L;
-    try {
-      int status = connection.getResponseCode();
-      if (status != HttpURLConnection.HTTP_OK) {
-        throw new Answered(status, pathAndQuery, connection.getHeaderField("Retry-After"));
-      }
-      long length = connection.getContentLengthLong();
-      if (length > maxBytes) {
-        throw new IOException("answered more than " + maxBytes + " bytes");
-      }
-      return new Streamed(length, new Bounded(connection, deadline));
-    } catch (IOException | RuntimeException e) {
-      connection.disconnect();
-      throw e;
     }
   }
 
@@ -142,7 +115,7 @@ public final class AgentHttp {
 
   /**
    * Makes a call, and when the agent answers it's busy (503), once more after it said to wait (at
-   * most two seconds): a heavy request (the journal, the settings) finds another under way.
+   * most two seconds): a heavy request (a page of the journal) finds another under way.
    */
   public static <T> T onceMoreIfBusy(Call<T> call) throws IOException {
     try {
@@ -158,58 +131,6 @@ public final class AgentHttp {
         throw answered;
       }
       return call.call();
-    }
-  }
-
-  /**
-   * An answer's body as it arrives.
-   *
-   * @param length its length, or -1 when the agent didn't give it
-   * @param body what it holds
-   */
-  public record Streamed(long length, InputStream body) {}
-
-  /** An answer's body that holds to the size limit and the deadline, and disconnects on close. */
-  private final class Bounded extends InputStream {
-    private final HttpURLConnection connection;
-    private final InputStream in;
-    private final long deadline;
-    private long read;
-
-    Bounded(HttpURLConnection connection, long deadline) throws IOException {
-      this.connection = connection;
-      in = connection.getInputStream();
-      this.deadline = deadline;
-    }
-
-    @Override
-    public int read() throws IOException {
-      byte[] one = new byte[1];
-      return read(one, 0, 1) < 0 ? -1 : one[0] & 0xff;
-    }
-
-    @Override
-    public int read(byte[] into, int offset, int length) throws IOException {
-      int got = in.read(into, offset, length);
-      if (got > 0) {
-        read += got;
-        if (read > maxBytes) {
-          throw new IOException("answered more than " + maxBytes + " bytes");
-        }
-      }
-      if (System.nanoTime() > deadline) {
-        throw new SocketTimeoutException("no whole answer within " + answerTimeoutMillis + " ms");
-      }
-      return got;
-    }
-
-    @Override
-    public void close() throws IOException {
-      try {
-        in.close();
-      } finally {
-        connection.disconnect();
-      }
     }
   }
 

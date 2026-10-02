@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The client against a stand-in agent on this computer: polled on its own thread, its probes run
- * and its files downloaded when asked, its requirements judged, and powered down.
+ * and its journal read when asked, its requirements judged, and powered down.
  */
 class AgentClientTest {
   /** Fast polls, for a test: ten a second, missing after half a second. */
@@ -41,8 +41,8 @@ class AgentClientTest {
 
   static Health health() {
     return new Health(
-        new Stamp("vision-front", 1234, "10.12.34.11", "r", "", "", Map.of(), "", "", ""),
-        new Boot("boot", 10, 10_000_000, true, "/dev/nvme0n1p2", true, ""),
+        new Stamp("vision-front", List.of("10.12.34.11"), "", "boot", 10, Map.of("ID", "debian")),
+        new Boot("boot", 10, 10_000_000, true, "/dev/nvme0n1p2", true),
         Cpu.UNKNOWN,
         List.of(),
         JournalSummary.EMPTY,
@@ -76,8 +76,6 @@ class AgentClientTest {
             send(exchange, 404, "{\"error\":\"no such probe\"}");
           }
         });
-    server.createContext(
-        AgentApi.DOWNLOADS + "/settings.zip", exchange -> send(exchange, 200, "PK"));
     server.createContext(
         AgentApi.JOURNAL,
         exchange ->
@@ -157,15 +155,11 @@ class AgentClientTest {
   }
 
   @Test
-  void itsProbesRunAndItsFilesDownloadWhenAsked() throws Exception {
+  void itsProbesRunAndItsJournalIsReadWhenAsked() throws Exception {
     assertThat(client.runProbe("vision.version")).isEqualTo(VERSION);
     assertThatThrownBy(() -> client.runProbe("none"))
         .isInstanceOf(AgentHttp.Answered.class)
         .hasMessageContaining("404");
-    AgentHttp.Streamed zip = client.download("settings.zip");
-    try (InputStream in = zip.body()) {
-      assertThat(new String(in.readAllBytes(), StandardCharsets.UTF_8)).isEqualTo("PK");
-    }
     assertThat(client.journal("priority=3").cursor()).isEqualTo("priority=3");
   }
 

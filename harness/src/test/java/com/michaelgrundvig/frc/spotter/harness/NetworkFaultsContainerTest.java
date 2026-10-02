@@ -3,12 +3,10 @@ package com.michaelgrundvig.frc.spotter.harness;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.client.AgentClient;
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import eu.rekawek.toxiproxy.Proxy;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import eu.rekawek.toxiproxy.model.toxic.Latency;
 import java.io.IOException;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
@@ -47,10 +45,8 @@ class NetworkFaultsContainerTest {
   @BeforeAll
   void aCoprocessorBehindToxiproxy() throws IOException {
     network = TestNetwork.create();
-    coprocessor = new Coprocessor(TestImages.agent(), network, 11);
+    coprocessor = new Coprocessor(TestImages.agent(), network, 11, "vision-front");
     coprocessor.start();
-    coprocessor.configure(
-        new AgentConfig("vision-front", "", 5808, List.of("standin"), List.of(), List.of()));
     toxiproxy = Toxiproxied.start(network, 3, 11);
     proxy = toxiproxy.proxy();
     client = toxiproxy.client("vision-front", coprocessor);

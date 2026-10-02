@@ -6,11 +6,9 @@ import java.util.Arrays;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 
-/** This boot, and what booted: the uptime, the root filesystem, and the bootloader. */
+/** This boot, and what booted: the uptime, and the root filesystem. */
 final class BootSource {
-  static final String UPTIME = "/proc/uptime";
   static final String MOUNTS = "/proc/self/mountinfo";
-  static final String BOOTLOADER = "/run/coprocessor/spi-uboot-version";
 
   private final Host host;
   private final StampSource stamp;
@@ -23,18 +21,11 @@ final class BootSource {
   }
 
   Boot read() throws IOException {
-    double uptime =
-        host.line(UPTIME).map(line -> Double.parseDouble(line.split("\\s+")[0])).orElse(Double.NaN);
+    double uptime = stamp.uptime();
     Root root = root();
     @Nullable Boolean clean = journal.previousBootClean();
     return new Boot(
-        stamp.bootId(),
-        uptime,
-        host.monotonicMicros(),
-        clean,
-        root.device(),
-        root.readOnly(),
-        host.line(BOOTLOADER).orElse(""));
+        stamp.bootId(), uptime, host.monotonicMicros(), clean, root.device(), root.readOnly());
   }
 
   /** The root filesystem's device, and whether it's mounted read-only. */

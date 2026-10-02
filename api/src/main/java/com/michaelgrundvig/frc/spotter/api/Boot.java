@@ -15,8 +15,7 @@ import org.jspecify.annotations.Nullable;
  *     with journald stopping); null when that boot left no journal
  * @param rootDevice the device the root filesystem is on, such as {@code /dev/nvme0n1p2}; an SD
  *     card left in shows up here
- * @param rootReadOnly whether the root filesystem is mounted read-only, as the image intends
- * @param bootloader the bootloader version found in SPI flash; empty when unknown
+ * @param rootReadOnly whether the root filesystem is mounted read-only
  */
 public record Boot(
     String bootId,
@@ -24,8 +23,7 @@ public record Boot(
     long monotonicMicros,
     @Nullable Boolean lastShutdownClean,
     String rootDevice,
-    boolean rootReadOnly,
-    String bootloader) {
+    boolean rootReadOnly) {
 
   /** The boot as JSON. */
   public JsonValue.Obj toJson() {
@@ -36,7 +34,6 @@ public record Boot(
         .putOptional("lastShutdownClean", lastShutdownClean)
         .put("rootDevice", rootDevice)
         .put("rootReadOnly", rootReadOnly)
-        .put("bootloader", bootloader)
         .build();
   }
 
@@ -49,7 +46,6 @@ public record Boot(
         o.integer("monotonicMicros", 0L),
         o.optionalBool("lastShutdownClean"),
         o.string("rootDevice", ""),
-        o.bool("rootReadOnly", false),
-        o.string("bootloader", ""));
+        o.bool("rootReadOnly", false));
   }
 }

@@ -3,38 +3,32 @@ package com.michaelgrundvig.frc.spotter.client;
 import com.michaelgrundvig.frc.spotter.api.AgentApi;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.json.JsonException;
-import com.michaelgrundvig.frc.spotter.table.CompiledTable;
-import com.michaelgrundvig.frc.spotter.table.Computer;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
- * The check {@code deploy} runs first: asks each coprocessor in the table for its stamp (a second
- * to connect, a second to answer), and compares it with this build. One that doesn't answer is
- * asked once more, two seconds on, as one restarting would answer then: at most about 8 s for a
- * coprocessor that never answers. A coprocessor whose stamp has another name, team, or address than
- * this build's, or lacks a label it expects (an image builder's, such as the version of the
- * software in it), fails the deploy, as does something else answering on the agent's port (a
- * different image), or the image's software answering without its agent, when an image builder's
- * asker checks for that; another recipe only warns. One that doesn't answer at all only warns, so a
- * robot can be deployed with its vision off. The template's example table (team 0) is checked
- * against nothing.
+ * The check a deploy runs first, on the laptop: asks each coprocessor the robot program expects for
+ * its identity ({@code /v1/stamp}, a second to connect, a second to answer), and compares the two.
+ * One that doesn't answer is asked once more, two seconds on, as one restarting would answer then:
+ * at most about 8 s for a coprocessor that never answers.
  *
- * <p>Run by Gradle ({@code ./gradlew coprocessorCheck}, which {@code deploy} depends on), on the
- * laptop, never on the robot. {@code -PskipCoprocessorCheck} skips it, and says so.
+ * <p>A coprocessor whose hostname isn't the one expected, that doesn't have the address it was
+ * asked at, or whose {@code /etc/os-release} lacks a label the caller expects or says another
+ * value, fails the deploy; so does something else answering on the agent's port, or (when the
+ * caller's asker checks for it) the computer's software answering without its agent. One that
+ * doesn't answer at all only warns, so a robot can be deployed with its vision off.
+ *
+ * <p>It knows nothing of what built the coprocessor's image: the labels it compares are the
+ * caller's, by name, as an image builder writes them ({@code IMAGE_ID}, {@code IMAGE_VERSION}, and
+ * its own prefixed keys).
  */
 public final class DeployCheck {
-  /**
-   * Whether a table is the robot template's example: team 0, with computers listed, which a robot
-   * has none of; one with no computers says none on purpose.
-   */
-  public static boolean isExample(CompiledTable table) {
-    return table.table().team() == 0 && !table.table().computers().isEmpty();
-  }
-
   /** How long each coprocessor has to connect, and then to answer. */
   static final double TIMEOUT_SECONDS = 1;
 
@@ -46,21 +40,42 @@ public final class DeployCheck {
 
   private DeployCheck() {}
 
+  /**
+   * A coprocessor as the robot program expects it.
+   *
+   * @param name its hostname
+   * @param address the address it's asked at, such as {@code 10.12.34.11}; it must have it
+   * @param agentPort its agent's port
+   * @param osRelease the {@code /etc/os-release} keys it must have, each with its value; empty for
+   *     none
+   */
+  public record Expected(
+      String name, String address, int agentPort, Map<String, String> osRelease) {
+    public Expected {
+      osRelease = Collections.unmodifiableMap(new TreeMap<>(osRelease));
+    }
+
+    /** A coprocessor expected by its name and address alone, its agent on 5808. */
+    public Expected(String name, String address) {
+      this(name, address, AgentApi.PORT, Map.of());
+    }
+  }
+
   /** What became of asking one coprocessor. */
   public sealed interface Asked {
-    /** Its agent answered with its stamp. */
+    /** Its agent answered with its identity. */
     record Stamped(Stamp stamp) implements Asked {}
 
     /**
-     * Something answered on its agent's port, but not with a stamp this build reads (a 404, or not
-     * JSON): a different image.
+     * Something answered on its agent's port, but not with an identity this build reads (a 404, or
+     * not JSON): not Spotter's agent, or not this version of it.
      */
     record Unreadable(String why) implements Asked {}
 
     /**
-     * Its agent didn't answer (refused, or no answer in time), but something else of the image did,
-     * as an image builder's asker checks (the software it runs, on its own port): the agent isn't
-     * running, or this isn't the image this build expects.
+     * Its agent didn't answer (refused, or no answer in time), but something else on the computer
+     * did, as the caller's asker checks (the software it runs, on its own port): the agent isn't
+     * running.
      *
      * @param what what answered, for people: "Its vision page"
      * @param why why the agent didn't
@@ -80,7 +95,7 @@ public final class DeployCheck {
     Asked ask(String address, int agentPort);
   }
 
-  /** How a coprocessor stands against this build. */
+  /** How a coprocessor stands against what the robot program expects. */
   public enum Verdict {
     OK,
     WARN,
@@ -102,63 +117,80 @@ public final class DeployCheck {
   }
 
   /**
-   * One coprocessor's verdict, from what asking it found.
-   *
-   * @param table the table compiled into this build, with what it expects
-   * @param computer the coprocessor, from that table
-   * @param asked what asking it found
+   * How a coprocessor's identity differs from what's expected, each as a sentence naming both
+   * values; empty when it's as expected.
    */
-  public static Finding judge(CompiledTable table, Computer computer, Asked asked) {
-    String name = computer.name();
-    String at = table.table().ip(computer);
+  public static List<String> differences(Expected expected, Stamp stamp) {
+    List<String> differences = new ArrayList<>();
+    if (!stamp.hostname().equals(expected.name())) {
+      differences.add(
+          "its hostname is \"" + stamp.hostname() + "\", not \"" + expected.name() + "\"");
+    }
+    if (!stamp.addresses().contains(expected.address())) {
+      differences.add(
+          "its addresses are "
+              + (stamp.addresses().isEmpty() ? "none" : String.join(", ", stamp.addresses()))
+              + ", without "
+              + expected.address());
+    }
+    expected
+        .osRelease()
+        .forEach(
+            (key, value) -> {
+              String found = stamp.osRelease().get(key);
+              if (found == null) {
+                differences.add(
+                    key + " isn't in its os-release, and \"" + value + "\" is expected");
+              } else if (!found.equals(value)) {
+                differences.add(
+                    key
+                        + " is \""
+                        + found
+                        + "\" on the coprocessor and \""
+                        + value
+                        + "\" in this build");
+              }
+            });
+    return differences;
+  }
+
+  /** One coprocessor's verdict, from what asking it found. */
+  public static Finding judge(Expected expected, Asked asked) {
+    String name = expected.name();
+    String at = expected.address();
     if (asked instanceof Asked.Stamped) {
       Stamp stamp = ((Asked.Stamped) asked).stamp();
-      // The table's own comparison: the wrong computer or image fails the deploy, an older recipe
-      // or one this build can't judge (no recipe hash) only warns.
-      List<CompiledTable.Mismatch> mismatches = table.compare(computer, stamp);
-      List<String> errors = messages(mismatches, CompiledTable.Severity.ERROR);
-      List<String> warnings = messages(mismatches, CompiledTable.Severity.WARNING);
-      List<String> unknown = messages(mismatches, CompiledTable.Severity.UNKNOWN);
-      String release = "image " + (stamp.version().isEmpty() ? "(no version)" : stamp.version());
-      if (!errors.isEmpty()) {
+      List<String> differences = differences(expected, stamp);
+      if (!differences.isEmpty()) {
         return new Finding(
             name,
             Verdict.FAIL,
-            "the wrong image at "
+            "not the computer this build expects at "
                 + at
                 + ": "
-                + String.join("; ", errors)
-                + ". Flash it with this build's release, or deploy with"
-                + " -PskipCoprocessorCheck to leave it as it is");
+                + String.join("; ", differences)
+                + ". Flash it with the image this build expects, or deploy with its check"
+                + " skipped to leave it as it is");
       }
-      if (!warnings.isEmpty()) {
-        return new Finding(
-            name,
-            Verdict.WARN,
-            release
-                + ", built from another recipe: "
-                + String.join("; ", warnings)
-                + ". Flash this build's release when convenient");
-      }
-      if (!unknown.isEmpty()) {
-        return new Finding(
-            name,
-            Verdict.WARN,
-            release
-                + ", as this build's; its recipe can't be checked: "
-                + String.join("; ", unknown));
-      }
-      return new Finding(name, Verdict.OK, release + ", as this build's");
+      return new Finding(
+          name,
+          Verdict.OK,
+          stamp.hostname()
+              + " at "
+              + at
+              + (expected.osRelease().isEmpty()
+                  ? ""
+                  : ", with " + String.join(", ", expected.osRelease().keySet()) + " as expected"));
     }
     if (asked instanceof Asked.Unreadable) {
       return new Finding(
           name,
           Verdict.FAIL,
-          "a different image answers at "
+          "something else answers at "
               + at
-              + ": its agent's port answered, but not with a stamp ("
+              + ": its agent's port answered, but not with an identity ("
               + ((Asked.Unreadable) asked).why()
-              + "). Flash it with this build's release");
+              + "). Is Spotter's agent 0.3.0 or newer installed there?");
     }
     if (asked instanceof Asked.AgentMissing) {
       Asked.AgentMissing missing = (Asked.AgentMissing) asked;
@@ -170,8 +202,7 @@ public final class DeployCheck {
               + at
               + ", but its agent doesn't ("
               + missing.why()
-              + "): the agent isn't running, or this isn't this build's image. Read its journal,"
-              + " or flash it with this build's release");
+              + "): the agent isn't running. Read its journal");
     }
     if (asked instanceof Asked.Busy) {
       return new Finding(
@@ -190,70 +221,45 @@ public final class DeployCheck {
             + at
             + " ("
             + ((Asked.Unreachable) asked).why()
-            + "): deploying anyway, with its cameras off until it answers");
-  }
-
-  /** The comparison's sentences of one severity. */
-  private static List<String> messages(
-      List<CompiledTable.Mismatch> mismatches, CompiledTable.Severity severity) {
-    return mismatches.stream()
-        .filter(mismatch -> mismatch.severity() == severity)
-        .map(CompiledTable.Mismatch::message)
-        .toList();
+            + "): deploying anyway, without it until it answers");
   }
 
   /** Waits, before asking again: the clock for real, nothing in a test. */
   @FunctionalInterface
   public interface Sleeper {
+    /** Waits for real; interrupted, it stops waiting and keeps the thread's interrupt. */
+    Sleeper REAL =
+        millis -> {
+          try {
+            Thread.sleep(millis);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        };
+
     void sleep(long millis);
   }
 
   /**
-   * Every coprocessor's verdict, and one for the table itself when its team isn't the one being
-   * deployed to. One that doesn't answer with a stamp is asked once more, {@link #RETRY_MILLIS} on.
-   *
-   * @param deployTeam the team number the deploy goes to; 0 or less when unknown
+   * Every expected coprocessor's verdict, in order. One that doesn't answer with its identity is
+   * asked once more, {@link #RETRY_MILLIS} on.
    */
-  public static List<Finding> check(
-      CompiledTable table, int deployTeam, Asker asker, Sleeper sleeper) {
+  public static List<Finding> check(List<Expected> coprocessors, Asker asker, Sleeper sleeper) {
     List<Finding> findings = new ArrayList<>();
-    if (isExample(table)) {
-      findings.add(
-          new Finding(
-              "the table",
-              Verdict.WARN,
-              "coprocessors/coprocessors.yaml is the template's example (team 0), so no"
-                  + " coprocessor was checked: set your team number and list your coprocessors,"
-                  + " or computers: [] for none"));
-      return findings;
-    }
-    int team = table.table().team();
-    if (deployTeam > 0 && team != deployTeam) {
-      findings.add(
-          new Finding(
-              "the table",
-              Verdict.WARN,
-              "coprocessors/coprocessors.yaml is team "
-                  + team
-                  + "'s, and this deploy is to team "
-                  + deployTeam
-                  + "'s robot: set its team to ask the right addresses"));
-    }
-    for (Computer computer : table.table().computers()) {
-      String address = table.table().ip(computer);
-      Asked asked = asker.ask(address, computer.agentPort());
+    for (Expected expected : coprocessors) {
+      Asked asked = asker.ask(expected.address(), expected.agentPort());
       if (!(asked instanceof Asked.Stamped)) {
         sleeper.sleep(RETRY_MILLIS);
-        asked = asker.ask(address, computer.agentPort());
+        asked = asker.ask(expected.address(), expected.agentPort());
       }
-      findings.add(judge(table, computer, asked));
+      findings.add(judge(expected, asked));
     }
     return findings;
   }
 
   /**
-   * Asks a coprocessor's agent for its stamp over the network. An image builder's asker may go on
-   * to check what else answers when the agent doesn't ({@link Asked.AgentMissing}).
+   * Asks a coprocessor's agent for its identity over the network. A caller's asker may go on to
+   * check what else answers when the agent doesn't ({@link Asked.AgentMissing}).
    */
   public static Asked ask(String address, int agentPort) {
     AgentHttp agent =
@@ -269,7 +275,11 @@ public final class DeployCheck {
       return new Asked.Unreachable(Poller.why(noAgent));
     }
     try {
-      return new Asked.Stamped(Stamp.parse(new String(body, StandardCharsets.UTF_8)));
+      Stamp stamp = Stamp.parse(new String(body, StandardCharsets.UTF_8));
+      if (stamp.hostname().isEmpty()) {
+        return new Asked.Unreadable("its answer has no hostname");
+      }
+      return new Asked.Stamped(stamp);
     } catch (JsonException | IllegalArgumentException e) {
       return new Asked.Unreadable(String.valueOf(e.getMessage()));
     }
@@ -282,7 +292,7 @@ public final class DeployCheck {
    */
   public static boolean report(List<Finding> findings, PrintStream out) {
     if (findings.isEmpty()) {
-      out.println("Coprocessor check: the table has no coprocessors");
+      out.println("Coprocessor check: no coprocessors are expected");
       return true;
     }
     boolean failed = false;
@@ -299,30 +309,8 @@ public final class DeployCheck {
                 ? "Coprocessor check: none answered, so none was compared with this build."
                 : "Coprocessor check: "
                     + passed
-                    + (passed == 1 ? " answered, running" : " answered, each running")
-                    + " this build's image.");
+                    + (passed == 1 ? " answered" : " answered, each")
+                    + " as this build expects.");
     return !failed;
-  }
-
-  /**
-   * Checks every coprocessor in the table compiled into this build; exits 1 if the deploy must
-   * stop.
-   *
-   * @param args the team number deployed to, if known
-   */
-  public static void main(String[] args) {
-    int team = args.length > 0 && args[0].matches("\\d{1,5}") ? Integer.parseInt(args[0]) : 0;
-    CompiledTable table = CompiledTable.load();
-    Sleeper sleeper =
-        millis -> {
-          try {
-            Thread.sleep(millis);
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
-        };
-    if (!report(check(table, team, DeployCheck::ask, sleeper), System.out)) {
-      System.exit(1);
-    }
   }
 }

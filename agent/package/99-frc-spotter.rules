@@ -1,5 +1,5 @@
-// The coprocessor agent's account is refused everything its package's rule (60) and its packs'
-// rules (61 to 98) don't grant: rules run in the order of their names, so this one comes last.
+// The coprocessor agent's account is refused everything its package's rule (60) doesn't grant:
+// rules run in the order of their names, so this one comes after any other.
 polkit.addRule(function (action, subject) {
   if (subject.user === "frc-spotter") {
     return polkit.Result.NO;

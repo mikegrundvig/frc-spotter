@@ -1,4 +1,4 @@
-package com.michaelgrundvig.frc.spotter.table;
+package com.michaelgrundvig.frc.spotter.probes;
 
 import com.michaelgrundvig.frc.spotter.json.Json;
 import java.util.ArrayList;
@@ -8,14 +8,14 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The part of YAML a coprocessor table is written in, read without a YAML library (so nothing extra
- * reaches the robot program or the agent). It reads:
+ * The part of YAML a pack is written in, read without a YAML library (so nothing extra reaches the
+ * robot program or the agent). It reads:
  *
  * <ul>
  *   <li>mappings, one {@code key: value} per line, nested by indenting with spaces;
  *   <li>lists, one {@code - item} per line, at the key's indent or deeper; an item may itself be a
- *       mapping ({@code - name: vision-front} and its keys beneath);
- *   <li>one-line lists of plain values: {@code [front-left, front-right]};
+ *       mapping ({@code - id: vision.unit} and its keys beneath);
+ *   <li>one-line lists of plain values: {@code [vision.service, other.service]};
  *   <li>plain, {@code 'single'}, and {@code "double"} quoted values;
  *   <li>{@code #} comments, blank lines, and a leading {@code ---}.
  * </ul>
@@ -23,7 +23,7 @@ import java.util.Optional;
  * <p>Everything else YAML allows (tabs for indents, {@code {...}} mappings, anchors, tags,
  * multi-line values, several documents) is refused with its line number, rather than read in a way
  * the writer didn't mean. Values stay text: what a value means (a number, a name) is for whoever
- * reads it, so a camera named {@code no} stays {@code "no"}.
+ * reads it, so a value written {@code no} stays {@code "no"}.
  */
 final class YamlSubset {
   /** A parsed value. */
@@ -49,7 +49,7 @@ final class YamlSubset {
 
   private record Line(int number, int indent, String content) {}
 
-  /** The deepest a table nests: it needs three levels. */
+  /** The deepest a file nests: a pack needs three levels. */
   static final int MAX_DEPTH = 16;
 
   private final String source;
@@ -94,10 +94,10 @@ final class YamlSubset {
         if (content.equals("---")) {
           continue;
         }
-        throw error(source, i + 1, "start the table on the line after ---");
+        throw error(source, i + 1, "start the file on the line after ---");
       }
       if (indent == 0 && content.equals("...")) {
-        throw error(source, i + 1, "remove this ...; nothing may follow the table");
+        throw error(source, i + 1, "remove this ...; nothing may follow the file");
       }
       started = true;
       lines.add(new Line(i + 1, indent, content));
@@ -404,11 +404,11 @@ final class YamlSubset {
     return content.equals("-") || content.startsWith("- ");
   }
 
-  private TableException error(Line line, String message) {
+  private PackException error(Line line, String message) {
     return error(source, line.number(), message);
   }
 
-  private static TableException error(String source, int line, String message) {
-    return new TableException(List.of(source + ":" + line + ": " + message));
+  private static PackException error(String source, int line, String message) {
+    return new PackException(List.of(source + ":" + line + ": " + message));
   }
 }

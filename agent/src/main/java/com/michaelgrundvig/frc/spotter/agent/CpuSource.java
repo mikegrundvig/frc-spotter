@@ -50,7 +50,7 @@ final class CpuSource {
     }
     double window =
         previous == null
-            ? host.line(BootSource.UPTIME)
+            ? host.line(StampSource.UPTIME)
                 .map(line -> Double.parseDouble(line.split("\\s+")[0]))
                 .orElse(0.0)
             : (now - previous.micros()) / 1e6;

@@ -29,12 +29,8 @@ else
   install -m 0644 "$here/frc-spotter.sysusers" \
     "$root/usr/lib/sysusers.d/frc-spotter.conf"
   install -m 0644 "$here"/*-frc-spotter.rules "$root/usr/share/polkit-1/rules.d/"
-  if [ -f "$here/pack.json" ]; then
-    mkdir -p "$root/usr/lib/frc-spotter/packs/builtin"
-    install -m 0644 "$here/pack.json" "$root/usr/lib/frc-spotter/packs/builtin/pack.json"
-  fi
 fi
-mkdir -p "$root/etc/frc-spotter"
+mkdir -p "$root/etc/frc-spotter/packs"
 if [ "$root" = / ]; then
   systemd-sysusers frc-spotter.conf
   systemctl enable frc-spotter.service
@@ -46,4 +42,4 @@ else
   systemd-sysusers --root="$root" frc-spotter.conf
   systemctl --root="$root" enable frc-spotter.service
 fi
-echo "install.sh: the coprocessor agent is installed; configure it in /etc/frc-spotter/agent.json"
+echo "install.sh: the coprocessor agent is installed; copy the packs you want into /etc/frc-spotter/packs/"

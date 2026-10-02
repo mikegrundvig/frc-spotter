@@ -8,9 +8,9 @@ plugins {
     alias(libs.plugins.errorprone) apply false
 }
 
-// Every project's coordinates, so another build (an image builder's, with includeBuild) can use its
-// api, client, or harness by them: com.michaelgrundvig.frc.spotter:<project>. The version is the
-// agent's (-PagentVersion, as a release sets it).
+// Every project's coordinates, so another build (a robot program's, or a pack's tests, with
+// includeBuild) can use its api, client, or harness by them: com.michaelgrundvig.frc.spotter:<project>.
+// The version is the agent's (-PagentVersion, as a release sets it).
 allprojects {
     group = "com.michaelgrundvig.frc.spotter"
     version = (findProperty("agentVersion") ?: "0.1.0").toString()

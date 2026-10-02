@@ -13,6 +13,11 @@ probes:
   - id: kinds.command-exit
     kind: command
     argv: [ls, /srv/none]
+  # An interpreter is a program like any other: the pack's file is trusted, not what it runs.
+  - id: kinds.command-shell
+    kind: command
+    argv: [sh, -c, 'echo "answer $((6 * 7))"']
+    match: '^answer (\d+)$'
   - id: kinds.http
     kind: http
     url: http://localhost:5800/api/version.json

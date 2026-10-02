@@ -1,0 +1,11 @@
+PRETTY_NAME="Armbian 25.8.1 trixie"
+NAME="Debian GNU/Linux"
+VERSION_ID="13"
+VERSION="13 (trixie)"
+VERSION_CODENAME=trixie
+ID=debian
+HOME_URL="https://www.debian.org/"
+# An image builder's labels (os-release(5)): the agent passes them on as they are.
+IMAGE_ID=vision-orangepi
+IMAGE_VERSION='2027.1'
+PADDOCK_PHOTONVISION_VERSION="v2027.1.0 \"stable\""

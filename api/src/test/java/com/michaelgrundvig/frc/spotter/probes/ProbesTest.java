@@ -8,9 +8,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * The probe definitions: each kind's parameters checked as it's made, so nothing an image loads
- * runs a shell, reads outside an absolute path, or reaches another computer; and the compiled set
- * round-trips through the file the image carries.
+ * The probe definitions: each kind's parameters checked as it's made, so nothing a pack loads reads
+ * a path written other than plainly or reaches another computer; and the packs a computer runs,
+ * combined into one bounded set.
  */
 class ProbesTest {
   static final Probe UNIT =
@@ -26,92 +26,57 @@ class ProbesTest {
           20,
           List.of("/opt/x.jar"));
 
-  static ProbeSet set() {
-    return new ProbeSet(
-        "vision-front",
-        List.of("builtin", "vision"),
-        List.of(
-            UNIT,
-            COMMAND,
-            new Probe(
-                "status",
-                "vision",
-                new Check.Http("http://localhost:5800/api/status", 200, "", ""),
-                5,
-                2,
-                List.of()),
-            new Probe(
-                "stamp",
-                "table",
-                new Check.File(
-                    "/etc/coprocessor/stamp.json",
-                    Check.FileTest.JSON,
-                    -1,
-                    -1,
-                    "",
-                    "name",
-                    "vision-front",
-                    ""),
-                0,
-                2,
-                List.of()),
-            new Probe(
-                "camera.front-left",
-                "table",
-                new Check.Usb("/dev/v4l/by-path/platform-x-usb-0:1:1.0-video-index0", 480),
-                5,
-                2,
-                List.of()),
-            new Probe(
-                "builtin.memory",
-                "builtin",
-                new Check.Threshold("memory.available.percent", 10, Double.NaN),
-                5,
-                2,
-                List.of())),
-        List.of(new Step("vision.stop", List.of("systemctl", "stop", "vision.service"), 120)),
-        List.of("vision.service"),
-        List.of(
-            new Download(
-                "settings.zip",
-                List.of("/opt/x/bin/helper", "settings-zip"),
-                "application/zip",
-                1 << 20,
-                60)));
-  }
+  static final Probe STATUS =
+      new Probe(
+          "vision.status",
+          "vision",
+          new Check.Http("http://localhost:5800/api/status", 200, "", ""),
+          0,
+          2,
+          List.of());
+
+  static final Probe MEMORY =
+      new Probe(
+          "board.memory",
+          "board",
+          new Check.Threshold("memory.available.percent", 10, Double.NaN),
+          5,
+          2,
+          List.of());
 
   @Test
-  void aSetRoundTripsThroughItsFileAndItsHashIsTheFiles() {
-    ProbeSet set = set();
-    assertThat(ProbeSet.parse(set.text())).isEqualTo(set);
-    assertThat(set.hash()).isEqualTo(ProbeSet.sha256(set.text())).matches("[0-9a-f]{64}");
-    assertThat(set.probe("status").orElseThrow().kind()).isEqualTo(ProbeKind.HTTP);
-    assertThat(set.probe("stamp").orElseThrow().onDemand()).isTrue();
-    assertThat(set.download("settings.zip")).isPresent();
-    assertThat(set.download("none")).isEmpty();
+  void packsCombineInTheOrderTheyreRead() {
+    ProbeSet set =
+        ProbeSet.EMPTY
+            .with(new Pack("vision", List.of("vision.service"), List.of(UNIT, COMMAND, STATUS)))
+            .with(new Pack("board", List.of("vision.service", "board.service"), List.of(MEMORY)));
+    assertThat(set.packs()).containsExactly("vision", "board");
+    assertThat(set.probes()).containsExactly(UNIT, COMMAND, STATUS, MEMORY);
+    assertThat(set.journalUnits()).containsExactly("vision.service", "board.service");
+    assertThat(set.probe("vision.status").orElseThrow().kind()).isEqualTo(ProbeKind.HTTP);
+    assertThat(set.probe("vision.status").orElseThrow().onDemand()).isTrue();
+    assertThat(set.probe("none")).isEmpty();
     assertThat(ProbeSet.EMPTY.probes()).isEmpty();
   }
 
   @Test
-  void anotherFormatIsRefused() {
-    String text = set().text().replace("\"format\": 1", "\"format\": 2");
-    assertThatThrownBy(() -> ProbeSet.parse(text))
-        .hasMessageContaining("format 2: this agent reads format 1");
+  void aPackWhoseNameOrProbesAreTakenIsRefused() {
+    ProbeSet set = ProbeSet.EMPTY.with(new Pack("vision", List.of(), List.of(UNIT)));
+    assertThatThrownBy(() -> set.with(new Pack("vision", List.of(), List.of())))
+        .hasMessage("a pack named vision was read already");
+    assertThatThrownBy(() -> set.with(new Pack("other", List.of(), List.of(UNIT))))
+        .hasMessage("probe vision.unit is defined already, by pack vision");
   }
 
   @Test
-  void aCommandRunsOneProgramDirectly() {
+  void aCommandRunsOneProgramDirectlyWithItsArgumentsFixed() {
+    // Shells and interpreters are programs like any other: a pack's file is trusted by its owner.
     for (List<String> argv :
         List.of(
-            List.of("sh", "-c", "reboot"),
-            List.of("/bin/bash", "x"),
-            List.of("/usr/bin/env", "python3"),
-            List.of("sudo", "x"),
-            List.of("python3", "-c", "x"),
-            List.of("busybox", "sh"))) {
-      assertThatThrownBy(() -> new Check.Command(argv, 0, ""))
-          .as("%s", argv)
-          .hasMessageContaining("never a shell or a program that runs another");
+            List.of("python3", "/opt/team/check.py"),
+            List.of("/bin/sh", "-c", "echo ok"),
+            List.of("busybox", "true"))) {
+      assertThat(new Check.Command(argv, 0, "").argv()).isEqualTo(argv);
     }
     assertThatThrownBy(() -> new Check.Command(List.of(), 0, "")).hasMessageContaining("is empty");
     assertThatThrownBy(() -> new Check.Command(List.of("bin/x"), 0, ""))
@@ -221,30 +186,22 @@ class ProbesTest {
 
   @Test
   void aSetIsBoundedAndItsNamesUnique() {
-    assertThatThrownBy(
-            () ->
-                new ProbeSet("c", List.of(), List.of(UNIT, UNIT), List.of(), List.of(), List.of()))
-        .hasMessageContaining("two of its probes are named vision.unit");
+    assertThatThrownBy(() -> new ProbeSet(List.of(), List.of(UNIT, UNIT), List.of()))
+        .hasMessageContaining("two probes are named vision.unit");
+    assertThatThrownBy(() -> new ProbeSet(List.of("a", "a"), List.of(), List.of()))
+        .hasMessageContaining("two packs are named a");
     List<Probe> many =
         java.util.stream.IntStream.range(0, 65)
             .mapToObj(i -> new Probe("p" + i, "x", UNIT.check(), 1, 1, List.of()))
             .toList();
-    assertThatThrownBy(() -> new ProbeSet("c", List.of(), many, List.of(), List.of(), List.of()))
-        .hasMessageContaining("more than 64");
-    assertThatThrownBy(
-            () ->
-                new ProbeSet(
-                    "c", List.of(), List.of(), List.of(), List.of("not a unit"), List.of()))
+    assertThatThrownBy(() -> new ProbeSet(List.of(), many, List.of()))
+        .hasMessageContaining("more than the 64");
+    List<String> units =
+        java.util.stream.IntStream.range(0, 17).mapToObj(i -> "u" + i + ".service").toList();
+    assertThatThrownBy(() -> new ProbeSet(List.of(), List.of(), units))
+        .hasMessageContaining("17 journal units, more than 16");
+    assertThatThrownBy(() -> new ProbeSet(List.of(), List.of(), List.of("not a unit")))
         .hasMessageContaining("isn't a unit's name");
-    assertThatThrownBy(() -> new Step("s", List.of("x"), 1000)).hasMessageContaining("timeout");
-    assertThatThrownBy(() -> new Download("a/b", List.of("x"), "text/plain", 1, 1))
-        .hasMessageContaining("letters, digits");
-    assertThatThrownBy(() -> new Download("a", List.of("x"), "zip", 1, 1))
-        .hasMessageContaining("isn't a media type");
-    assertThatThrownBy(() -> new Download("a", List.of("x"), "text/plain", 0, 1))
-        .hasMessageContaining("maxBytes");
-    assertThatThrownBy(() -> new Download("a", List.of("x"), "text/plain", 1, 0))
-        .hasMessageContaining("timeout");
   }
 
   @Test

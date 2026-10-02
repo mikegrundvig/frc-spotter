@@ -1,6 +1,5 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
@@ -9,16 +8,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.regex.Pattern;
 
 /**
  * The coprocessor agent: {@code java -jar frc-spotter.jar [serve] [--port=N] [--bind=ADDRESS]
- * [--controller=ADDRESS] [--root=DIR]} serves the API (docs/agent.md) on the port its configuration
- * names ({@code /etc/frc-spotter/agent.json}), else the image's stamp file's, else 5808, unless
- * {@code --port} says. {@code --controller} names the one address a shutdown is taken from, over
- * the configuration's (a test's, where the robot is a test process behind the container runtime's
- * port forwarding). {@code --root} reads the computer's files from a folder rather than {@code /}:
- * a fixture tree, for tests.
+ * [--controller=ADDRESS] [--root=DIR]} serves the API (docs/agent.md) on 5808, with nothing to
+ * configure. {@code /etc/frc-spotter/agent.json} may override the port, the controller's address,
+ * and the address it listens on, and the command line overrides that: {@code --controller} names
+ * the one address a shutdown is taken from (a test's, where the robot is a test process behind the
+ * container runtime's port forwarding). {@code --root} reads the computer's files from a folder
+ * rather than {@code /}: a fixture tree, for tests.
  */
 public final class AgentMain {
   /** How long any one of the agent's own commands may take. */
@@ -53,7 +51,11 @@ public final class AgentMain {
     Map<String, String> options = options(args);
     String controller = options.get("controller");
     if (controller != null) {
-      checkAddress(controller);
+      checkAddress(controller, "--controller");
+    }
+    String bind = options.get("bind");
+    if (bind != null) {
+      checkAddress(bind, "--bind");
     }
     Configuration configuration = Configuration.read(host);
     for (String problem : configuration.problems()) {
@@ -63,40 +65,34 @@ public final class AgentMain {
     AgentServer server =
         new AgentServer(
             agent,
-            new InetSocketAddress(
-                options.getOrDefault("bind", "0.0.0.0"),
-                port(options, configuration, agent.stampFile().agentPort())),
+            new InetSocketAddress(bind(options, configuration), port(options, configuration)),
             new RateLimitedLog(host::log, host::monotonicMicros, AgentServer.REFUSAL_LOG_MICROS));
     agent.start();
     return server;
   }
 
-  /**
-   * The port to serve on: {@code --port}'s, else the configuration's (when it could be read), else
-   * the stamp file's.
-   */
-  static int port(Map<String, String> options, Configuration configuration, int stampPort) {
+  /** The port to serve on: {@code --port}'s, else the configuration's (5808 unless it says). */
+  static int port(Map<String, String> options, Configuration configuration) {
     if (options.containsKey("port")) {
       return Integer.parseInt(options.getOrDefault("port", "0"));
     }
-    boolean configured =
-        !configuration.source().isEmpty() && configuration.config() != AgentConfig.NONE;
-    return configured ? configuration.config().port() : stampPort;
+    return configuration.config().port();
   }
 
-  /** An IPv4 address written out: four numbers from 0 to 255, without leading zeros. */
-  private static final Pattern IPV4 =
-      Pattern.compile(
-          "((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])");
+  /** The address to listen on: {@code --bind}'s, else the configuration's, else every one. */
+  static String bind(Map<String, String> options, Configuration configuration) {
+    String bind = options.getOrDefault("bind", configuration.config().bind());
+    return bind.isEmpty() ? "0.0.0.0" : bind;
+  }
 
   /**
-   * Checks that {@code --controller} is an IPv4 address written out, as a request's address is
-   * compared with it: never a name, which would be looked up.
+   * Checks that an address given on the command line is an IPv4 address written out, as a request's
+   * address is compared with it: never a name, which would be looked up.
    */
-  static void checkAddress(String address) {
-    if (!IPV4.matcher(address).matches()) {
+  static void checkAddress(String address, String option) {
+    if (!AgentConfig.IPV4.matcher(address).matches()) {
       throw new IllegalArgumentException(
-          "--controller must be an IPv4 address, such as 10.12.34.2: " + address);
+          option + " must be an IPv4 address, such as 10.12.34.2: " + address);
     }
   }
 

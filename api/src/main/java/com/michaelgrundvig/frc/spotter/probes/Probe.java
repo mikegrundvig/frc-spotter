@@ -4,13 +4,13 @@ import com.michaelgrundvig.frc.spotter.json.JsonValue;
 import java.util.List;
 
 /**
- * One probe, as an image defines it: a named check the agent runs, on its own schedule or when the
+ * One probe, as a pack defines it: a named check the agent runs, on its own schedule or when the
  * robot asks, and reports. The robot can only name a probe; everything it runs, reads, or asks is
- * fixed here, in the image.
+ * fixed here, in the pack's file.
  *
  * @param id its name: printable ASCII, no {@code /}, no space at either end, at most {@link
  *     #MAX_ID} characters; unique on its computer
- * @param pack the pack it came from ({@code table} for one written in the coprocessor table)
+ * @param pack the pack it came from
  * @param check what it checks
  * @param everySeconds how often it runs, in seconds; 0 to run only when asked
  * @param timeoutSeconds how long a run may take before it's stopped and counted an error
@@ -65,7 +65,7 @@ public record Probe(
     }
   }
 
-  /** Checks a name a probe, step, or download goes by. */
+  /** Checks a name a probe goes by. */
   static void checkId(String id, String what) {
     if (id.isEmpty()
         || id.length() > MAX_ID

@@ -1,13 +1,9 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,8 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Runs commands as processes: the only place the agent starts one. What a command prints is read as
  * it's printed and the process is stopped once the bounds are reached, so a journal of any size
  * costs no more than a page; one timer thread stops a process that overruns its time. Of its
- * standard error, the first line is kept (why it failed) and the rest read and dropped. Each runs
- * with {@link #JAVA_VARIABLE} naming the agent's own Java.
+ * standard error, the first line is kept (why it failed) and the rest read and dropped.
  */
 final class ProcessCommands implements Commands, AutoCloseable {
   private final ScheduledExecutorService timer =
@@ -49,15 +44,11 @@ final class ProcessCommands implements Commands, AutoCloseable {
   /** How long the end of a command's standard error is waited for, once it has exited. */
   private static final long ERRORS_WAIT_MILLIS = 200;
 
-  /** The Java this agent runs on, which its commands' helpers run on too. */
-  private final String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-
-  /** A command's process: its input empty, the agent's Java named. */
+  /** A command's process, its input empty. */
   private Process start(List<String> command) throws IOException {
-    ProcessBuilder builder =
-        new ProcessBuilder(command).redirectInput(ProcessBuilder.Redirect.from(nullDevice()));
-    builder.environment().put(JAVA_VARIABLE, java);
-    return builder.start();
+    return new ProcessBuilder(command)
+        .redirectInput(ProcessBuilder.Redirect.from(nullDevice()))
+        .start();
   }
 
   /**
@@ -97,32 +88,6 @@ final class ProcessCommands implements Commands, AutoCloseable {
         },
         timeout.toMillis(),
         TimeUnit.MILLISECONDS);
-  }
-
-  @Override
-  public Output toFile(List<String> command, Duration timeout, long maxBytes, Path file)
-      throws IOException {
-    Process process = start(command);
-    Future<String> errors = errors(process);
-    AtomicBoolean timedOut = new AtomicBoolean();
-    ScheduledFuture<?> deadline = deadline(process, timeout, timedOut);
-    boolean truncated = false;
-    try (InputStream in = process.getInputStream();
-        OutputStream out = Files.newOutputStream(file)) {
-      byte[] chunk = new byte[8192];
-      long written = 0;
-      int read;
-      while ((read = in.read(chunk)) != -1) {
-        if (written + read > maxBytes) {
-          truncated = true;
-          process.destroyForcibly();
-          break;
-        }
-        out.write(chunk, 0, read);
-        written += read;
-      }
-    }
-    return finish(process, timeout, timedOut, deadline, List.of(), truncated, errors);
   }
 
   @Override

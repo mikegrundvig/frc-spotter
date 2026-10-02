@@ -3,14 +3,20 @@ package com.michaelgrundvig.frc.spotter.api;
 import java.util.List;
 
 /**
- * The coprocessor agent's HTTP API, version 1: JSON, on the computer's {@code agentPort} (5808
- * unless the table says otherwise). Read-only but for one action, {@link #SHUTDOWN}, which only the
- * robot controller may ask for. It runs nothing a request says, only what the computer's packs
- * define, by name, and bounds every answer. A refusal or a failure answers {@code {"error": "..."}}
- * with its status: 400 for a bad query, 403, 404, 405, 503 when busy, or 500.
+ * The coprocessor agent's HTTP API, version 1: JSON, on {@link #PORT} unless the computer's {@code
+ * /etc/frc-spotter/agent.json} says otherwise. Read-only but for one action, {@link #SHUTDOWN},
+ * which only the robot controller may ask for. It runs nothing a request says, only what the
+ * computer's packs define, by name, and bounds every answer. A refusal or a failure answers {@code
+ * {"error": "..."}} with its status: 400 for a bad query, 403, 404, 405, 503 when busy, or 500.
  */
 public final class AgentApi {
-  /** Which image this is, and as which computer: a {@link Stamp}. */
+  /** The agent's port unless its configuration says otherwise: in FRC's team range, 5800-5810. */
+  public static final int PORT = 5808;
+
+  /**
+   * Which computer this is: a {@link Stamp}, its hostname, addresses, MAC, boot, and {@code
+   * /etc/os-release}.
+   */
   public static final String STAMP = "/v1/stamp";
 
   /** The computer's health: a {@link Health}. */
@@ -44,23 +50,20 @@ public final class AgentApi {
   /** How often one probe may be run when asked: more often answers its last result. */
   public static final int PROBE_RUN_SECONDS = 2;
 
-  /** A file a pack serves: {@code GET /v1/downloads/<name>}. */
-  public static final String DOWNLOADS = "/v1/downloads";
-
   /**
-   * Shuts the computer down (POST): runs the steps its packs define first (a pack stops the
-   * software it watches, so it saves its state), then powers off. Only the robot controller ({@link
-   * #CONTROLLER}, or the address the computer's configuration names) may ask; anyone else gets 403.
-   * It answers 202 with a {@link ShutdownAnswer} at once, then acts; asking again while it's under
-   * way answers 202 and does nothing more.
+   * Powers the computer off (POST), with {@code systemctl poweroff}, which stops every service in
+   * order first. Only the robot controller ({@link #CONTROLLER} on the computer's own 10.TE.AM.x
+   * network, or the address its configuration names) may ask; anyone else gets 403. It answers 202
+   * with a {@link ShutdownAnswer} at once, then acts; asking again while it's under way answers 202
+   * and does nothing more.
    */
   public static final String SHUTDOWN = "/v1/shutdown";
 
-  /** The last number of the robot controller's address, 10.TE.AM.2: who may ask to shut down. */
+  /**
+   * The last number of the robot controller's address, 10.TE.AM.2: who may ask to shut down, on the
+   * network of the computer's own 10.TE.AM.x address.
+   */
   public static final int CONTROLLER = 2;
-
-  /** Where the image keeps its stamp. */
-  public static final String STAMP_FILE = "/etc/coprocessor/stamp.json";
 
   /** How many journal entries a page has unless the request says. */
   public static final int DEFAULT_JOURNAL_PAGE = 100;

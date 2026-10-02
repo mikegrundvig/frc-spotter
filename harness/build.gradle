@@ -3,9 +3,9 @@
 // Toxiproxy), which a pack's own tests use too, and Spotter's own container tests (src/test,
 // @ContainerTest, tagged "container"): the agent installed from its .deb in a plain Debian 13
 // container under systemd, with no Java of its own, its root read-only and /data writable as on a
-// board; the -all.jar on a stock Java 17. The tests play the robot with Spotter's own client. They need Docker or Podman running
-// Linux containers, and skip themselves without (as on a Windows laptop); in CI on Linux they must
-// run. `test -Pquick` leaves them out unless --tests names them.
+// board; the -all.jar on a stock Java 17. The tests play the robot with Spotter's own client. They
+// need Docker or Podman running Linux containers, and skip themselves without (as on a Windows
+// laptop); in CI on Linux they must run. `test -Pquick` leaves them out unless --tests names them.
 
 plugins {
     id "java-library"
@@ -31,11 +31,6 @@ configurations {
         canBeConsumed = false
         canBeResolved = true
     }
-    // The example pack with a Java helper, as installed.
-    javaHelperPack {
-        canBeConsumed = false
-        canBeResolved = true
-    }
     // The agent's package as installed (with DEBIAN/), which the tests build into a .deb and install.
     agentPackage {
         canBeConsumed = false
@@ -46,7 +41,6 @@ configurations {
 dependencies {
     agentJar project(path: ":agent", configuration: "agentJarRelease")
     agentPackage project(path: ":agent", configuration: "agentPackage")
-    javaHelperPack project(path: ":java-helper-pack", configuration: "packFolder")
 
     errorprone libs.errorprone.core
     errorprone libs.nullaway
@@ -67,14 +61,11 @@ tasks.named("test") {
     useJUnitPlatform()
     def agentJar = configurations.agentJar
     def agentPackage = configurations.agentPackage
-    def javaHelperPack = configurations.javaHelperPack
     inputs.files(agentJar).withPropertyName("agentJar").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(agentPackage).withPropertyName("agentPackage").withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(javaHelperPack).withPropertyName("javaHelperPack").withPathSensitivity(PathSensitivity.RELATIVE)
     doFirst {
         systemProperty "spotter.agentJar", agentJar.singleFile.absolutePath
         systemProperty "spotter.agentPackage", agentPackage.singleFile.absolutePath
-        systemProperty "spotter.javaHelperPack", javaHelperPack.singleFile.absolutePath
     }
     // In CI on Linux, Docker is there: a container test that can't run fails rather than skips.
     def os = System.getProperty("os.name").toLowerCase()
@@ -97,12 +88,4 @@ apply from: rootProject.file("gradle/quality.gradle")
 // two minutes are for unit tests).
 tasks.named("test") {
     systemProperty "junit.jupiter.execution.timeout.default", "10 m"
-}
-
-// The built-in pack, as the robot's build reads it, for the tests to compile what the agent runs.
-tasks.named("processTestResources") {
-    from(rootProject.file("packs/builtin/pack.yaml")) {
-        into "harness"
-        rename { "builtin.yaml" }
-    }
 }

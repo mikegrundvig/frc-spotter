@@ -1,6 +1,5 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
-import com.michaelgrundvig.frc.spotter.probes.Step;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
@@ -9,27 +8,25 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The agent's one action: a soft power-off, so a coprocessor kept powered after the robot is
- * switched off (by a battery pack, say) shuts down cleanly rather than losing power mid-write. It
- * runs the steps the computer's packs define first (a pack stops the software it watches, so its
- * settings are saved), each within its own time, then powers the computer off, whether the steps
- * succeeded or not. It happens once: asking again while it's under way does nothing more.
+ * switched off (by a battery pack, say) shuts down cleanly rather than losing power mid-write.
+ * {@code systemctl poweroff} stops every service in order, and waits for each, before the power
+ * goes, so the software on it saves what it has. It happens once: asking again while it's under way
+ * does nothing more.
  *
  * <p>The agent runs unprivileged; a polkit rule its package installs lets its user power off, and
- * each pack's rule lets it do what that pack's steps need (docs/agent.md).
+ * nothing else (docs/agent.md).
  */
 final class Shutdown {
   /** How long powering off may take to be accepted. */
   static final Duration POWEROFF_TIMEOUT = Duration.ofSeconds(30);
 
   private final Host host;
-  private final List<Step> steps;
   private final Executor executor;
   private final AtomicBoolean requested = new AtomicBoolean();
   private volatile String failure = "";
 
-  Shutdown(Host host, List<Step> steps, Executor executor) {
+  Shutdown(Host host, Executor executor) {
     this.host = host;
-    this.steps = List.copyOf(steps);
     this.executor = executor;
   }
 
@@ -53,33 +50,12 @@ final class Shutdown {
       return false;
     }
     failure = "";
-    host.log(
-        "Shutdown asked for by "
-            + from
-            + ": "
-            + (steps.isEmpty()
-                ? ""
-                : "running "
-                    + String.join(", ", steps.stream().map(Step::name).toList())
-                    + ", then ")
-            + "powering off");
+    host.log("Shutdown asked for by " + from + ": powering off");
     executor.execute(this::run);
     return true;
   }
 
   private void run() {
-    for (Step step : steps) {
-      Duration timeout = Duration.ofMillis(Math.round(step.timeoutSeconds() * 1000));
-      try {
-        Commands.Output output = host.commands().run(step.argv(), timeout, 16, 4096);
-        if (output.exit() != 0) {
-          host.log(
-              "Step " + step.name() + " failed (" + output.describe() + "); powering off anyway");
-        }
-      } catch (IOException e) {
-        host.log("Step " + step.name() + " failed (" + e.getMessage() + "); powering off anyway");
-      }
-    }
     String failed;
     try {
       Commands.Output off =

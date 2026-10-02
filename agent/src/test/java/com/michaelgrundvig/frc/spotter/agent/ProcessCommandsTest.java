@@ -85,39 +85,6 @@ class ProcessCommandsTest {
   }
 
   @Test
-  void aDownloadIsWrittenToItsFileWithinItsBound() throws IOException {
-    try (ProcessCommands commands = new ProcessCommands()) {
-      Path file = dir.resolve("out");
-      Commands.Output whole =
-          commands.toFile(program(3, false), Duration.ofSeconds(60), 1000, file);
-      assertThat(whole.exit()).isZero();
-      assertThat(Files.readString(file)).isEqualTo("line 0\nline 1\nline 2\nno newline");
-      Commands.Output over =
-          commands.toFile(program(1000, true), Duration.ofSeconds(60), 100, file);
-      assertThat(over.truncated()).isTrue();
-      assertThat(over.exit()).isEqualTo(-1);
-      assertThat(Files.size(file)).isLessThanOrEqualTo(100);
-    }
-  }
-
-  @Test
-  void everyCommandIsToldTheJavaTheAgentRunsOn() throws IOException {
-    Path source = dir.resolve("Env.java");
-    Files.writeString(
-        source,
-        "class Env { public static void main(String[] a) {"
-            + " System.out.println(System.getenv(\""
-            + Commands.JAVA_VARIABLE
-            + "\")); } }");
-    try (ProcessCommands commands = new ProcessCommands()) {
-      Commands.Output output =
-          commands.run(
-              List.of(JAVA, "-Xlog:disable", source.toString()), Duration.ofSeconds(60), 10, 1000);
-      assertThat(output.lines()).containsExactly(JAVA);
-    }
-  }
-
-  @Test
   void theFirstLineOfWhatItWritesToStandardErrorIsKept() throws IOException {
     Path source = dir.resolve("Fail.java");
     Files.writeString(

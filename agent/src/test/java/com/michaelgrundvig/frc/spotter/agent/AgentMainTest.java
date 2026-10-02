@@ -3,7 +3,6 @@ package com.michaelgrundvig.frc.spotter.agent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -30,7 +29,7 @@ class AgentMainTest {
   @Test
   void theControllerCanBeNamedAndThenAShutdownIsTakenFromItAlone() throws Exception {
     Fixture fixture = new Fixture(dir);
-    // The stamp's team is 1234, whose controller is 10.12.34.2; this test asks from 127.0.0.1.
+    // It's at 10.12.34.11, whose controller is 10.12.34.2; this test asks from 127.0.0.1.
     HttpRequest shutdown =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:0/v1/shutdown"))
             .POST(HttpRequest.BodyPublishers.noBody())
@@ -54,11 +53,13 @@ class AgentMainTest {
   @Test
   void theControllerIsAnAddressNeverAName() {
     for (String bad : List.of("robot.local", "10.12.34", "10.12.34.256", "::1", "")) {
-      assertThatThrownBy(() -> AgentMain.checkAddress(bad))
+      assertThatThrownBy(() -> AgentMain.checkAddress(bad, "--controller"))
           .as(bad)
           .hasMessageContaining("--controller must be an IPv4 address");
     }
-    AgentMain.checkAddress("10.12.34.2");
+    AgentMain.checkAddress("10.12.34.2", "--controller");
+    assertThatThrownBy(() -> AgentMain.serve(new Fixture(dir).host, List.of("--bind=any"), r -> {}))
+        .hasMessageContaining("--bind must be an IPv4 address");
   }
 
   private static HttpResponse<String> send(AgentServer server, HttpRequest request)
@@ -73,21 +74,25 @@ class AgentMainTest {
   }
 
   @Test
-  void itServesOnTheConfigurationsPortElseTheStamps() throws Exception {
+  void itServesOn5808UnlessItsOverridesOrCommandLineSay() throws Exception {
     Fixture fixture = new Fixture(dir);
-    fixture.config(new AgentConfig("vision-front", "", 5809, List.of(), List.of(), List.of()));
+    Configuration none = Configuration.read(fixture.host);
+    assertThat(AgentMain.port(Map.of(), none)).isEqualTo(5808);
+    assertThat(AgentMain.bind(Map.of(), none)).isEqualTo("0.0.0.0");
+    fixture.config("{\"port\": 5809, \"bind\": \"127.0.0.1\"}");
     Configuration configured = Configuration.read(fixture.host);
-    assertThat(AgentMain.port(Map.of(), configured, 5808)).isEqualTo(5809);
-    assertThat(AgentMain.port(Map.of("port", "5807"), configured, 5808)).isEqualTo(5807);
-    fixture.write(AgentConfig.PATH, "{\"port\": 80}");
-    assertThat(AgentMain.port(Map.of(), Configuration.read(fixture.host), 5808)).isEqualTo(5808);
-    fixture.delete(AgentConfig.PATH);
-    assertThat(AgentMain.port(Map.of(), Configuration.read(fixture.host), 5806)).isEqualTo(5806);
+    assertThat(AgentMain.port(Map.of(), configured)).isEqualTo(5809);
+    assertThat(AgentMain.bind(Map.of(), configured)).isEqualTo("127.0.0.1");
+    assertThat(AgentMain.port(Map.of("port", "5807"), configured)).isEqualTo(5807);
+    assertThat(AgentMain.bind(Map.of("bind", "10.12.34.11"), configured)).isEqualTo("10.12.34.11");
+    // Overrides that can't be read are ignored.
+    fixture.config("{\"port\": 80}");
+    assertThat(AgentMain.port(Map.of(), Configuration.read(fixture.host))).isEqualTo(5808);
     assertThat(AgentMain.options(List.of("--root=/x"))).containsEntry("root", "/x");
   }
 
   @Test
-  void itServesOnTheStampsPortUnlessToldOtherwise() throws Exception {
+  void itServesItsStampWithNothingConfigured() throws Exception {
     Fixture fixture = new Fixture(dir);
     try (AgentServer server =
         AgentMain.serve(fixture.host, List.of("--port=0", "--bind=127.0.0.1"), Runnable::run)) {
@@ -99,7 +104,21 @@ class AgentMainTest {
                       .build(),
                   HttpResponse.BodyHandlers.ofString());
       assertThat(stamp.statusCode()).isEqualTo(200);
+      assertThat(stamp.body()).contains("\"hostname\":\"vision-front\"");
     }
-    assertThat(new StampSource(fixture.host).file().agentPort()).isEqualTo(5808);
+  }
+
+  @Test
+  void whatItCouldntReadIsLoggedAsItStarts() throws Exception {
+    Fixture fixture = new Fixture(dir);
+    fixture.pack("mine", "pack: mine\n");
+    fixture.owners.put("/etc/frc-spotter/packs/mine.yaml", new Host.Owner(1000, 0600));
+    try (AgentServer server =
+        AgentMain.serve(fixture.host, List.of("--port=0", "--bind=127.0.0.1"), Runnable::run)) {
+      assertThat(server.port()).isPositive();
+    }
+    assertThat(fixture.log())
+        .contains(
+            "pack ignored: /etc/frc-spotter/packs/mine.yaml isn't root's (its owner is user 1000)");
   }
 }

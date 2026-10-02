@@ -12,19 +12,20 @@ import com.michaelgrundvig.frc.spotter.api.Memory;
 import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.api.ThermalZone;
-import com.michaelgrundvig.frc.spotter.probes.Download;
 import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
-import com.michaelgrundvig.frc.spotter.table.Table;
 import java.io.IOException;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeSet;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -40,6 +41,10 @@ final class Agent implements AutoCloseable {
 
   /** The most problems a health answer carries. */
   static final int MAX_PROBLEMS = 10;
+
+  /** An address on a robot's network, 10.TE.AM.x: its first three numbers. */
+  private static final Pattern ROBOT_NETWORK =
+      Pattern.compile("(10\\.[0-9]{1,3}\\.[0-9]{1,3})\\.[0-9]{1,3}");
 
   private final Host host;
   private final Configuration configuration;
@@ -71,7 +76,8 @@ final class Agent implements AutoCloseable {
    * @param executor where work that outlasts a request runs: reading health afresh, and the
    *     shutdown once its request is answered
    * @param controllerOverride the one address a shutdown is taken from, given on the command line;
-   *     null to take the configuration's (or the robot controller's, 10.TE.AM.2, from the stamp)
+   *     null to take the configuration's, or else the robot controller's, 10.TE.AM.2, on the
+   *     computer's own 10.TE.AM.x network
    */
   Agent(
       Host host,
@@ -93,7 +99,7 @@ final class Agent implements AutoCloseable {
     this.probes =
         new Probes(
             host, configuration.probes(), new ProbeRunner(host, () -> Measurements.of(health())));
-    this.shutdown = new Shutdown(host, configuration.probes().beforeShutdown(), executor);
+    this.shutdown = new Shutdown(host, executor);
     this.background = executor;
   }
 
@@ -102,7 +108,7 @@ final class Agent implements AutoCloseable {
     probes.start();
   }
 
-  /** The probes compiled for this computer. */
+  /** The probes its packs define. */
   ProbeSet probeSet() {
     return configuration.probes();
   }
@@ -112,22 +118,9 @@ final class Agent implements AutoCloseable {
     return probes;
   }
 
-  /**
-   * The stamp, with this boot, the MAC address, and the hash of the probes it runs. Without a stamp
-   * file (an agent installed outside the image), it's named from its configuration.
-   */
+  /** Which computer this is: its hostname, addresses, MAC, boot, and os-release. */
   Stamp stamp() throws IOException {
-    Stamp file = stamp.file().stamp();
-    if (file.name().isEmpty() && !configuration.config().name().isEmpty()) {
-      file = new Stamp(configuration.config().name(), 0, "", "", "", "", Map.of(), "", "", "");
-    }
-    return file.withRuntime(stamp.bootId(), stamp.mac())
-        .withProbesHash(configuration.probes().hash());
-  }
-
-  /** The stamp file as the image wrote it, with the port it says to serve on. */
-  StampSource.StampFile stampFile() throws IOException {
-    return stamp.file();
+    return stamp.read();
   }
 
   /** The configuration this agent read, and where from. */
@@ -178,7 +171,7 @@ final class Agent implements AutoCloseable {
         part(
             "boot",
             boot::read,
-            new Boot(stamped.bootId(), Double.NaN, now, null, "", false, ""),
+            new Boot(stamped.bootId(), Double.NaN, now, null, "", false),
             problems);
     Cpu load = part("cpu", cpu::read, Cpu.UNKNOWN, problems);
     List<ThermalZone> zones = part("thermal", thermal::read, List.of(), problems);
@@ -188,6 +181,10 @@ final class Agent implements AutoCloseable {
         part("journal", () -> journal.summary(stamped.bootId()), JournalSummary.EMPTY, problems);
     Optional<Drive> nvme = part("drive", drive::read, Optional.empty(), problems);
     problems.addAll(configuration.problems());
+    Controller controller = part("controller", this::controller, Controller.NONE, problems);
+    if (controller.address().isEmpty() && !controller.why().isEmpty()) {
+      problems.add("shutdown refused: " + controller.why());
+    }
     if (shutdown.requested()) {
       problems.add(0, "shutting down: asked for by the robot");
     } else if (!shutdown.failure().isEmpty()) {
@@ -228,20 +225,6 @@ final class Agent implements AutoCloseable {
     return journal.page(position, priority, units, limit);
   }
 
-  /**
-   * Makes a download its packs define into {@code file}: what it printed, or why it failed.
-   *
-   * @throws IOException when its program couldn't be started, or the file written
-   */
-  Commands.Output download(Download download, Path file) throws IOException {
-    return host.commands()
-        .toFile(
-            download.argv(),
-            Duration.ofMillis(Math.round(download.timeoutSeconds() * 1000)),
-            download.maxBytes(),
-            file);
-  }
-
   /** Writes a line to the agent's log. */
   void log(String message) {
     host.log(message);
@@ -261,36 +244,60 @@ final class Agent implements AutoCloseable {
   }
 
   /**
-   * The one address a shutdown is taken from: the command line's, else the configuration's, else
-   * the robot controller's on the stamp's team (10.TE.AM.2). Empty when there's none: no
-   * configuration naming one, and no stamp (no name or team), so no robot to take one from.
+   * The one address a shutdown is taken from, or why there's none.
+   *
+   * @param address the address; empty when there's none, and none is taken
+   * @param why where the address came from, or why there's none
    */
-  Optional<String> controller() throws IOException {
+  record Controller(String address, String why) {
+    static final Controller NONE = new Controller("", "");
+  }
+
+  /**
+   * The one address a shutdown is taken from: the command line's, else the configuration's, else
+   * the robot controller's (10.TE.AM.2) on the network of the computer's own 10.TE.AM.x address, as
+   * its addresses are now. None when it has no 10.x address, or has them on more than one such
+   * network, since then it can't tell which robot it's on.
+   */
+  Controller controller() throws IOException {
     if (controllerOverride != null) {
-      return Optional.of(controllerOverride);
+      return new Controller(controllerOverride, "named on the command line");
     }
     if (!configuration.config().controller().isEmpty()) {
-      return Optional.of(configuration.config().controller());
+      return new Controller(configuration.config().controller(), "named in " + AgentConfig.PATH);
     }
-    Stamp stamped = stamp.file().stamp();
-    if (stamped.name().isEmpty() || stamped.team() <= 0) {
-      return Optional.empty();
+    TreeSet<String> networks = new TreeSet<>();
+    for (String address : host.addresses()) {
+      Matcher matcher = ROBOT_NETWORK.matcher(address);
+      if (matcher.matches()) {
+        networks.add(matcher.group(1));
+      }
     }
-    return Optional.of(controllerOf(stamped.team()));
+    if (networks.isEmpty()) {
+      return new Controller(
+          "",
+          "this computer has no 10.TE.AM.x address to find the robot controller (10.TE.AM."
+              + AgentApi.CONTROLLER
+              + ") by; name it in "
+              + AgentConfig.PATH
+              + " if it's elsewhere");
+    }
+    if (networks.size() > 1) {
+      return new Controller(
+          "",
+          "this computer has addresses on more than one 10.x network ("
+              + String.join(", ", networks.stream().map(n -> n + ".x").toList())
+              + "), so which robot controller it answers to isn't clear; name it in "
+              + AgentConfig.PATH);
+    }
+    return new Controller(
+        networks.first() + "." + AgentApi.CONTROLLER, "the robot controller on its own network");
   }
 
-  /** The names this computer answers to: its name, and its name in .local. */
+  /** The names this computer answers to: its hostname, and its hostname in .local. */
   List<String> names() throws IOException {
-    String name = stamp.file().stamp().name();
-    if (name.isEmpty()) {
-      name = configuration.config().name();
-    }
+    String name = stamp.hostname().toLowerCase(Locale.ROOT);
     return name.isEmpty() ? List.of() : List.of(name, name + ".local");
-  }
-
-  /** The robot controller's address on a team's network: 10.TE.AM.2. */
-  static String controllerOf(int team) {
-    return Table.ip(team, AgentApi.CONTROLLER);
   }
 
   private interface Reading<T> {

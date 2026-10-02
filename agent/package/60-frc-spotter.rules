@@ -1,7 +1,7 @@
 // The coprocessor agent's soft-off (docs/agent.md): its account may power the computer off,
 // also while someone is logged in over SSH. Its POST /v1/shutdown takes requests from its
-// controller only. Each pack's rule (61 to 98) adds what that pack's steps need; the agent package's
-// 99 refuses its account everything else.
+// controller only. The agent package's 99 refuses its account everything else: packs bring no
+// rules.
 polkit.addRule(function (action, subject) {
   if (subject.user !== "frc-spotter") {
     return polkit.Result.NOT_HANDLED;

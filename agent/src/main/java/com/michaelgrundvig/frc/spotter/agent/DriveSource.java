@@ -11,9 +11,9 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The NVMe drive's health. Reading it takes root, so a root job on the image writes nvme-cli's
- * reports to {@code /run/coprocessor/} every minute, and the agent reads those files only: {@code
- * nvme smart-log --output-format=json} and {@code nvme id-ctrl --output-format=json}.
+ * The NVMe drive's health. Reading it takes root, so a root job writes nvme-cli's reports to {@code
+ * /run/frc-spotter/} every minute, and the agent reads those files only: {@code nvme smart-log
+ * --output-format=json} and {@code nvme id-ctrl --output-format=json}.
  *
  * <p>nvme-cli's JSON has changed between versions, so values are read leniently (unverified against
  * the image's nvme-cli): a temperature may be a number in kelvins (as the drive reports it) or text
@@ -21,8 +21,8 @@ import org.jspecify.annotations.Nullable;
  * critical warning may be a number or an object with a {@code value}.
  */
 final class DriveSource {
-  static final String SMART_LOG = "/run/coprocessor/nvme-smart-log.json";
-  static final String ID_CTRL = "/run/coprocessor/nvme-id-ctrl.json";
+  static final String SMART_LOG = "/run/frc-spotter/nvme-smart-log.json";
+  static final String ID_CTRL = "/run/frc-spotter/nvme-id-ctrl.json";
   static final String DEVICE = "/dev/nvme0";
   private static final Pattern NUMBER = Pattern.compile("-?[0-9]+(\\.[0-9]+)?");
 
@@ -32,7 +32,7 @@ final class DriveSource {
     this.host = host;
   }
 
-  /** The drive's health; empty when the image wrote none (no NVMe drive). */
+  /** The drive's health; empty when none was written (no NVMe drive, or no job reading it). */
   Optional<Drive> read() throws IOException {
     Optional<String> text = host.read(SMART_LOG);
     if (text.isEmpty() || text.get().isBlank()) {

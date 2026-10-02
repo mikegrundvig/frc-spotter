@@ -1,15 +1,15 @@
-package com.michaelgrundvig.frc.spotter.table;
+package com.michaelgrundvig.frc.spotter.probes;
 
 import java.util.List;
 
-/** A coprocessor table that can't be used, with every problem found, each saying where. */
-public class TableException extends RuntimeException {
+/** A pack that can't be used, with every problem found, each saying where (its file and line). */
+public class PackException extends RuntimeException {
   private static final long serialVersionUID = 1L;
 
   private final List<String> problems;
 
-  /** A table with these problems. */
-  public TableException(List<String> problems) {
+  /** A pack with these problems. */
+  public PackException(List<String> problems) {
     super(String.join("\n", problems));
     this.problems = List.copyOf(problems);
   }

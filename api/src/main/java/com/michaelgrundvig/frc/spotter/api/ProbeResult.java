@@ -3,11 +3,11 @@ package com.michaelgrundvig.frc.spotter.api;
 import com.michaelgrundvig.frc.spotter.json.JsonValue;
 
 /**
- * One probe's latest result, in {@link Health#probes}: a check the image defines, by name, that the
+ * One probe's latest result, in {@link Health#probes}: a check a pack defines, by name, that the
  * agent ran (docs/agent.md, "Probes"). The agent says what it found; the robot judges whether
  * that's what it needs.
  *
- * @param id the probe's id, as the image defines it
+ * @param id the probe's id, as its pack defines it
  * @param kind its kind: {@code command}, {@code http}, {@code file}, {@code unit}, {@code usb}, or
  *     {@code threshold}
  * @param status {@link #PASS}, {@link #FAIL}, {@link #ERROR}, or {@link #PENDING}
@@ -26,10 +26,10 @@ public record ProbeResult(
     String detail,
     long ranMicros,
     double durationMillis) {
-  /** It ran, and found what the image expects. */
+  /** It ran, and found what its pack expects. */
   public static final String PASS = "pass";
 
-  /** It ran, and found something other than what the image expects. */
+  /** It ran, and found something other than what its pack expects. */
   public static final String FAIL = "fail";
 
   /**

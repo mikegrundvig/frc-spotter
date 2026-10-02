@@ -43,9 +43,9 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
-    // The template's packs, which the tests install into their fixture computers.
+    // Spotter's catalog of packs (packs/), which the tests read with the agent's own reader.
     systemProperty "frc.projectDir", rootProject.projectDir.absolutePath
-    inputs.files(rootProject.fileTree("packs") { include "*/pack.yaml" })
+    inputs.files(rootProject.fileTree("packs") { include "*.yaml" })
     .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
@@ -65,28 +65,6 @@ tasks.named("jar") {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// The libraries the agent runs with, group:name:version one to a line, for the recipe hash
-// (docs/agent.md): a new library is a new image; a new WPILib, which the agent doesn't run,
-// isn't.
-tasks.register("runtimeLibraries") {
-    description = "List the agent's runtime libraries, for the coprocessor recipe hash."
-    def classpath = configurations.runtimeClasspath
-    def out = layout.buildDirectory.file("coprocessor/runtime-libraries.txt")
-    inputs.files(classpath)
-    outputs.file(out)
-    doLast {
-        def libraries = new TreeSet<String>()
-        classpath.incoming.resolutionResult.allComponents.each { component ->
-            def id = component.id
-            if (id instanceof ModuleComponentIdentifier) {
-                libraries << "${id.group}:${id.module}:${id.version}".toString()
-            }
-        }
-        out.get().asFile.parentFile.mkdirs()
-        out.get().asFile.text = libraries.collect { it + "\n" }.join("")
-    }
-}
-
 ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
 apply from: rootProject.file("gradle/quality.gradle")
 
@@ -98,13 +76,13 @@ apply from: rootProject.file("gradle/quality.gradle")
 //
 // One set of files three ways: a .deb with its own Java runtime, a tarball of the same for systems
 // without dpkg, and the -all.jar alone, with its unit, polkit rules, and install script beside it,
-// for a board that already has Java 17 or newer. The runtime is jlink's, of the modules the agent and
-// its packs' Java helpers need, for the computer building it: build an ARM package on ARM.
+// for a board that already has Java 17 or newer. The runtime is jlink's, of the modules the agent
+// needs, for the computer building it: build an ARM package on ARM. No pack is installed: a team
+// copies the ones it wants from packs/ into /etc/frc-spotter/packs/.
 def agentVersion = (project.findProperty("agentVersion") ?: "0.1.0").toString()
 def debianArch = [amd64: "amd64", x86_64: "amd64", aarch64: "arm64", arm64: "arm64"]
 .get(System.getProperty("os.arch"), System.getProperty("os.arch"))
-// The runtime's modules: the agent's, and no more. A pack's Java helper that needs others runs on
-// the board's own Java (FRC_AGENT_JAVA names this runtime, for helpers that need only these).
+// The runtime's modules: the agent's, and no more.
 def runtimeModules = "java.base,jdk.httpserver"
 def packageRoot = layout.buildDirectory.dir("package/root")
 
@@ -122,19 +100,6 @@ def agentRuntime = tasks.register("agentRuntime", Exec) {
             "--compress=zip-9", "--output", out.get().asFile.absolutePath
 }
 
-// The built-in pack's definitions, as the agent reads them.
-def builtinPack = tasks.register("builtinPackJson", JavaExec) {
-    description = "Check the built-in pack and write it as pack.json."
-    classpath = configurations.runtimeClasspath
-    mainClass = "com.michaelgrundvig.frc.spotter.tools.CoprocessorBuild"
-    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
-    def source = rootProject.file("packs/builtin/pack.yaml")
-    def out = layout.buildDirectory.file("package/builtin/pack.json")
-    inputs.file(source)
-    outputs.file(out)
-    args "pack", source.absolutePath, out.get().asFile.absolutePath
-}
-
 def agentPackageTask = tasks.register("agentPackage", Sync) {
     group = "build"
     description = "Assemble the agent's package as installed, with DEBIAN/: build/package/root."
@@ -146,7 +111,6 @@ def agentPackageTask = tasks.register("agentPackage", Sync) {
         into "usr/lib/frc-spotter/bin"
         filePermissions { unix("0755") }
     }
-    from(builtinPack) { into "usr/lib/frc-spotter/packs/builtin" }
     from("package/frc-spotter.service") { into "usr/lib/systemd/system" }
     from("package/frc-spotter.sysusers") {
         into "usr/lib/sysusers.d"
@@ -247,7 +211,6 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
         }
     }
     from("package") { include "*.rules", "*.service", "*.sysusers" }
-    from(builtinPack)
 }
 
 // The -all.jar with its files, as one download: unpack it and run its install.sh.

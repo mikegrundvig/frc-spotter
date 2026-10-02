@@ -247,8 +247,7 @@ class ProbeRunnerTest {
     Probe ticking =
         new Probe(
             "tick", "test", new Check.Command(List.of("helper", "hash"), 0, ""), 0.1, 2, List.of());
-    ProbeSet set =
-        new ProbeSet("c", List.of(), List.of(watching, ticking), List.of(), List.of(), List.of());
+    ProbeSet set = new ProbeSet(List.of(), List.of(watching, ticking), List.of());
     Probes probes = new Probes(fixture.host, set, runner);
     probes.scheduled(watching);
     probes.scheduled(watching);
@@ -280,10 +279,7 @@ class ProbeRunnerTest {
     Probe probe =
         new Probe("p", "test", new Check.Command(List.of("helper"), 0, "^ok$"), 0, 2, List.of());
     Probes probes =
-        new Probes(
-            fixture.host,
-            new ProbeSet("c", List.of(), List.of(probe), List.of(), List.of(), List.of()),
-            runner);
+        new Probes(fixture.host, new ProbeSet(List.of(), List.of(probe), List.of()), runner);
     probes.runNow("p");
     fixture.commands.answer(List.of("helper"), List.of("not ok"));
     fixture.micros.addAndGet(5_000_000);

@@ -5,7 +5,6 @@ import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.ShutdownAnswer;
 import com.michaelgrundvig.frc.spotter.json.Json;
 import com.michaelgrundvig.frc.spotter.json.JsonValue;
-import com.michaelgrundvig.frc.spotter.probes.Download;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -13,13 +12,10 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,15 +25,15 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The agent's HTTP API, version 1, on the JDK's own server: JSON answers, each bounded; nothing a
- * request says is run, only probes and downloads its packs define, by name. The one action, {@code
- * POST /v1/shutdown}, is the controller's alone. The only class that touches the web server.
+ * request says is run, only probes its packs define, by name. The one action, {@code POST
+ * /v1/shutdown}, is the controller's alone. The only class that touches the web server.
  *
  * <p>Each request has a thread of its own, so a client that's slow to send (or never finishes)
- * holds up nobody else. The heavy requests (the journal and downloads) take turns, and a request
- * that finds one under way is refused as busy (503) at once, so the light ones (health, stamp,
- * probes, shutdown) never wait behind them. It answers only requests addressed to it (by a
- * robot-network, link-local, or loopback address, or its own name), so a web page elsewhere can't
- * reach it through a name that resolves to it.
+ * holds up nobody else. The heavy request (a page of the journal) takes turns, and one that finds
+ * another under way is refused as busy (503) at once, so the light ones (health, stamp, probes,
+ * shutdown) never wait behind it. It answers only requests addressed to it (by a robot-network,
+ * link-local, or loopback address, or its own name), so a web page elsewhere can't reach it through
+ * a name that resolves to it.
  */
 final class AgentServer implements AutoCloseable {
   /** How many heavy requests are answered at once. */
@@ -122,8 +118,7 @@ final class AgentServer implements AutoCloseable {
           throw new Refused(421, "this agent answers requests addressed to it only");
         }
         String probe = under(path, AgentApi.PROBES);
-        String download = under(path, AgentApi.DOWNLOADS);
-        if (!PATHS.contains(path) && probe == null && download == null) {
+        if (!PATHS.contains(path) && probe == null) {
           throw new Refused(404, "no such resource: " + path);
         }
         boolean shutdown = path.equals(AgentApi.SHUTDOWN);
@@ -135,8 +130,6 @@ final class AgentServer implements AutoCloseable {
           shutdown(exchange);
         } else if (path.equals(AgentApi.JOURNAL)) {
           heavy(exchange, () -> journal(exchange));
-        } else if (download != null) {
-          heavy(exchange, () -> download(exchange, download));
         } else if (probe != null) {
           probe(exchange, probe);
         } else if (path.equals(AgentApi.PROBES)) {
@@ -196,51 +189,6 @@ final class AgentServer implements AutoCloseable {
     }
   }
 
-  /**
-   * Makes a download its packs define, then sends it whole, with its length: made into a file
-   * first, so a download that fails or runs over its bound is an error, never a file cut short.
-   */
-  private void download(HttpExchange exchange, String name) throws IOException, Refused {
-    Download download =
-        agent
-            .probeSet()
-            .download(name)
-            .orElseThrow(
-                () -> new Refused(404, "this computer's packs serve no file named " + name));
-    Path file = Files.createTempFile("frc-spotter-download", ".part");
-    try {
-      Commands.Output made = agent.download(download, file);
-      if (made.timedOut() || made.truncated() || made.exit() != 0) {
-        agent.log(
-            "Download "
-                + name
-                + " failed: "
-                + (made.timedOut()
-                    ? "timed out"
-                    : made.truncated()
-                        ? "larger than " + download.maxBytes() + " bytes"
-                        : "exit " + made.exit()));
-        throw new Refused(500, "making " + name + " failed; the agent's journal says why");
-      }
-      exchange.getResponseHeaders().set("Content-Type", download.contentType());
-      exchange
-          .getResponseHeaders()
-          .set("Content-Disposition", "attachment; filename=\"" + filename(name) + "\"");
-      exchange.sendResponseHeaders(200, Files.size(file));
-      try (OutputStream out = exchange.getResponseBody()) {
-        Files.copy(file, out);
-      }
-    } finally {
-      Files.deleteIfExists(file);
-    }
-  }
-
-  /** A download's file name: the computer's name before it, as a backup is named. */
-  private String filename(String name) throws IOException {
-    List<String> names = agent.names();
-    return names.isEmpty() ? name : names.get(0) + "-" + name;
-  }
-
   /** Work a heavy request does, once it has its turn. */
   private interface Heavy {
     void answer() throws IOException, Refused;
@@ -250,7 +198,7 @@ final class AgentServer implements AutoCloseable {
   private void heavy(HttpExchange exchange, Heavy work) throws IOException, Refused {
     if (!heavy.tryAcquire()) {
       exchange.getResponseHeaders().set("Retry-After", "1");
-      throw new Refused(503, "busy with another journal or download request; ask again shortly");
+      throw new Refused(503, "busy with another journal request; ask again shortly");
     }
     try {
       work.answer();
@@ -333,18 +281,16 @@ final class AgentServer implements AutoCloseable {
 
   private void shutdown(HttpExchange exchange) throws IOException, Refused {
     String from = exchange.getRemoteAddress().getAddress().getHostAddress();
-    Optional<String> controller = agent.controller();
-    if (controller.isEmpty()) {
-      refusals.log("Refused a shutdown from " + from + ": no controller is configured");
-      throw new Refused(
-          403,
-          "no controller is configured, and this computer has no stamp to find the robot"
-              + " controller by, so a shutdown is taken from nobody");
+    Agent.Controller controller = agent.controller();
+    if (controller.address().isEmpty()) {
+      refusals.log("Refused a shutdown from " + from + ": " + controller.why());
+      throw new Refused(403, "a shutdown is taken from nobody: " + controller.why());
     }
-    if (!from.equals(controller.get())) {
+    if (!from.equals(controller.address())) {
       refusals.log("Refused a shutdown from " + from + ": not the robot controller");
       throw new Refused(
-          403, "only the robot controller (" + controller.get() + ") may shut this computer down");
+          403,
+          "only the robot controller (" + controller.address() + ") may shut this computer down");
     }
     boolean first = agent.shutdown(from);
     json(exchange, 202, new ShutdownAnswer(!first).toJson());

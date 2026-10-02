@@ -11,17 +11,8 @@ import com.michaelgrundvig.frc.spotter.client.AgentClient;
 import com.michaelgrundvig.frc.spotter.client.AgentHttp;
 import com.michaelgrundvig.frc.spotter.client.DeployCheck;
 import com.michaelgrundvig.frc.spotter.json.Json;
-import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
-import com.michaelgrundvig.frc.spotter.table.CompiledTable;
-import com.michaelgrundvig.frc.spotter.table.Computer;
-import com.michaelgrundvig.frc.spotter.table.Pack;
-import com.michaelgrundvig.frc.spotter.table.Packs;
-import com.michaelgrundvig.frc.spotter.table.Table;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.AfterAll;
@@ -33,16 +24,14 @@ import org.testcontainers.containers.Network;
 
 /**
  * The agent as installed from its .deb on a plain Debian 13 with no Java, under systemd with its
- * root read-only, and the robot's client calling it: every endpoint on the wire, the deploy check
- * against it, and each kind of probe against real files, units, a web server, and its own
- * measurements; a USB probe against a fixture tree of devices.
+ * root read-only, nothing configured and its packs copied in, and the robot's client calling it:
+ * every endpoint on the wire, the deploy check against its identity, the packs it mustn't trust,
+ * and each kind of probe against real files, units, a web server, and its own measurements; a USB
+ * probe against a fixture tree of devices.
  */
 @ContainerTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AgentContainerTest {
-  static final AgentConfig STANDIN =
-      new AgentConfig("vision-front", "", 5808, List.of("standin", "kinds"), List.of(), List.of());
-
   Network network;
   Coprocessor coprocessor;
   AgentClient client;
@@ -50,9 +39,8 @@ class AgentContainerTest {
   @BeforeAll
   void aCoprocessor() {
     network = TestNetwork.create();
-    coprocessor = new Coprocessor(TestImages.agent(), network, 11);
+    coprocessor = new Coprocessor(TestImages.agent(), network, 11, "vision-front");
     coprocessor.start();
-    coprocessor.configure(STANDIN);
     client = coprocessor.client("vision-front");
   }
 
@@ -108,32 +96,49 @@ class AgentContainerTest {
   }
 
   @Test
-  void theStampAndHealthAreWhatTheRobotReads() throws Exception {
+  void itsIdentityAndHealthAreWhatTheRobotReads() throws Exception {
     Health health = health();
     Stamp stamp = health.stamp();
-    assertThat(stamp.name()).isEqualTo("vision-front");
-    assertThat(stamp.team()).isEqualTo(Images.TEAM);
-    assertThat(stamp.address()).isEqualTo(Images.address(11));
+    assertThat(stamp.hostname()).isEqualTo("vision-front");
+    assertThat(stamp.addresses()).first().isEqualTo(Images.address(11));
     assertThat(stamp.bootId()).matches("[0-9a-f-]{36}");
+    // A container's interface is virtual (no device behind it), so it has no wired MAC to report.
+    assertThat(stamp.mac()).isEmpty();
+    assertThat(stamp.uptimeSeconds()).isPositive();
+    assertThat(stamp.osRelease())
+        .containsEntry("ID", "debian")
+        .containsEntry("VERSION_ID", "13")
+        .containsAllEntriesOf(TestImages.LABELS);
     assertThat(health.memory().totalMb()).isPositive();
     assertThat(health.boot().uptimeSeconds()).isPositive();
     assertThat(health.problems()).noneMatch(problem -> problem.startsWith("configuration"));
     assertThat(health.probes())
         .extracting(ProbeResult::id)
         .contains("vision.unit", "kinds.command");
-    // The stamp carries the hash of the probes it runs: the ones the robot's build compiles.
-    ProbeSet compiled = Packs.compile(STANDIN, packs());
-    assertThat(stamp.probesHash()).isEqualTo(compiled.hash());
     String json = Json.compact(health.toJson());
     System.out.printf("A health answer: %d bytes%n", json.getBytes(StandardCharsets.UTF_8).length);
   }
 
-  /** The packs the agent runs, as the robot's build reads them. */
-  static List<Pack> packs() {
-    return List.of(
-        Pack.parseYaml(TestImages.resource("builtin.yaml"), "builtin"),
-        Pack.parseYaml(TestImages.resource("standin.yaml"), "standin"),
-        Pack.parseYaml(TestImages.resource("kinds.yaml"), "kinds"));
+  @Test
+  void aPackFileItCantTrustIsIgnoredAndSaysWhy() throws Exception {
+    assertThat(health().problems())
+        .contains(
+            "pack ignored: /etc/frc-spotter/packs/mine.yaml isn't root's (its owner is user 65534)",
+            "pack ignored: /etc/frc-spotter/packs/shared.yaml may be written by its group or"
+                + " others (mode 664): chmod go-w it");
+    assertThat(coprocessor.run("journalctl", "-u", "frc-spotter", "--no-pager"))
+        .contains("pack ignored: /etc/frc-spotter/packs/mine.yaml isn't root's");
+  }
+
+  @Test
+  void itTakesAShutdownFromTheControllerOnItsOwnNetworkWithNothingConfigured() throws Exception {
+    // Its address is 10.99.71.11, so the robot controller is 10.99.71.2: this test isn't it.
+    AgentHttp http = new AgentHttp(coprocessor.agentHost(), coprocessor.agentPort(), 1, 5, 1 << 20);
+    assertThat(http.post(AgentApi.SHUTDOWN)).isEqualTo(403);
+    assertThat(coprocessor.run("systemctl", "is-active", "vision.service").strip())
+        .isEqualTo("active");
+    assertThat(coprocessor.run("journalctl", "-u", "frc-spotter", "--no-pager"))
+        .contains(": not the robot controller");
   }
 
   @Test
@@ -144,17 +149,6 @@ class AgentContainerTest {
     assertThat(vision.entries()).isNotNull();
     AgentHttp http = new AgentHttp(coprocessor.agentHost(), coprocessor.agentPort(), 1, 5, 1 << 20);
     assertThat(statusOf(() -> http.get(AgentApi.JOURNAL + "?unit=sshd.service"))).isEqualTo(400);
-  }
-
-  @Test
-  void aPacksDownloadIsServed() throws Exception {
-    AgentHttp http = new AgentHttp(coprocessor.agentHost(), coprocessor.agentPort(), 1, 5, 1 << 20);
-    AgentHttp.Streamed streamed = client.download("settings.zip");
-    try (InputStream in = streamed.body()) {
-      assertThat(new String(in.readAllBytes(), StandardCharsets.UTF_8))
-          .isEqualTo("PK stand-in backup");
-    }
-    assertThat(statusOf(() -> http.get("/v1/settings.zip"))).isEqualTo(404);
   }
 
   @FunctionalInterface
@@ -179,6 +173,7 @@ class AgentContainerTest {
             Map.entry("kinds.command", "pass"),
             Map.entry("kinds.command-slow", "error"),
             Map.entry("kinds.command-exit", "fail"),
+            Map.entry("kinds.command-shell", "pass"),
             Map.entry("kinds.http", "pass"),
             Map.entry("kinds.http-missing", "fail"),
             Map.entry("kinds.file-json", "pass"),
@@ -207,6 +202,7 @@ class AgentContainerTest {
     }
     System.out.print(said);
     assertThat(client.runProbe("kinds.command").value()).matches("13\\.\\d+");
+    assertThat(client.runProbe("kinds.command-shell").value()).isEqualTo("42");
     assertThat(client.runProbe("kinds.command-slow").detail()).isEqualTo("timed out after 1000 ms");
     assertThat(client.runProbe("kinds.http").value()).isEqualTo("v-standin");
     assertThat(client.runProbe("kinds.file-text").value()).isEqualTo("trixie");
@@ -240,7 +236,7 @@ class AgentContainerTest {
       }
     }
     ProbeResult present = ProbeResult.fromJson(Json.parse(left));
-    assertThat(present.status()).isEqualTo(ProbeResult.PASS);
+    assertThat(present.status()).as("%s", present).isEqualTo(ProbeResult.PASS);
     assertThat(present.value()).isEqualTo("7-1 5000 Mb/s Arducam OV9281 USB Camera");
     ProbeResult absent =
         ProbeResult.fromJson(
@@ -253,29 +249,33 @@ class AgentContainerTest {
   }
 
   @Test
-  void theDeployCheckComparesItsStampAndSeesWhatAnswers() throws Exception {
-    Computer computer = new Computer("vision-front", 11, List.of(), 5808);
-    Table table = new Table(Images.TEAM, 5808, List.of(computer));
-    ProbeSet probes = Packs.compile(STANDIN, packs());
-    CompiledTable same =
-        new CompiledTable(
-            table, "", Map.of("standinVersion", "v-standin"), Map.of("vision-front", probes));
+  void theDeployCheckComparesItsIdentityAndSeesWhatAnswers() throws Exception {
+    DeployCheck.Expected same =
+        new DeployCheck.Expected(
+            "vision-front",
+            Images.address(11),
+            5808,
+            Map.of("IMAGE_ID", "spotter-test", "TEST_STANDIN_VERSION", "v-standin"));
     DeployCheck.Asked asked = DeployCheck.ask(coprocessor.agentHost(), coprocessor.agentPort());
     assertThat(asked).isInstanceOf(DeployCheck.Asked.Stamped.class);
-    assertThat(DeployCheck.judge(same, computer, asked).verdict())
-        .isEqualTo(DeployCheck.Verdict.WARN);
-    assertThat(DeployCheck.judge(same, computer, asked).text())
-        .contains("its recipe can't be checked");
-    CompiledTable other =
-        new CompiledTable(
-            table, "", Map.of("standinVersion", "v2027.1.0"), Map.of("vision-front", probes));
-    DeployCheck.Finding wrong = DeployCheck.judge(other, computer, asked);
+    DeployCheck.Finding ok = DeployCheck.judge(same, asked);
+    assertThat(ok.verdict()).as("%s", ok).isEqualTo(DeployCheck.Verdict.OK);
+    DeployCheck.Expected other =
+        new DeployCheck.Expected(
+            "vision-front", Images.address(11), 5808, Map.of("TEST_STANDIN_VERSION", "v2027.1.0"));
+    DeployCheck.Finding wrong = DeployCheck.judge(other, asked);
     assertThat(wrong.verdict()).isEqualTo(DeployCheck.Verdict.FAIL);
     assertThat(wrong.text())
         .contains("\"v-standin\" on the coprocessor and \"v2027.1.0\" in this build");
+    DeployCheck.Finding elsewhere =
+        DeployCheck.judge(new DeployCheck.Expected("vision-back", Images.address(12)), asked);
+    assertThat(elsewhere.verdict()).isEqualTo(DeployCheck.Verdict.FAIL);
+    assertThat(elsewhere.text())
+        .contains("its hostname is \"vision-front\", not \"vision-back\"")
+        .contains("without " + Images.address(12));
 
-    // The agent stopped, its software answering: an image builder's asker checks the software's
-    // port when the agent doesn't answer, and says so.
+    // The agent stopped, its software answering: a caller's asker checks the software's port
+    // when the agent doesn't answer, and says so.
     coprocessor.run("systemctl", "stop", "frc-spotter.service");
     try {
       DeployCheck.Asker builders =
@@ -295,8 +295,7 @@ class AgentContainerTest {
           };
       DeployCheck.Asked agentless = builders.ask(coprocessor.agentHost(), coprocessor.agentPort());
       assertThat(agentless).isInstanceOf(DeployCheck.Asked.AgentMissing.class);
-      assertThat(DeployCheck.judge(same, computer, agentless).verdict())
-          .isEqualTo(DeployCheck.Verdict.FAIL);
+      assertThat(DeployCheck.judge(same, agentless).verdict()).isEqualTo(DeployCheck.Verdict.FAIL);
     } finally {
       coprocessor.run("systemctl", "start", "frc-spotter.service");
       coprocessor.awaitAgent();

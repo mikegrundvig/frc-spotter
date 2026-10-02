@@ -1,7 +1,5 @@
 package com.michaelgrundvig.frc.spotter.harness;
 
-import com.michaelgrundvig.frc.spotter.json.Json;
-import com.michaelgrundvig.frc.spotter.table.Pack;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -15,40 +13,51 @@ import java.util.Objects;
  *
  * <ul>
  *   <li>{@link #agent}: Debian 13 under systemd with no Java, the agent installed from its .deb,
- *       and the test packs, a stand-in for the software it watches, and a fixture tree of USB
- *       devices;
- *   <li>{@link #agentOnJava17}: a stock Java 17 with the agent installed from its -all.jar, and the
- *       example pack with a Java helper.
+ *       the test packs, a stand-in for the software it watches, its image labeled in os-release,
+ *       and a fixture tree of USB devices;
+ *   <li>{@link #agentOnJava17}: a stock Java 17 with the agent installed from its -all.jar.
  * </ul>
  */
 final class TestImages {
   private TestImages() {}
 
+  /** The labels the agent's image carries in its os-release, as an image builder writes them. */
+  static final Map<String, String> LABELS =
+      Map.of("IMAGE_ID", "spotter-test", "IMAGE_VERSION", "7", "TEST_STANDIN_VERSION", "v-standin");
+
   /**
    * The agent's image: the base, the agent installed from its .deb, the test packs (a stand-in for
-   * the software it watches, and one probe of each kind), the stand-in's unit, a failing unit, a
-   * fixture tree of USB devices at {@code /srv/fixture}, and the stamp.
+   * the software it watches, and one probe of each kind) with two that it mustn't trust (one
+   * nobody's, one its group may write), the stand-in's unit, a failing unit, its labels in
+   * os-release, and a fixture tree of USB devices at {@code /srv/fixture} with a pack of their
+   * ports.
    */
   static String agent() {
     Map<String, Object> context = new LinkedHashMap<>();
     String installAgent = Images.installAgent(context);
-    context.put("standin.json", packJson("standin"));
-    context.put("kinds.json", packJson("kinds"));
-    context.put("61-standin.rules", resource("61-standin.rules"));
+    Map<String, String> packs = new LinkedHashMap<>();
+    packs.put("standin", resource("standin.yaml"));
+    packs.put("kinds", resource("kinds.yaml"));
+    String installPacks = Images.installPacks(context, packs);
     context.put("vision.service", resource("vision.service"));
     context.put("broken.service", resource("broken.service"));
-    context.put("fixture-agent.json", resource("fixture-agent.json"));
-    context.put(
-        "stamp.json", Images.stamp("vision-front", 11, Map.of("standinVersion", "v-standin")));
+    context.put("usb.yaml", resource("usb.yaml"));
+    StringBuilder labels = new StringBuilder();
+    LABELS.forEach((key, value) -> labels.append(key).append("=\"").append(value).append("\"\\n"));
     return Images.build(
         "agent",
         """
         FROM %s
         %s
-        # The test packs, as a pack's own install would put them.
-        COPY standin.json /usr/lib/frc-spotter/packs/standin/pack.json
-        COPY kinds.json /usr/lib/frc-spotter/packs/kinds/pack.json
-        COPY 61-standin.rules /usr/share/polkit-1/rules.d/61-frc-spotter-standin.rules
+        # The test packs, copied in as a team copies a pack.
+        %s
+        # Two packs it mustn't trust: nobody's, and one its group may write.
+        RUN printf 'pack: mine\\n' > /etc/frc-spotter/packs/mine.yaml \\
+         && chown nobody /etc/frc-spotter/packs/mine.yaml \\
+         && printf 'pack: shared\\n' > /etc/frc-spotter/packs/shared.yaml \\
+         && chmod 0664 /etc/frc-spotter/packs/shared.yaml
+        # The image's labels, in os-release as an image builder writes them.
+        RUN printf '%s' >> /usr/lib/os-release
         # The software the stand-in pack watches: a web server on 5800, as a vision program's page is.
         COPY vision.service broken.service /etc/systemd/system/
         RUN mkdir -p /srv/vision/api \\
@@ -57,35 +66,32 @@ final class TestImages {
          && printf 'PK stand-in backup' > /srv/vision/backup.zip \\
          && systemctl enable vision.service broken.service
         # A fixture tree of USB devices, with real links, for an agent run with --root: front-left
-        # on a USB 3 port, front-right not plugged in.
-        COPY fixture-agent.json /srv/fixture/etc/frc-spotter/agent.json
+        # on a USB 3 port, front-right not plugged in; and a pack of their ports.
+        COPY usb.yaml /srv/fixture/etc/frc-spotter/packs/usb.yaml
         RUN set -e; f=/srv/fixture; usb=$f/sys/devices/platform/xhci-hcd.0.auto/usb7/7-1 \\
+         && chmod 0644 $f/etc/frc-spotter/packs/usb.yaml \\
          && mkdir -p $f/dev/v4l/by-path $f/sys/class/video4linux/video0 "$usb/7-1:1.0" \\
-              $f/usr/lib/frc-spotter/packs \\
-         && cp -R /usr/lib/frc-spotter/packs/builtin $f/usr/lib/frc-spotter/packs/ \\
          && : > $f/dev/video0 \\
          && ln -s ../../video0 "$f/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0" \\
          && ln -s "../../../devices/platform/xhci-hcd.0.auto/usb7/7-1/7-1:1.0" $f/sys/class/video4linux/video0/device \\
          && echo 5000 > $usb/speed && echo 0c45 > $usb/idVendor && echo 6366 > $usb/idProduct \\
          && echo 'Arducam OV9281 USB Camera' > $usb/product
-        COPY stamp.json /etc/coprocessor/stamp.json
         RUN mkdir -p /data/frc-spotter
         VOLUME /data
         """
-            .formatted(Images.base(), installAgent),
+            .formatted(Images.base(), installAgent, installPacks, labels),
         context);
   }
 
   /**
    * The -all.jar's image: a stock Java 17 (Temurin's, on Ubuntu 24.04) under systemd, its java on
    * the path as a system Java's is, and nothing else of Java; the agent installed from the -all.jar
-   * and its install script, and the example pack with a Java helper from its own.
+   * and its install script, and the stand-in's pack, whose software isn't there.
    */
   static String agentOnJava17() {
     Map<String, Object> context = new LinkedHashMap<>();
     context.put("jar", Images.property("spotter.agentJar"));
-    context.put("pack", Images.property("spotter.javaHelperPack"));
-    context.put("stamp.json", Images.stamp("vision-front", 21, Map.of()));
+    String installPacks = Images.installPacks(context, Map.of("standin", resource("standin.yaml")));
     return Images.build(
         "java17",
         """
@@ -104,22 +110,14 @@ final class TestImages {
         COPY jar /tmp/agent
         RUN sh /tmp/agent/install.sh && rm -rf /tmp/agent \\
          && test ! -e /usr/lib/frc-spotter/runtime
-        COPY pack /tmp/pack
-        RUN sh /tmp/pack/install.sh && rm -rf /tmp/pack
-        COPY stamp.json /etc/coprocessor/stamp.json
+        %s
         RUN mkdir -p /data/frc-spotter
         VOLUME /data
         STOPSIGNAL SIGRTMIN+3
         ENTRYPOINT ["/sbin/init"]
         """
-            .formatted(Images.JAVA_17),
+            .formatted(Images.JAVA_17, installPacks),
         context);
-  }
-
-  /** A test pack, read from its YAML and written as the agent reads it. */
-  static String packJson(String name) {
-    String yaml = resource(name + ".yaml");
-    return Json.pretty(Pack.parseYaml(yaml, name + ".yaml").toJson());
   }
 
   /** A resource of the harness's, as text. */

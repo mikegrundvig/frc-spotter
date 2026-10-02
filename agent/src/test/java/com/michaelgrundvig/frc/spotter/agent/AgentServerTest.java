@@ -9,8 +9,6 @@ import com.michaelgrundvig.frc.spotter.api.ProbeResult;
 import com.michaelgrundvig.frc.spotter.api.ShutdownAnswer;
 import com.michaelgrundvig.frc.spotter.api.Stamp;
 import com.michaelgrundvig.frc.spotter.json.Json;
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
-import com.michaelgrundvig.frc.spotter.table.Pack;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -39,7 +37,7 @@ class AgentServerTest {
   AgentServer server;
   final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-  /** A pack for some vision software: its unit, its journal, a stop before power-off, backups. */
+  /** A pack for some vision software: its unit, its journal, and a camera's port. */
   static final String VISION =
       """
       pack: vision
@@ -52,46 +50,15 @@ class AgentServerTest {
         - id: vision.front left
           kind: usb
           path: /dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0
-      beforeShutdown:
-        - name: vision.stop
-          argv: [systemctl, stop, vision.service]
-          timeout: 120
-      downloads:
-        - name: settings.json
-          argv: ['{pack}/bin/backup', json]
-          contentType: application/json; charset=utf-8
-          maxBytes: 64
-          timeout: 5
-        - name: settings.zip
-          argv: ['{pack}/bin/backup', zip, '{computer}']
-          contentType: application/zip
-          maxBytes: 64
-          timeout: 5
       """;
-
-  static final String BACKUP = "/usr/lib/frc-spotter/packs/vision/bin/backup";
 
   @BeforeEach
   void anAgent() throws IOException {
     fixture = new Fixture(dir);
     fixture.commands.answer(List.of("journalctl"), Fixture.lines("journal-this-boot.json"));
-    fixture.commands.answer(List.of("systemctl", "stop"), List.of());
     fixture.commands.answer(List.of("systemctl", "poweroff"), List.of());
-    fixture.commands.answer(List.of(BACKUP, "json"), List.of("{\"hash\":\"abc\"}"));
-    fixture.commands.answer(List.of(BACKUP, "zip", "vision-front"), List.of("PK"));
-    fixture.pack(Pack.parseYaml(VISION, "vision"));
-    fixture.config(withPacks(List.of("vision")));
+    fixture.pack("vision", VISION);
     serve(fixture.agent());
-  }
-
-  static AgentConfig withPacks(List<String> packs) {
-    return new AgentConfig(
-        Fixture.CONFIG.name(),
-        Fixture.CONFIG.controller(),
-        Fixture.CONFIG.port(),
-        packs,
-        Fixture.CONFIG.cameras(),
-        List.of());
   }
 
   private void serve(Agent agent) throws IOException {
@@ -141,8 +108,10 @@ class AgentServerTest {
         .contains("application/json; charset=utf-8");
     assertThat(stamp.headers().firstValue("Cache-Control")).contains("no-store");
     Stamp read = Stamp.parse(text(stamp));
-    assertThat(read.name()).isEqualTo("vision-front");
+    assertThat(read.hostname()).isEqualTo("vision-front");
+    assertThat(read.addresses()).containsExactly("10.12.34.11");
     assertThat(read.mac()).isEqualTo("c0:74:2b:fe:12:34");
+    assertThat(read.osRelease("IMAGE_ID")).isEqualTo("vision-orangepi");
 
     HttpResponse<byte[]> health = get(AgentApi.HEALTH);
     assertThat(health.statusCode()).isEqualTo(200);
@@ -193,44 +162,10 @@ class AgentServerTest {
   }
 
   @Test
-  void aPacksDownloadsAreServedWhole() throws Exception {
-    HttpResponse<byte[]> json = get(AgentApi.DOWNLOADS + "/settings.json");
-    assertThat(json.statusCode()).isEqualTo(200);
-    assertThat(text(json)).isEqualTo("{\"hash\":\"abc\"}\n");
-    assertThat(json.headers().firstValue("Content-Type"))
-        .contains("application/json; charset=utf-8");
-
-    HttpResponse<byte[]> zip = get(AgentApi.DOWNLOADS + "/settings.zip");
-    assertThat(zip.statusCode()).isEqualTo(200);
-    assertThat(zip.headers().firstValue("Content-Type")).contains("application/zip");
-    assertThat(zip.headers().firstValue("Content-Disposition"))
-        .contains("attachment; filename=\"vision-front-settings.zip\"");
-    assertThat(text(zip)).isEqualTo("PK\n");
-
-    assertThat(get(AgentApi.DOWNLOADS + "/nothing").statusCode()).isEqualTo(404);
-    assertThat(get(AgentApi.DOWNLOADS + "/").statusCode()).isEqualTo(404);
-    // The first API's settings paths are gone: a pack's downloads are under DOWNLOADS only.
-    assertThat(get("/v1/settings").statusCode()).isEqualTo(404);
-    assertThat(get("/v1/settings.zip").statusCode()).isEqualTo(404);
-  }
-
-  @Test
-  void aDownloadThatFailsOrRunsOverIsAnErrorNeverAFileCutShort() throws Exception {
-    fixture.commands.answer(
-        List.of(BACKUP, "json"), new Commands.Output(2, List.of("{"), false, false));
-    assertThat(get(AgentApi.DOWNLOADS + "/settings.json").statusCode()).isEqualTo(500);
-    fixture.commands.answer(List.of(BACKUP, "json"), List.of("x".repeat(100)));
-    HttpResponse<byte[]> over = get(AgentApi.DOWNLOADS + "/settings.json");
-    assertThat(over.statusCode()).isEqualTo(500);
-    assertThat(text(over)).contains("making settings.json failed");
-    assertThat(fixture.log())
-        .contains(
-            "Download settings.json failed: exit 2",
-            "Download settings.json failed: larger than 64 bytes");
-    // Without a pack that defines them, there's nothing to download.
-    fixture.config(withPacks(List.of()));
-    serve(fixture.agent());
-    assertThat(get(AgentApi.DOWNLOADS + "/settings.zip").statusCode()).isEqualTo(404);
+  void theFirstAPIsPathsAreGone() throws Exception {
+    for (String gone : List.of("/v1/settings", "/v1/settings.zip", "/v1/downloads/settings.zip")) {
+      assertThat(get(gone).statusCode()).as(gone).isEqualTo(404);
+    }
   }
 
   @Test
@@ -239,7 +174,7 @@ class AgentServerTest {
     assertThat(listed.statusCode()).isEqualTo(200);
     List<ProbeResult> all =
         Json.parse(text(listed)).asObject("probes").list("probes", ProbeResult::fromJson);
-    assertThat(all).extracting(ProbeResult::id).contains("camera.front-left", "vision.unit");
+    assertThat(all).extracting(ProbeResult::id).containsExactly("vision.unit", "vision.front left");
     assertThat(all).allMatch(result -> result.status().equals(ProbeResult.PENDING));
 
     HttpResponse<byte[]> ran = get(AgentApi.PROBES + "/vision.unit");
@@ -278,7 +213,7 @@ class AgentServerTest {
 
   @Test
   void onlyTheRobotControllerMayShutTheComputerDown() throws Exception {
-    // The stamp's team is 1234: the robot controller is 10.12.34.2, and this test isn't.
+    // It's at 10.12.34.11: the robot controller is 10.12.34.2, and this test isn't.
     HttpResponse<byte[]> refused = post(AgentApi.SHUTDOWN);
     assertThat(refused.statusCode()).isEqualTo(403);
     assertThat(text(refused)).contains("only the robot controller (10.12.34.2)");
@@ -286,17 +221,14 @@ class AgentServerTest {
   }
 
   @Test
-  void aShutdownRunsItsPacksStepsThenPowersOffOnce() throws Exception {
+  void aShutdownPowersOffOnce() throws Exception {
     serve(fixture.agent("127.0.0.1"));
     HttpResponse<byte[]> first = post(AgentApi.SHUTDOWN);
     assertThat(first.statusCode()).isEqualTo(202);
     assertThat(ShutdownAnswer.parse(text(first)).alreadyRequested()).isFalse();
     List<List<String>> ran = fixture.commands.ran();
-    assertThat(ran.subList(ran.size() - 2, ran.size()))
-        .containsExactly(
-            List.of("systemctl", "stop", "vision.service"), List.of("systemctl", "poweroff"));
-    assertThat(fixture.log.get(0))
-        .isEqualTo("Shutdown asked for by 127.0.0.1: running vision.stop, then powering off");
+    assertThat(ran.get(ran.size() - 1)).isEqualTo(List.of("systemctl", "poweroff"));
+    assertThat(fixture.log.get(0)).isEqualTo("Shutdown asked for by 127.0.0.1: powering off");
 
     HttpResponse<byte[]> again = post(AgentApi.SHUTDOWN);
     assertThat(again.statusCode()).isEqualTo(202);
@@ -310,36 +242,21 @@ class AgentServerTest {
   }
 
   @Test
-  void theControllerIsTheConfigurationsWhenItNamesOne() throws Exception {
-    fixture.config(
-        new AgentConfig("vision-front", "127.0.0.1", 5808, List.of(), List.of(), List.of()));
+  void theControllerIsTheOverridesWhenTheyNameOne() throws Exception {
+    fixture.config("{\"controller\": \"127.0.0.1\"}");
     serve(fixture.agent());
     assertThat(post(AgentApi.SHUTDOWN).statusCode()).isEqualTo(202);
     assertThat(fixture.log.get(0)).isEqualTo("Shutdown asked for by 127.0.0.1: powering off");
   }
 
   @Test
-  void aShutdownGoesOnWhenAStepFails() throws Exception {
-    fixture.commands.answer(
-        List.of("systemctl", "stop"), new Commands.Output(1, List.of(), false, false));
-    fixture.commands.answer(
-        List.of("systemctl", "poweroff"), new Commands.Output(-1, List.of(), false, true));
-    serve(fixture.agent("127.0.0.1"));
-    assertThat(post(AgentApi.SHUTDOWN).statusCode()).isEqualTo(202);
-    assertThat(fixture.log)
-        .contains(
-            "Step vision.stop failed (exit 1); powering off anyway",
-            "Powering off failed (timed out); a shutdown may be asked for again");
-  }
-
-  @Test
   void aFailureIsAServerErrorThatSaysOnlyThatAndIsLogged() throws Exception {
-    fixture.write("/etc/coprocessor/stamp.json", "[]");
+    fixture.write(StampSource.UPTIME, "not a number\n");
     HttpResponse<byte[]> stamp = get(AgentApi.STAMP);
     assertThat(stamp.statusCode()).isEqualTo(500);
     assertThat(text(stamp))
         .isEqualTo("{\"error\":\"the agent couldn't answer; its journal says why\"}");
-    assertThat(fixture.log()).anyMatch(line -> line.contains("expected an object"));
+    assertThat(fixture.log()).anyMatch(line -> line.contains("NumberFormatException"));
   }
 
   @Test
@@ -351,9 +268,10 @@ class AgentServerTest {
               throw new AssertionError("not a link anyone expected");
             });
     serve(new Agent(host, Configuration.read(host), Duration.ofSeconds(2), Runnable::run, null));
-    assertThat(get(AgentApi.PROBES + "/camera.front-left").statusCode()).isEqualTo(500);
+    assertThat(get(AgentApi.PROBES + "/vision.front%20left").statusCode()).isEqualTo(500);
     // The probes' turns were let go: the next request is answered (and fails) the same way.
-    assertThat(get(AgentApi.PROBES + "/camera.front-left").statusCode()).isEqualTo(500);
+    fixture.micros.addAndGet(AgentApi.PROBE_RUN_SECONDS * 1_000_000L);
+    assertThat(get(AgentApi.PROBES + "/vision.front%20left").statusCode()).isEqualTo(500);
     assertThat(get(AgentApi.HEALTH).statusCode()).isEqualTo(200);
   }
 
@@ -428,8 +346,8 @@ class AgentServerTest {
             HttpResponse.BodyHandlers.ofByteArray());
     try {
       awaitWaiting();
-      // A journal page is under way, held: another heavy request is refused at once.
-      HttpResponse<byte[]> busy = get(AgentApi.DOWNLOADS + "/settings.zip");
+      // A journal page is under way, held: another is refused at once.
+      HttpResponse<byte[]> busy = get(AgentApi.JOURNAL);
       assertThat(busy.statusCode()).isEqualTo(503);
       assertThat(busy.headers().firstValue("Retry-After")).contains("1");
       long start = System.nanoTime();
@@ -439,7 +357,7 @@ class AgentServerTest {
       slow.countDown();
     }
     assertThat(first.get(20, TimeUnit.SECONDS).statusCode()).isEqualTo(200);
-    assertThat(get(AgentApi.DOWNLOADS + "/settings.zip").statusCode()).isEqualTo(200);
+    assertThat(get(AgentApi.JOURNAL).statusCode()).isEqualTo(200);
   }
 
   @Test
@@ -489,20 +407,25 @@ class AgentServerTest {
     small.commands.answer(List.of("journalctl"), Fixture.lines("journal-this-boot.json"));
     fixture = small;
     serve(small.agent());
-    // The stamp file is longer than 64 bytes: cut short, it isn't JSON.
-    assertThat(get(AgentApi.STAMP).statusCode()).isEqualTo(500);
-    assertThat(small.log()).anyMatch(line -> line.contains("never ends"));
+    // The drive's report is longer than 64 bytes: cut short, it isn't JSON, and that's a problem.
+    HttpResponse<byte[]> health = get(AgentApi.HEALTH);
+    assertThat(health.statusCode()).isEqualTo(200);
+    assertThat(Health.parse(text(health)).problems())
+        .contains("drive: line 4, column 18: expected ',' or '}'");
   }
 
   @Test
-  void aComputerWithoutAStampOrAControllerTakesNoShutdown() throws Exception {
-    fixture.delete("/etc/coprocessor/stamp.json");
+  void aComputerWithNoRobotAddressTakesNoShutdown() throws Exception {
+    fixture.addresses.clear();
     serve(fixture.agent());
     HttpResponse<byte[]> refused = post(AgentApi.SHUTDOWN);
     assertThat(refused.statusCode()).isEqualTo(403);
-    assertThat(text(refused)).contains("no stamp");
-    fixture.write("/etc/coprocessor/stamp.json", "{\"name\":\"vision-front\",\"team\":0}");
-    assertThat(post(AgentApi.SHUTDOWN).statusCode()).isEqualTo(403);
+    assertThat(text(refused))
+        .contains("a shutdown is taken from nobody: this computer has no 10.TE.AM.x address");
+    assertThat(fixture.log())
+        .singleElement()
+        .asString()
+        .startsWith("Refused a shutdown from 127.0.0.1: this computer has no 10.TE.AM.x address");
     assertThat(fixture.commands.ran()).noneMatch(command -> command.contains("poweroff"));
   }
 

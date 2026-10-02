@@ -7,8 +7,8 @@ package com.michaelgrundvig.frc.spotter.client;
  * @param connectTimeoutSeconds how long a poll waits for a connection
  * @param answerTimeoutSeconds how long a poll waits for the whole answer, once connected
  * @param staleAfterSeconds an answer older than this, or none at all, is a coprocessor missing
- * @param downloadTimeoutSeconds how long a download (a backup, a journal page, a probe run when
- *     asked) may take, once connected
+ * @param requestTimeoutSeconds how long a request off the robot loop (a journal page, a probe run
+ *     when asked) may take, once connected
  * @param powerDownTimeoutSeconds how long to keep asking a coprocessor that hasn't taken a request
  *     to power down
  */
@@ -17,12 +17,12 @@ public record ClientSettings(
     double connectTimeoutSeconds,
     double answerTimeoutSeconds,
     double staleAfterSeconds,
-    double downloadTimeoutSeconds,
+    double requestTimeoutSeconds,
     double powerDownTimeoutSeconds) {
   /**
    * Once a second, within 250 ms to connect and 500 ms to answer, so a poll that times out never
-   * delays the next; missing after three polls without an answer; downloads within 10 s; asked to
-   * power down for 30 s.
+   * delays the next; missing after three polls without an answer; other requests within 10 s; asked
+   * to power down for 30 s.
    */
   public static final ClientSettings DEFAULTS = new ClientSettings(1, 0.25, 0.5, 3, 10, 30);
 
@@ -33,7 +33,7 @@ public record ClientSettings(
           connectTimeoutSeconds,
           answerTimeoutSeconds,
           staleAfterSeconds,
-          downloadTimeoutSeconds,
+          requestTimeoutSeconds,
           powerDownTimeoutSeconds
         }) {
       if (!(value > 0) || value > 3600) {

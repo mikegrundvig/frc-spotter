@@ -5,9 +5,9 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * The kinds of probe, and the only ones: each reads one sort of thing, with parameters the image
- * fixes. There's no kind that runs a script or follows a request's instructions (docs/agent.md,
- * "Probes").
+ * The kinds of probe, and the only ones: each reads one sort of thing, with parameters its pack
+ * fixes. No kind takes anything from a request: the robot names a probe, and nothing more
+ * (docs/agent.md, "Probes").
  */
 public enum ProbeKind {
   /** A program run directly (no shell), as the agent's user: its exit status and its output. */

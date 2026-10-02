@@ -11,17 +11,17 @@ import org.jspecify.annotations.Nullable;
  * hot it is, its memory and disks, how it booted, its journal's trouble, its drive, and each
  * probe's latest result, which is where what runs on it is checked.
  *
- * @param stamp which image this is, and as which computer
+ * @param stamp which computer this is: its hostname, addresses, MAC, boot, and os-release
  * @param boot this boot, and what booted
  * @param cpu how busy each core is, and how fast each cluster runs
  * @param thermal every thermal zone, with its trip points
  * @param journal this boot's trouble, counted
- * @param drive the NVMe drive's health; null when the image found no NVMe drive
+ * @param drive the NVMe drive's health; null when there's no NVMe drive, or it isn't read
  * @param problems what the agent couldn't read, each saying what and why; empty when it read
  *     everything
  * @param memory the computer's memory
  * @param disks the root's and {@code /data}'s space, for those mounted
- * @param probes each probe the agent runs, with its latest result, in its configuration's order
+ * @param probes each probe the agent runs, with its latest result, in its packs' order
  */
 public record Health(
     Stamp stamp,
@@ -41,7 +41,7 @@ public record Health(
     probes = List.copyOf(probes);
   }
 
-  /** A probe's latest result, if the image defines it. */
+  /** A probe's latest result, if the computer's packs define it. */
   public Optional<ProbeResult> probe(String id) {
     return probes.stream().filter(probe -> probe.id().equals(id)).findFirst();
   }

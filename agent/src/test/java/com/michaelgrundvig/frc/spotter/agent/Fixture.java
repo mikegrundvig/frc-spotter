@@ -1,8 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
-import com.michaelgrundvig.frc.spotter.table.Pack;
-import com.michaelgrundvig.frc.spotter.table.Packs;
+import com.michaelgrundvig.frc.spotter.probes.Pack;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URISyntaxException;
@@ -22,13 +20,17 @@ import java.util.stream.Stream;
 
 /**
  * An RK3588 coprocessor for tests: a copy of the fixture tree in {@code src/test/resources/rk3588}
- * (eight cores in three clusters, seven thermal zones, two USB cameras, an NVMe drive, a stamp),
- * its agent configured with its two cameras at their ports and the template's built-in pack
- * installed, canned command output, a clock the test moves, and the log the agent writes.
+ * (eight cores in three clusters, seven thermal zones, two USB cameras, an NVMe drive, its hostname
+ * and os-release), at 10.12.34.11, with no packs and nothing configured; its files root's and
+ * written by root alone unless a test says otherwise; canned command output, a clock the test
+ * moves, and the log the agent writes.
  */
 final class Fixture {
-  /** The template's own repository, whose packs the fixture installs. */
+  /** Spotter's own repository, whose catalog of packs the tests read. */
   static final Path PROJECT = Path.of(System.getProperty("frc.projectDir", "../.."));
+
+  /** Its address on team 1234's robot network. */
+  static final String ADDRESS = "10.12.34.11";
 
   /** front-left's port: the camera on the USB 3 port, 7-1. */
   static final String FRONT_LEFT =
@@ -37,18 +39,6 @@ final class Fixture {
   /** front-right's port: the camera on the USB 2 port, 3-1. */
   static final String FRONT_RIGHT =
       "/dev/v4l/by-path/platform-fc880000.usb-usb-0:1:1.0-video-index0";
-
-  /** The computer's configuration: its cameras at their ports, no packs beyond the built-in one. */
-  static final AgentConfig CONFIG =
-      new AgentConfig(
-          "vision-front",
-          "",
-          5808,
-          List.of(),
-          List.of(
-              new AgentConfig.Camera("front-left", FRONT_LEFT),
-              new AgentConfig.Camera("front-right", FRONT_RIGHT)),
-          List.of());
 
   /** The sysfs links the cameras' paths resolve through, as on a coprocessor. */
   static final Map<String, String> LINKS =
@@ -64,6 +54,13 @@ final class Fixture {
 
   final Path root;
   final FakeCommands commands = new FakeCommands();
+
+  /** Who owns each file, and its mode, where it isn't root's alone (0644). */
+  final Map<String, Host.Owner> owners = new HashMap<>();
+
+  /** The computer's addresses, as it has them now. */
+  final List<String> addresses = new java.util.concurrent.CopyOnWriteArrayList<>(List.of(ADDRESS));
+
   final AtomicLong micros = new AtomicLong(1_234_560_000L);
   final List<String> log = new ArrayList<>();
   final Host host;
@@ -81,27 +78,21 @@ final class Fixture {
     copy(resource("rk3588"), root);
     host = host(root);
     commands.answer(List.of("systemctl", "show"), Fixture.lines("systemctl-show.txt"));
-    pack(Pack.parseYaml(templatePack(Pack.BUILTIN), Pack.BUILTIN));
-    config(CONFIG);
   }
 
-  /** A pack of the template's, as written in its folder. */
-  static String templatePack(String name) throws IOException {
-    return Files.readString(
-        PROJECT.resolve(Pack.TEMPLATE_PACKS).resolve(name).resolve(Pack.FILE),
-        StandardCharsets.UTF_8);
+  /** A pack of Spotter's catalog, as written there. */
+  static String catalogPack(String file) throws IOException {
+    return Files.readString(PROJECT.resolve("packs").resolve(file), StandardCharsets.UTF_8);
   }
 
-  /** Installs a pack on the computer, as its package would: its pack.json in its folder. */
-  void pack(Pack pack) throws IOException {
-    write(
-        Packs.PACKS_DIR + "/" + pack.name() + "/" + Pack.JSON_FILE,
-        com.michaelgrundvig.frc.spotter.json.Json.pretty(pack.toJson()));
+  /** Copies a pack into the computer's packs, as a team does: {@code <name>.yaml}, root's. */
+  void pack(String name, String yaml) throws IOException {
+    write(Pack.DIRECTORY + "/" + name + Pack.SUFFIX, yaml);
   }
 
-  /** Writes the computer's configuration. */
-  void config(AgentConfig config) throws IOException {
-    write(AgentConfig.PATH, config.text());
+  /** Writes the computer's overrides, {@code /etc/frc-spotter/agent.json}. */
+  void config(String json) throws IOException {
+    write(AgentConfig.PATH, json);
   }
 
   private Host host(Path at) {
@@ -116,6 +107,8 @@ final class Fixture {
         true,
         commands,
         links,
+        path -> owners.getOrDefault(path, new Host.Owner(Configuration.ROOT, 0644)),
+        () -> List.copyOf(addresses),
         micros::get,
         message -> {
           synchronized (log) {
@@ -139,7 +132,7 @@ final class Fixture {
 
   /**
    * An agent on this computer, as configured now, whose controller is its configuration's, else the
-   * robot controller where it is on the stamp's team's network.
+   * robot controller on its own network's.
    */
   Agent agent() {
     return new Agent(host, Configuration.read(host), Duration.ofSeconds(2), Runnable::run, null);
@@ -211,19 +204,6 @@ final class Fixture {
 
     void answer(List<String> start, Output output) {
       answers.put(start, output);
-    }
-
-    @Override
-    public Output toFile(List<String> command, Duration timeout, long maxBytes, Path file)
-        throws IOException {
-      Output output = run(command, timeout, Integer.MAX_VALUE, Integer.MAX_VALUE);
-      String text = output.lines().isEmpty() ? "" : String.join("\n", output.lines()) + "\n";
-      if (text.length() > maxBytes) {
-        Files.writeString(file, text.substring(0, (int) maxBytes), StandardCharsets.UTF_8);
-        return new Output(-1, List.of(), true, false);
-      }
-      Files.writeString(file, text, StandardCharsets.UTF_8);
-      return new Output(output.exit(), List.of(), false, output.timedOut());
     }
 
     @Override

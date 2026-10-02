@@ -1,82 +1,100 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
-import com.michaelgrundvig.frc.spotter.json.Json;
 import com.michaelgrundvig.frc.spotter.json.JsonException;
+import com.michaelgrundvig.frc.spotter.probes.Pack;
+import com.michaelgrundvig.frc.spotter.probes.PackException;
 import com.michaelgrundvig.frc.spotter.probes.ProbeSet;
-import com.michaelgrundvig.frc.spotter.table.AgentConfig;
-import com.michaelgrundvig.frc.spotter.table.Pack;
-import com.michaelgrundvig.frc.spotter.table.Packs;
-import com.michaelgrundvig.frc.spotter.table.TableException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 /**
- * What makes this computer's agent its own: its configuration ({@link AgentConfig}, the one file a
- * team writes per computer) and the probe set compiled from it and the packs installed, read once
- * as the agent starts. The agent package is the same on every computer; this is the difference.
+ * What this computer's agent runs, read once as it starts: the overrides in {@link
+ * AgentConfig#PATH}, if there are any, and the packs in {@link Pack#DIRECTORY}. The agent needs
+ * neither: with no packs, it reports the computer alone.
  *
- * <p>A configuration or pack that can't be read doesn't stop the agent: it runs with the built-in
- * pack alone (or nothing), says why in every health answer's problems, and takes no actions from a
- * controller it couldn't read. A computer that can't be configured should still say how it is.
+ * <p>A pack is trusted by its file, as {@code sshd} trusts its configuration: one that isn't
+ * root's, or that its group or anyone else may write, is ignored. So is one that can't be read, or
+ * whose name or probes another pack took first. An overrides file that can't be read is ignored
+ * too. Each says why in every health answer's problems; the agent runs on, as a computer that can't
+ * be checked should still say how it is.
  *
- * @param config the configuration; {@link AgentConfig#NONE} when there's none, or it can't be read
- * @param probes the probe set compiled from it and the packs it names
- * @param source where the configuration was read from; empty when there's none
- * @param problems what couldn't be read, each saying where and why
+ * @param config the overrides; {@link AgentConfig#DEFAULT} when there are none, or they can't be
+ *     read
+ * @param probes the packs read, combined
+ * @param source where the overrides were read from; empty when there's no file
+ * @param problems what couldn't be read or was ignored, each saying where and why
  */
 record Configuration(AgentConfig config, ProbeSet probes, String source, List<String> problems) {
+  /** The user ID a pack's file must be owned by: root. */
+  static final int ROOT = 0;
+
   Configuration {
     problems = List.copyOf(problems);
   }
 
-  /**
-   * Reads this computer's configuration (from {@link AgentConfig#PATH}, else {@link
-   * AgentConfig#DATA_PATH}) and compiles its probes from the packs installed under {@link
-   * Packs#PACKS_DIR}.
-   */
+  /** Reads this computer's overrides and packs. */
   static Configuration read(Host host) {
     List<String> problems = new ArrayList<>();
-    AgentConfig config = AgentConfig.NONE;
+    AgentConfig config = AgentConfig.DEFAULT;
     String source = "";
-    for (String path : List.of(AgentConfig.PATH, AgentConfig.DATA_PATH)) {
-      try {
-        Optional<String> text = host.read(path);
-        if (text.isPresent()) {
-          config = AgentConfig.parse(text.get(), path);
-          source = path;
-          break;
-        }
-      } catch (IOException | IllegalArgumentException | JsonException e) {
-        problems.add("configuration: " + path + ": " + e.getMessage());
-        source = path;
-        break;
+    try {
+      Optional<String> text = host.read(AgentConfig.PATH);
+      if (text.isPresent()) {
+        source = AgentConfig.PATH;
+        config = AgentConfig.parse(text.get());
       }
+    } catch (IOException | IllegalArgumentException | JsonException e) {
+      problems.add("configuration ignored: " + AgentConfig.PATH + ": " + e.getMessage());
     }
-    List<Pack> packs = new ArrayList<>();
-    List<String> names = new ArrayList<>();
-    names.add(Pack.BUILTIN);
-    names.addAll(config.packs());
+    return new Configuration(config, packs(host, problems), source, problems);
+  }
+
+  /** Every pack in {@link Pack#DIRECTORY} that can be trusted and read, in its files' order. */
+  static ProbeSet packs(Host host, List<String> problems) {
+    ProbeSet set = ProbeSet.EMPTY;
+    List<String> names;
+    try {
+      names = host.list(Pack.DIRECTORY);
+    } catch (IOException e) {
+      problems.add("packs: " + Pack.DIRECTORY + ": " + e.getMessage());
+      return set;
+    }
     for (String name : names) {
-      String path = Packs.PACKS_DIR + "/" + name + "/" + Pack.JSON_FILE;
+      if (!name.endsWith(Pack.SUFFIX)) {
+        continue;
+      }
+      String path = Pack.DIRECTORY + "/" + name;
       try {
-        Optional<String> text = host.read(path);
-        if (text.isEmpty()) {
-          problems.add("pack " + name + ": not installed (no " + path + ")");
+        Host.Owner owner = host.owner(path);
+        if (owner.uid() != ROOT) {
+          problems.add(
+              "pack ignored: " + path + " isn't root's (its owner is user " + owner.uid() + ")");
           continue;
         }
-        packs.add(Pack.fromJson(Json.parse(text.get()), path));
-      } catch (IOException | IllegalArgumentException | JsonException e) {
-        problems.add("pack " + name + ": " + e.getMessage());
+        if (owner.writableByOthers()) {
+          problems.add(
+              "pack ignored: "
+                  + path
+                  + " may be written by its group or others (mode "
+                  + Integer.toOctalString(owner.mode())
+                  + "): chmod go-w it");
+          continue;
+        }
+        Optional<String> text = host.read(path);
+        if (text.isEmpty()) {
+          continue; // gone as it was read
+        }
+        set = set.with(Pack.parseYaml(text.get(), path));
+      } catch (PackException e) {
+        for (String problem : e.problems()) {
+          problems.add("pack ignored: " + problem);
+        }
+      } catch (IOException | IllegalArgumentException e) {
+        problems.add("pack ignored: " + path + ": " + e.getMessage());
       }
     }
-    ProbeSet probes = ProbeSet.EMPTY;
-    try {
-      probes = Packs.compile(config, packs);
-    } catch (TableException e) {
-      problems.addAll(e.problems().stream().map(problem -> "probes: " + problem).toList());
-    }
-    return new Configuration(config, probes, source, problems);
+    return set;
   }
 }

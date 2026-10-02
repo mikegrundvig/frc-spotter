@@ -11,9 +11,10 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * What a probe checks, by kind, with the parameters the image fixes. Every value is checked when a
- * check is made, however it's made, so a definition the agent loads can't name a shell, a path
- * outside the filesystem's root, or a URL off this computer.
+ * What a probe checks, by kind, with the parameters its pack fixes. Every value is checked when a
+ * check is made, however it's made, so a definition the agent loads can't name a path written other
+ * than plainly, or a URL off this computer. What a pack may run is trusted by the pack's file
+ * (root's, and writable by nobody else), not by the program it names.
  */
 public sealed interface Check {
   /** Its kind. */
@@ -27,34 +28,6 @@ public sealed interface Check {
 
   /** The longest argument, path, URL, or pattern. */
   int MAX_TEXT = 1024;
-
-  /**
-   * Programs a probe or step may not run: shells, and programs that run another or change who runs
-   * it. The image fixes every argument, so a shell would only hide what runs; one that runs another
-   * program would hide which.
-   */
-  Set<String> NOT_RUN =
-      Set.of(
-          "sh",
-          "bash",
-          "dash",
-          "zsh",
-          "ksh",
-          "ash",
-          "fish",
-          "csh",
-          "tcsh",
-          "busybox",
-          "env",
-          "sudo",
-          "su",
-          "doas",
-          "pkexec",
-          "runuser",
-          "setpriv",
-          "xargs",
-          "nohup",
-          "systemd-run");
 
   /** A plain program name, found on the PATH. */
   Pattern PROGRAM = Pattern.compile("[A-Za-z0-9._+-]{1,128}");
@@ -88,7 +61,10 @@ public sealed interface Check {
   }
 
   /**
-   * Runs a program directly, never through a shell, as the agent's user, with its arguments fixed.
+   * Runs a program directly, never through a shell, as the agent's user, with its arguments fixed:
+   * the agent adds nothing to them, and the robot only names the probe. The program may be any
+   * installed one, an interpreter running a team's script included ({@code python3
+   * /opt/team/check.py}).
    *
    * @param argv the program and its arguments; the program is an absolute path or a name found on
    *     the PATH
@@ -368,7 +344,7 @@ public sealed interface Check {
 
   // ---- What every check's values are checked against ----
 
-  /** Checks a program and its arguments: no shell, nothing empty, nothing unbounded. */
+  /** Checks a program and its arguments: nothing empty, nothing unbounded. */
   static void checkArgv(List<String> argv, String what) {
     if (argv.isEmpty()) {
       throw new IllegalArgumentException(what + " is empty: name a program");
@@ -385,14 +361,6 @@ public sealed interface Check {
     } else if (!PROGRAM.matcher(program).matches()) {
       throw new IllegalArgumentException(
           what + "'s program \"" + program + "\" is neither an absolute path nor a plain name");
-    }
-    String name = program.substring(program.lastIndexOf('/') + 1);
-    if (NOT_RUN.contains(name) || name.startsWith("python") || name.startsWith("perl")) {
-      throw new IllegalArgumentException(
-          what
-              + " runs "
-              + name
-              + ": a probe runs one program directly, never a shell or a program that runs another");
     }
   }
 

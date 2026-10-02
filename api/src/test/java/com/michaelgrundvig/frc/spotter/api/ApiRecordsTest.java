@@ -14,15 +14,16 @@ class ApiRecordsTest {
   static final Stamp STAMP =
       new Stamp(
           "vision-front",
-          1234,
-          "10.12.34.11",
-          "coprocessors-2027.1",
-          "4f2c9d6e8a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c0d",
-          "2027-01-10T18:30:00Z",
-          Map.of("board", "orangepi-5", "visionVersion", "v2027.1.0"),
-          "",
+          List.of("10.12.34.11", "fd00::11"),
+          "c0:74:2b:fe:12:34",
           "3c1e6a2e-6f6c-4a1d-9a53-8c1f0c7b8e21",
-          "c0:74:2b:fe:12:34");
+          1234.5,
+          Map.of(
+              "ID", "debian",
+              "VERSION_ID", "13",
+              "IMAGE_ID", "vision-orangepi",
+              "IMAGE_VERSION", "2027.1",
+              "PADDOCK_PHOTONVISION_VERSION", "v2027.1.0"));
 
   static Health health() {
     JournalEntry usb =
@@ -38,7 +39,7 @@ class ApiRecordsTest {
             "usb");
     return new Health(
         STAMP,
-        new Boot(STAMP.bootId(), 1234.5, 1_234_500_000L, true, "/dev/nvme0n1p2", true, "2024.10"),
+        new Boot(STAMP.bootId(), 1234.5, 1_234_500_000L, true, "/dev/nvme0n1p2", true),
         new Cpu(
             1.0,
             List.of(3.0, 5.5, 2.0, 4.0, 97.5, 99.0, 98.2, 96.1),
@@ -64,7 +65,7 @@ class ApiRecordsTest {
         List.of(new Disk("/", 3_900, 1_200, true), new Disk("/data", 8_100, 7_600, false)),
         List.of(
             new ProbeResult(
-                "builtin.thermal-margin",
+                "board.thermal-margin",
                 "threshold",
                 ProbeResult.PASS,
                 "12.2",
@@ -72,7 +73,7 @@ class ApiRecordsTest {
                 1_234_400_000L,
                 0.1),
             new ProbeResult(
-                "camera.front-right",
+                "vision.front-right",
                 "command",
                 ProbeResult.FAIL,
                 "",
@@ -88,18 +89,19 @@ class ApiRecordsTest {
   }
 
   @Test
-  void theStampFileLeavesOutWhatTheAgentAdds() {
-    Stamp file =
+  void aStampCarriesOsReleaseAsItIs() {
+    Stamp read =
         Stamp.parse(
-            "{\"name\":\"vision-front\",\"labels\":{\"board\":\"orangepi-5\"},\"extra\":1}");
-    assertThat(file.bootId()).isEmpty();
-    Stamp live = file.withRuntime("boot", "mac");
-    assertThat(live.bootId()).isEqualTo("boot");
-    assertThat(live.mac()).isEqualTo("mac");
-    assertThat(live.label("board")).isEqualTo("orangepi-5");
-    assertThat(live.label("nothing")).isEmpty();
-    // Labels are kept sorted, so the stamp's JSON is the same however they were given.
-    assertThat(STAMP.labels().keySet()).containsExactly("board", "visionVersion");
+            "{\"hostname\":\"vision-front\",\"osRelease\":{\"IMAGE_ID\":\"x\",\"ID\":\"debian\"},"
+                + "\"extra\":1}");
+    assertThat(read.hostname()).isEqualTo("vision-front");
+    assertThat(read.bootId()).isEmpty();
+    assertThat(read.addresses()).isEmpty();
+    assertThat(read.uptimeSeconds()).isNaN();
+    assertThat(read.osRelease("IMAGE_ID")).isEqualTo("x");
+    assertThat(read.osRelease("NOTHING")).isEmpty();
+    // Its keys are kept sorted, so the stamp's JSON is the same however they were given.
+    assertThat(read.osRelease().keySet()).containsExactly("ID", "IMAGE_ID");
   }
 
   @Test
@@ -115,8 +117,8 @@ class ApiRecordsTest {
   @Test
   void probesAreFoundByIdAndTheirTextIsBounded() {
     Health health = health();
-    assertThat(health.probe("builtin.thermal-margin").orElseThrow().passed()).isTrue();
-    assertThat(health.probe("camera.front-right").orElseThrow().passed()).isFalse();
+    assertThat(health.probe("board.thermal-margin").orElseThrow().passed()).isTrue();
+    assertThat(health.probe("vision.front-right").orElseThrow().passed()).isFalse();
     assertThat(health.probe("none")).isEmpty();
     assertThat(health.memory().availablePercent())
         .isCloseTo(64.6, org.assertj.core.data.Offset.offset(0.1));
@@ -128,14 +130,6 @@ class ApiRecordsTest {
         new ProbeResult("x", "command", ProbeResult.PASS, "v".repeat(1000), "", 0, 0);
     assertThat(longOne.value()).hasSize(ProbeResult.MAX_TEXT).endsWith("…");
     assertThat(ProbeResult.pending("y", "unit").status()).isEqualTo(ProbeResult.PENDING);
-  }
-
-  @Test
-  void aStampCarriesItsProbeDefinitionsHash() {
-    Stamp stamped = STAMP.withProbesHash("abc");
-    assertThat(stamped.probesHash()).isEqualTo("abc");
-    assertThat(Stamp.parse(Json.compact(stamped.toJson()))).isEqualTo(stamped);
-    assertThat(STAMP.probesHash()).isEmpty();
   }
 
   @Test

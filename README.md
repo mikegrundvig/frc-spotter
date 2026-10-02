@@ -4,32 +4,34 @@ Spotter watches an FRC robot's coprocessors from the robot. It knows the compute
 software on them:
 
 - **the agent** (`agent/`), a small web service each coprocessor runs, reporting the computer's
-  health (load, heat, memory, disks, the journal, the drive) and the checks its packs define, and
-  powering the computer off cleanly when the robot asks;
-- **packs**, which say what to check of one program and how to stop it before a power-off: the
-  built-in pack (`packs/builtin/`), and an example pack with a Java helper
-  (`examples/packs/java-helper/`);
-- **the API** (`api/`), what the agent, the robot, and the build share, with the build tool that
-  compiles a team's table of coprocessors;
+  health (load, heat, memory, disks, the journal, the drive) and which computer it is, running the
+  checks its packs define, and powering the computer off cleanly when the robot asks. It needs no
+  configuration;
+- **packs**, one YAML file each, which say what to check of one program or board: a team copies
+  the ones it wants into `/etc/frc-spotter/packs/`, or writes its own;
+- **the API** (`api/`), what the agent and the robot share, and the packs' reader;
 - **the client** (`client/`), the robot's side: polling each agent without ever blocking the robot
   loop, judging what the robot needs of it, powering it down, and the check before a deploy;
 - **the harness** (`harness/`), container tests of the agent and the client together, and a
   library a pack's own tests use.
 
-Image builders (such as [frc-paddock](https://github.com/mikegrundvig/frc-paddock), which builds
-PhotonVision coprocessor images) install the agent's `.deb` and their packs.
+Spotter knows nothing of how a coprocessor's image is built: an image builder installs its `.deb`
+and the team's pack files like any other package and files, and labels its images in
+`/etc/os-release`, which Spotter reports as it is.
 
-`docs/agent.md` is the agent, its API, probes, packs, configuration, and package; `docs/robot.md`
-is the robot's side.
+`docs/agent.md` is the agent, its API, probes, packs, overrides, and package; `docs/robot.md` is
+the robot's side.
 
 ## Installing the agent
 
 Each [release](https://github.com/mikegrundvig/frc-spotter/releases) has the agent's `.deb` for
 64-bit ARM and x86 Linux, with its own Java runtime; a tarball of the same for systems without
 dpkg; and the `-all.jar` for a board with Java 17 or newer, alone and with its unit, polkit rules,
-and install script. `SHA256SUMS` has their checksums. Configure a computer in
-`/etc/frc-spotter/agent.json` (`docs/agent.md`). It installs as `frc-spotter` (its package, unit,
-and account); releases before 0.2.0 installed it as `frc-coprocessor-agent`.
+and install script. `SHA256SUMS` has their checksums. It needs no configuration: its name is the
+computer's hostname, it takes a shutdown only from the robot controller on its own 10.TE.AM.x
+network, and it checks the packs in `/etc/frc-spotter/packs/` (`docs/agent.md`). It installs as
+`frc-spotter` (its package, unit, and account); releases before 0.2.0 installed it as
+`frc-coprocessor-agent`.
 
 ## Building
 

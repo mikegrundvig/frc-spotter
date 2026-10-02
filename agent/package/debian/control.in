@@ -12,4 +12,5 @@ Description: health and checks of an FRC robot's coprocessor, for the robot to p
  A small web service an FRC robot's coprocessor runs: the computer's health
  (load, heat, memory, disks, the journal, the drive) and the checks its packs
  define, which the robot polls and judges. It bundles its own Java runtime.
- Configure it in /etc/frc-spotter/agent.json.
+ It needs no configuration: copy the packs you want into
+ /etc/frc-spotter/packs/.

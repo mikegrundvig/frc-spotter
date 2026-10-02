@@ -1,8 +1,6 @@
 package com.michaelgrundvig.frc.spotter.harness;
 
 import com.github.dockerjava.api.exception.NotFoundException;
-import com.michaelgrundvig.frc.spotter.json.Json;
-import com.michaelgrundvig.frc.spotter.json.JsonValue;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -22,8 +20,9 @@ import org.testcontainers.images.builder.ImageFromDockerfile;
  * hash of everything it's built from, so an image already built is reused and a change builds a new
  * one. {@link #base} is Debian 13 under systemd with no Java; {@link #installAgent} adds the lines
  * that install the agent from its .deb, as a board's image build would (the package's maintainer
- * scripts run with no systemd running, as in a chroot). A pack's tests build their own image on
- * these, with their software and their pack installed as their image installs them.
+ * scripts run with no systemd running, as in a chroot), and {@link #installPacks} the lines that
+ * copy packs in as a team does. A pack's tests build their own image on these, with their software
+ * and their pack installed.
  *
  * <p>The agent's package comes from the build: {@code spotter.agentDeb} (a .deb, as Spotter
  * releases it), or {@code spotter.agentPackage} (its files as installed, with {@code DEBIAN/},
@@ -90,21 +89,31 @@ public final class Images {
         """;
   }
 
-  /** A stamp, as an image's stamping writes it, for a computer on the tests' network. */
-  public static String stamp(String name, int address, Map<String, String> labels) {
-    JsonValue.Obj.Builder labelsJson = JsonValue.Obj.builder();
-    labels.forEach(labelsJson::put);
-    return Json.compact(
-        JsonValue.Obj.builder()
-            .put("name", name)
-            .put("team", TEAM)
-            .put("address", address(address))
-            .put("version", "test")
-            .put("recipeHash", "")
-            .put("builtAt", "")
-            .put("labels", labelsJson.build())
-            .put("agentPort", 5808)
-            .build());
+  /**
+   * The Dockerfile lines that copy packs into {@code /etc/frc-spotter/packs/} as a team does: each
+   * {@code <name>.yaml}, root's, and written by root alone, so the agent trusts it. Adds them to
+   * the build's {@code context}.
+   *
+   * @param packs each pack's YAML, by the name its file takes
+   */
+  public static String installPacks(Map<String, Object> context, Map<String, String> packs) {
+    StringBuilder lines = new StringBuilder();
+    packs.forEach(
+        (name, yaml) -> {
+          context.put("pack-" + name + ".yaml", yaml);
+          lines
+              .append("COPY pack-")
+              .append(name)
+              .append(".yaml /etc/frc-spotter/packs/")
+              .append(name)
+              .append(".yaml\n");
+        });
+    if (!packs.isEmpty()) {
+      lines.append(
+          "RUN chown root:root /etc/frc-spotter/packs/*.yaml"
+              + " && chmod 0644 /etc/frc-spotter/packs/*.yaml\n");
+    }
+    return lines.toString();
   }
 
   /** An address on the tests' network: 10.99.71.x. */
