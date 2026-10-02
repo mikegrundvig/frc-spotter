@@ -47,3 +47,8 @@ tasks.named("test") {
 
 ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
 apply from: rootProject.file("gradle/quality.gradle")
+
+// Published as com.michaelgrundvig.frc:spotter-client (gradle/publishing.gradle).
+ext.mavenArtifact = "spotter-client"
+ext.mavenDescription = "Spotter's robot-side client: polling each coprocessor's agent without blocking the robot loop, judging what the robot needs, powering it down, and the check before a deploy."
+apply from: rootProject.file("gradle/publishing.gradle")

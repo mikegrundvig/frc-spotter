@@ -1,0 +1,63 @@
+// Publishing a library the robot program uses (api, client) to Spotter's Maven repository: the
+// static one on the gh-pages branch, served by GitHub Pages at
+// https://mikegrundvig.github.io/frc-spotter/maven. A project applies this with ext.mavenArtifact
+// and ext.mavenDescription set. The release workflow checks out gh-pages and publishes into it
+// (-PpagesRepository=<its maven folder>); Gradle reads the maven-metadata.xml already there, so a
+// new version is added and the old ones kept. Each file gets its .md5, .sha1, .sha256, and .sha512.
+//
+//   ./gradlew publishAllPublicationsToPagesRepository -PagentVersion=0.3.0 -PpagesRepository=DIR
+
+apply plugin: "maven-publish"
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+            groupId = "com.michaelgrundvig.frc"
+            artifactId = project.ext.mavenArtifact
+            pom {
+                name = project.ext.mavenArtifact
+                description = project.ext.mavenDescription
+                url = "https://github.com/mikegrundvig/frc-spotter"
+                licenses {
+                    license {
+                        name = "MIT License"
+                        url = "https://github.com/mikegrundvig/frc-spotter/blob/main/LICENSE"
+                    }
+                }
+                developers {
+                    developer {
+                        name = "Michael Grundvig"
+                        url = "https://github.com/mikegrundvig"
+                    }
+                }
+                scm {
+                    url = "https://github.com/mikegrundvig/frc-spotter"
+                    connection = "scm:git:https://github.com/mikegrundvig/frc-spotter.git"
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "pages"
+            // Where the gh-pages branch's maven folder is checked out; build/maven unless given.
+            url = providers.gradleProperty("pagesRepository")
+                    .orElse(rootProject.layout.buildDirectory.dir("maven").map { it.asFile.absolutePath })
+                    .map { new File(it).toURI() }
+                    .get()
+        }
+    }
+}
+
+// The javadoc of Java 17's API, as the code is compiled against it.
+tasks.named("javadoc") {
+    options.encoding = "UTF-8"
+    options.addStringOption("-release", "17")
+    options.addBooleanOption("Xdoclint:all,-missing", true)
+}

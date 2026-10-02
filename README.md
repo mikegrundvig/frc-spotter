@@ -72,7 +72,24 @@ if (health != null) {
 }
 ```
 
-`docs/robot.md` is the robot's side in full.
+The client and what it shares with the agent are in Spotter's Maven repository, with their sources
+and javadoc, at `https://mikegrundvig.github.io/frc-spotter/maven`:
+
+| Coordinates | What |
+|---|---|
+| `com.michaelgrundvig.frc:spotter-client:0.3.0` | The robot's side; brings `spotter-api` with it |
+| `com.michaelgrundvig.frc:spotter-api:0.3.0` | The agent's API records and their JSON, and the packs' reader |
+
+```groovy
+repositories {
+    maven { url = "https://mikegrundvig.github.io/frc-spotter/maven" }
+}
+dependencies {
+    implementation "com.michaelgrundvig.frc:spotter-client:0.3.0"
+}
+```
+
+Each release adds its version there; none is removed. `docs/robot.md` is the robot's side in full.
 
 ## Releases
 

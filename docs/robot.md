@@ -2,7 +2,11 @@
 
 `client/` (Gradle `:client`, `com.michaelgrundvig.frc.spotter.client`) is the robot's side of the
 agent (`docs/agent.md`): plain Java 17 with nothing but `:api`, no WPILib or AdvantageKit, so a
-robot program, a laptop tool, and the container tests use it alike. The robot template wraps it
+robot program, a laptop tool, and the container tests use it alike. Each release publishes it as
+`com.michaelgrundvig.frc:spotter-client` (and `:api` as `com.michaelgrundvig.frc:spotter-api`),
+with sources, javadoc, and checksums, to the Maven repository at
+`https://mikegrundvig.github.io/frc-spotter/maven` (`gradle/publishing.gradle`; the static
+repository is the `gh-pages` branch, which the release workflow adds each version to). The robot template wraps it
 with its logging, alerts, and dashboard cards; this page is what the client itself does.
 
 ## Asking without waiting
