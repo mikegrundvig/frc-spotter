@@ -1,0 +1,127 @@
+// PhotonVision's pack (docs/agent.md, "Packs"): its definitions (pack.yaml), and its helper,
+// a small program the definitions name, built from the shared code so the robot's build and the
+// coprocessor hash PhotonVision's settings, and fingerprint its tag layout, one way. The helper runs
+// on the Java the agent runs on (FRC_AGENT_JAVA), its own or the board's, so it's Java 17 too.
+//
+//   ./gradlew :photonvision-pack:packFolder    the pack as installed: build/pack/photonvision/
+
+plugins {
+    id "java"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// Java 17 bytecode and APIs, as the agent's: see agent/build.gradle.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(":api")
+    // PhotonVision's settings database is SQLite.
+    implementation libs.sqlite.jdbc
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    // PhotonVision's settings database, made from its schema, for the tests.
+    testImplementation testFixtures(project(":api"))
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+    jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
+}
+
+// photonvision-helper.jar: the helper with everything it needs, run with `java -jar`. sqlite-jdbc's
+// native libraries are kept for 64-bit ARM and x86 Linux, and no others: a fifth of the size.
+def keptNatives = [
+    "org/sqlite/native/Linux/aarch64",
+    "org/sqlite/native/Linux/x86_64"
+]
+tasks.named("jar") {
+    archiveFileName = "photonvision-helper.jar"
+    manifest {
+        attributes(
+                "Main-Class": "com.michaelgrundvig.frc.spotter.photonvision.Helper",
+                "Enable-Native-Access": "ALL-UNNAMED")
+    }
+    dependsOn configurations.runtimeClasspath
+    from({
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }) {
+        exclude "META-INF/MANIFEST.MF", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"
+        exclude { element ->
+            def path = element.relativePath.pathString
+            path.startsWith("org/sqlite/native/") && !keptNatives.any { path.startsWith(it) || it.startsWith(path) }
+        }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// The pack's definitions, checked and written as the agent reads them (pack.json), by the shared
+// code's build tool.
+def packJson = tasks.register("packJson", JavaExec) {
+    description = "Check pack.yaml and write it as pack.json."
+    classpath = configurations.runtimeClasspath
+    mainClass = "com.michaelgrundvig.frc.spotter.tools.CoprocessorBuild"
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+    def source = file("pack.yaml")
+    def out = layout.buildDirectory.file("pack-json/pack.json")
+    inputs.file(source)
+    outputs.file(out)
+    args "pack", source.absolutePath, out.get().asFile.absolutePath
+}
+
+// The pack as it's installed (/usr/lib/frc-coprocessor/packs/photonvision/): its definitions, its
+// helper and the helper's launcher, its polkit rule, and the script that installs it.
+def packFolderTask = tasks.register("packFolder", Sync) {
+    group = "build"
+    description = "Assemble PhotonVision's pack as installed, in build/pack/photonvision."
+    into layout.buildDirectory.dir("pack/photonvision")
+    from(packJson)
+    from(tasks.named("jar")) { into "lib" }
+    from("package") {
+        exclude "launcher/**", "install.sh", "*.md"
+        filePermissions { unix("0644") }
+    }
+    // The launcher's source folder isn't named bin/, which Git ignores (an IDE's output).
+    from("package/launcher") {
+        into "bin"
+        filePermissions { unix("0755") }
+    }
+    from("package/install.sh") {
+        filePermissions {
+            unix("0755")
+        }
+    }
+}
+
+configurations {
+    // The pack as installed, for the container tests and the image builder.
+    packFolder {
+        canBeConsumed = true
+        canBeResolved = false
+    }
+}
+artifacts {
+    add("packFolder", packFolderTask.map { it.destinationDir }) { builtBy packFolderTask }
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
+apply from: rootProject.file("gradle/quality.gradle")

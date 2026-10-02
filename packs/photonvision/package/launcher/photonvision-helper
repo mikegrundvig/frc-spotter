@@ -1,0 +1,9 @@
+#!/bin/sh
+# PhotonVision's pack helper (coprocessor/README.md, "Packs"): the program this pack's definitions
+# name. It runs on the Java the agent runs on, which the agent names in FRC_AGENT_JAVA (its own
+# runtime, or the board's), so the pack never names a path to one. sqlite-jdbc unpacks its native
+# library into the agent's runtime directory, as /tmp may not allow running it.
+here=$(dirname "$0")
+exec "${FRC_AGENT_JAVA:-java}" -Xmx64m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 \
+  -Dorg.sqlite.tmpdir="${RUNTIME_DIRECTORY:-${TMPDIR:-/tmp}}" \
+  -jar "$here/../lib/photonvision-helper.jar" "$@"

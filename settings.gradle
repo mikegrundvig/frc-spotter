@@ -17,5 +17,8 @@ rootProject.name = "frc-spotter"
 include "api"
 // The agent each coprocessor runs.
 include "agent"
+// PhotonVision's pack: its definitions, and the helper they name.
+include "photonvision-pack"
+project(":photonvision-pack").projectDir = file("packs/photonvision")
 // The coprocessor image builder (shell): its tests, run by Gradle.
 include "image"
