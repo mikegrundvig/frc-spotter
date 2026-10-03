@@ -106,9 +106,18 @@ final class Fixture {
     return Configuration.read(host);
   }
 
+  /** How often the agent ended, for systemd to start it again: after a push. */
+  final java.util.concurrent.atomic.AtomicInteger exits =
+      new java.util.concurrent.atomic.AtomicInteger();
+
   /** The agent on this board, its packs read; its collectors not started. */
   Agent agent() {
-    return new Agent(host, configuration(), "0.4.0-test", null);
+    return agent(null);
+  }
+
+  /** The agent on this board, taking writes from one address, its collectors not started. */
+  Agent agent(@org.jspecify.annotations.Nullable String controller) {
+    return new Agent(host, configuration(), "0.4.0-test", controller, exits::incrementAndGet);
   }
 
   /** What the agent logged, one line each. */

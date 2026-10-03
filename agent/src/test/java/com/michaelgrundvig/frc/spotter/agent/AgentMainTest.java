@@ -37,9 +37,11 @@ class AgentMainTest {
     }
     AgentMain.checkAddress("10.12.34.2", "--controller");
     Fixture fixture = new Fixture(dir);
-    assertThatThrownBy(() -> AgentMain.serve(fixture.host, List.of("--bind=any"), "0.4.0"))
+    assertThatThrownBy(
+            () -> AgentMain.serve(fixture.host, List.of("--bind=any"), "0.4.0", () -> {}))
         .hasMessageContaining("--bind must be an IPv4 address");
-    assertThatThrownBy(() -> AgentMain.serve(fixture.host, List.of("--controller=x"), "0.4.0"))
+    assertThatThrownBy(
+            () -> AgentMain.serve(fixture.host, List.of("--controller=x"), "0.4.0", () -> {}))
         .hasMessageContaining("--controller must be an IPv4 address");
   }
 
@@ -65,7 +67,7 @@ class AgentMainTest {
     Fixture fixture = new Fixture(dir);
     fixture.write(Packs.INSTALLED + "/old.yaml", "pack: old\n");
     try (AgentServer server =
-        AgentMain.serve(fixture.host, List.of("--port=0", "--bind=127.0.0.1"), "0.4.0")) {
+        AgentMain.serve(fixture.host, List.of("--port=0", "--bind=127.0.0.1"), "0.4.0", () -> {})) {
       HttpResponse<String> described =
           HttpClient.newHttpClient()
               .send(

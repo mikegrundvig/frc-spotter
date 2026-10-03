@@ -34,7 +34,8 @@ public final class AgentMain {
     Host host =
         Host.system(
             Path.of(options.getOrDefault("root", "/")), message -> System.err.println(message));
-    try (AgentServer server = serve(host, List.of(args), version())) {
+    // After a push the agent ends, and systemd starts it again to read the new packs.
+    try (AgentServer server = serve(host, List.of(args), version(), () -> System.exit(0))) {
       System.err.println("Coprocessor agent serving protocol 2 on port " + server.port());
       new CountDownLatch(1).await();
     }
@@ -46,8 +47,13 @@ public final class AgentMain {
     return version == null ? UNRELEASED : version;
   }
 
-  /** Starts serving a board, with the command line's options, and starts its collectors. */
-  static AgentServer serve(Host host, List<String> args, String version) throws IOException {
+  /**
+   * Starts serving a board, with the command line's options, and starts its collectors.
+   *
+   * @param exit ends the agent, for systemd to start it again: after a push
+   */
+  static AgentServer serve(Host host, List<String> args, String version, Runnable exit)
+      throws IOException {
     Map<String, String> options = options(args);
     String controller = options.get("controller");
     if (controller != null) {
@@ -61,7 +67,7 @@ public final class AgentMain {
     for (String problem : configuration.problems()) {
       host.log(problem);
     }
-    Agent agent = new Agent(host, configuration, version, controller);
+    Agent agent = new Agent(host, configuration, version, controller, exit);
     AgentServer server =
         new AgentServer(
             agent,

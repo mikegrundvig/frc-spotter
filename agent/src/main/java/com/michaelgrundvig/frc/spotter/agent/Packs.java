@@ -52,11 +52,20 @@ final class Packs {
 
   /** Reads the board's packs: its installed ones, and its pushed ones when it accepts pushes. */
   static Loaded load(Host host, boolean acceptPushes) {
+    return load(host, acceptPushes ? "" : "agent.json refuses pushes");
+  }
+
+  /**
+   * Reads the board's packs: its installed ones, and its pushed ones unless it refuses them.
+   *
+   * @param refused why it refuses pushed packs; empty when it accepts them
+   */
+  static Loaded load(Host host, String refused) {
     List<String> problems = new ArrayList<>();
     Map<String, Optional<Pack>> installed = folder(host, INSTALLED, false, problems);
     Map<String, Optional<Pack>> pushed = Map.of();
     String hash = "";
-    if (acceptPushes) {
+    if (refused.isEmpty()) {
       pushed = folder(host, PUSHED, true, problems);
       try {
         hash = PackHash.of(host.path(PUSHED));
@@ -66,7 +75,7 @@ final class Packs {
     } else {
       try {
         if (!host.list(PUSHED).isEmpty()) {
-          problems.add(PUSHED + ": ignored, as agent.json refuses pushes");
+          problems.add(PUSHED + ": ignored, as " + refused);
         }
       } catch (IOException e) {
         // Ignored either way.

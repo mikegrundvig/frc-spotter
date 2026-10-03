@@ -31,21 +31,17 @@ final class Describer {
           builtIn("reboot", "Reboot", "Restarts the board", "Restart this computer?", "reboot"));
 
   private final String version;
-  private final AgentConfig config;
+  private final Configuration configuration;
   private final Packs.Loaded packs;
-  private final List<String> problems;
 
   /**
    * @param version the agent's version
-   * @param config the board's settings
-   * @param packs the packs it read
-   * @param problems what it ignored, and why: its settings' and its packs'
+   * @param configuration the board's settings and packs, and what it ignored
    */
-  Describer(String version, AgentConfig config, Packs.Loaded packs, List<String> problems) {
+  Describer(String version, Configuration configuration) {
     this.version = version;
-    this.config = config;
-    this.packs = packs;
-    this.problems = List.copyOf(problems);
+    this.configuration = configuration;
+    this.packs = configuration.packs();
   }
 
   private static Pack.Action builtIn(
@@ -69,8 +65,8 @@ final class Describer {
             .setAgentVersion(version)
             .setIdentity(identity)
             .setPushedPacks(packs.pushedHash())
-            .setRefusesPushes(!config.acceptPushes())
-            .setRequiresSignatures(!config.trustedKeys().isEmpty());
+            .setRefusesPushes(!configuration.acceptsPushes())
+            .setRequiresSignatures(!configuration.config().trustedKeys().isEmpty());
     for (Pack pack : packs.packs()) {
       description.addPacks(pack.description());
     }
@@ -95,7 +91,7 @@ final class Describer {
         description.addActions(declaration(pack.name(), action));
       }
     }
-    for (String problem : problems) {
+    for (String problem : configuration.problems()) {
       description.addProblems(problem);
     }
     CRC32 crc = new CRC32();

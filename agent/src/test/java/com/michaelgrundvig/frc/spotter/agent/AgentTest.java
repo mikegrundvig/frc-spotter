@@ -185,9 +185,9 @@ class AgentTest {
     try (Agent agent = fixture.agent()) {
       assertThat(agent.description().getProblems())
           .containsExactly(
-              "/etc/frc-spotter/agent.json: ignored: it may set acceptPushes, bind, controller,"
-                  + " port, trustedKeys only, not packs (packs are folders in"
-                  + " /etc/frc-spotter/packs/)",
+              "/etc/frc-spotter/agent.json: can't be read, so every write is refused: it may"
+                  + " set acceptPushes, bind, controller, port, trustedKeys only, not packs (packs"
+                  + " are folders in /etc/frc-spotter/packs/)",
               Packs.INSTALLED + "/mine/pack.yaml: isn't root's (its owner is user 1000), ignored");
     }
   }
@@ -207,7 +207,7 @@ class AgentTest {
             },
             fixture.nanos::get,
             fixture.log::add);
-    try (Agent agent = new Agent(failing, Configuration.read(failing), "0.4.0", null)) {
+    try (Agent agent = new Agent(failing, Configuration.read(failing), "0.4.0", null, () -> {})) {
       assertThat(agent.description().getIdentity().getHostname()).isEmpty();
     }
     assertThat(fixture.log())
@@ -230,7 +230,8 @@ class AgentTest {
     try (Agent agent = fixture.agent()) {
       assertThat(agent.controller().address()).isEqualTo("10.12.34.3");
     }
-    try (Agent agent = new Agent(fixture.host, fixture.configuration(), "0.4.0", "127.0.0.1")) {
+    try (Agent agent =
+        new Agent(fixture.host, fixture.configuration(), "0.4.0", "127.0.0.1", () -> {})) {
       assertThat(agent.controller().address()).isEqualTo("127.0.0.1");
       assertThat(agent.names()).containsExactly("vision-front", "vision-front.local");
     }

@@ -21,7 +21,7 @@ class ArchitectureTest {
   void onlyCommandsRunsWhatAPackNames() {
     noClasses()
         .that()
-        .doNotHaveSimpleName("Commands")
+        .doNotBelongToAnyOf(Commands.class)
         .should()
         .dependOnClassesThat()
         .haveFullyQualifiedName(ProcessBuilder.class.getName())
@@ -41,7 +41,7 @@ class ArchitectureTest {
   void theWebServerStaysInOnePlace() {
     noClasses()
         .that()
-        .doNotHaveSimpleName("AgentServer")
+        .doNotBelongToAnyOf(AgentServer.class)
         .should()
         .dependOnClassesThat()
         .resideInAPackage("com.sun.net.httpserver..")

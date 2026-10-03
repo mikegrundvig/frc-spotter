@@ -12,8 +12,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The agent: a runner of what its packs declare, measuring nothing itself. It describes the board
- * (its identity, packs, values, logs and actions), keeps the values its collectors fill, and knows
- * who may change the board: the robot controller.
+ * (its identity, packs, values, logs and actions), keeps the values its collectors fill, runs its
+ * actions, pages its logs, takes pushed packs, and knows who may change the board: the robot
+ * controller, signing its writes if the board requires it.
  */
 final class Agent implements AutoCloseable {
   /** How often the description is read afresh: the board's addresses may change as it runs. */
@@ -27,9 +28,15 @@ final class Agent implements AutoCloseable {
   private final Configuration configuration;
   private final IdentitySource identity;
   private final Describer describer;
+  private final Events events = new Events();
   private final ValueStore store;
   private final Commands commands;
   private final Collectors collectors;
+  private final Runs runs;
+  private final Logs logs;
+  private final Push push;
+  private final Signatures signatures;
+  private final Runnable exit;
   private final @Nullable String controllerOverride;
   private Spotter.@Nullable Description description;
   private long describedNanos;
@@ -43,24 +50,37 @@ final class Agent implements AutoCloseable {
    * @param controllerOverride the one address a write is taken from, given on the command line;
    *     null to take the settings', or else the robot controller's, 10.TE.AM.2, on the board's own
    *     10.TE.AM.x network
+   * @param exit ends the agent, for systemd to start it again: after a push
    */
   Agent(
-      Host host, Configuration configuration, String version, @Nullable String controllerOverride) {
+      Host host,
+      Configuration configuration,
+      String version,
+      @Nullable String controllerOverride,
+      Runnable exit) {
     this.host = host;
     this.configuration = configuration;
     this.controllerOverride = controllerOverride;
+    this.exit = exit;
     this.identity = new IdentitySource(host);
-    this.describer =
-        new Describer(
-            version, configuration.config(), configuration.packs(), configuration.problems());
+    this.describer = new Describer(version, configuration);
     List<Pack> packs = configuration.packs().packs();
-    this.store = new ValueStore(Collectors.values(packs));
+    this.store = new ValueStore(Collectors.values(packs), events::valuesChanged);
     this.commands = new Commands(host);
     this.collectors = new Collectors(host, packs, commands, store);
+    this.runs = new Runs(host, commands, events, Runs.declared(packs));
+    this.logs = new Logs(commands, packs);
+    this.push = new Push(host);
+    this.signatures = new Signatures(configuration.config().trustedKeys());
   }
 
-  /** Starts running the collectors on their schedules. */
+  /**
+   * Takes up the runs a previous agent kept, tidies pushed bundles, and starts the collectors on
+   * their schedules.
+   */
   void start() {
+    runs.restore();
+    push.tidy();
     collectors.start();
   }
 
@@ -79,15 +99,59 @@ final class Agent implements AutoCloseable {
     return store;
   }
 
+  /** What happens, for streams to follow. */
+  Events events() {
+    return events;
+  }
+
+  /** The actions' runs. */
+  Runs runs() {
+    return runs;
+  }
+
+  /** The packs' logs. */
+  Logs logs() {
+    return logs;
+  }
+
+  /** Pushed packs. */
+  Push push() {
+    return push;
+  }
+
+  /** Signed writes. */
+  Signatures signatures() {
+    return signatures;
+  }
+
+  /** The monotonic clock, nanoseconds since boot: what values and events are timed by. */
+  long nanos() {
+    return host.monotonicNanos();
+  }
+
+  /** Ends the agent, for systemd to start it again: after a push. */
+  void exit() {
+    exit.run();
+  }
+
   /**
    * The board's description: read afresh at most every {@link #DESCRIPTION_NANOS}, so an address
    * the board gains as it runs shows, with a new revision.
    */
-  synchronized Spotter.Description description() {
+  Spotter.Description description() {
+    return current().clone();
+  }
+
+  /** The description's revision, as {@link #description} would answer it. */
+  int revision() {
+    return current().getRevision();
+  }
+
+  private synchronized Spotter.Description current() {
     long now = host.monotonicNanos();
     Spotter.Description last = description;
     if (last != null && now - describedNanos < DESCRIPTION_NANOS) {
-      return last.clone();
+      return last;
     }
     Spotter.Identity read;
     try {
@@ -99,12 +163,12 @@ final class Agent implements AutoCloseable {
     Spotter.Description fresh = describer.describe(read);
     description = fresh;
     describedNanos = now;
-    return fresh.clone();
+    return fresh;
   }
 
   /** Every value now, complete, with the revision of the description its indexes belong to. */
   Spotter.Values values() {
-    return store.since(-1, description().getRevision(), host.monotonicNanos());
+    return store.since(-1, revision(), host.monotonicNanos());
   }
 
   /** Writes a line to the agent's log. */
@@ -170,6 +234,7 @@ final class Agent implements AutoCloseable {
   @Override
   public void close() {
     collectors.close();
+    runs.close();
     commands.close();
   }
 }
