@@ -2,9 +2,8 @@ package com.michaelgrundvig.frc.spotter.harness;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.michaelgrundvig.frc.spotter.api.Health;
-import com.michaelgrundvig.frc.spotter.api.ProbeResult;
-import com.michaelgrundvig.frc.spotter.client.AgentClient;
+import com.michaelgrundvig.frc.spotter.protocol.Spotter;
+import java.util.Map;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Network;
@@ -12,10 +11,14 @@ import org.testcontainers.containers.Network;
 /**
  * The agent's -all.jar on a stock Java 17 (Temurin's, on Ubuntu), installed with its install
  * script, as on a board that has a Java of its own: it starts under its unit with nothing
- * configured, reads the pack copied in, and answers the robot's client with Ubuntu's os-release.
+ * configured, reads the pack put in place, and describes itself with Ubuntu's os-release.
  */
 @ContainerTest
 class AgentJarContainerTest {
+  private static Spotter.FieldValue value(Map<String, Spotter.FieldValue> values, String id) {
+    return Objects.requireNonNull(values.get(id), id);
+  }
+
   @Test
   void theAllJarRunsOnJava17WithItsPacks() throws Exception {
     try (Network network = TestNetwork.create();
@@ -34,22 +37,26 @@ class AgentJarContainerTest {
           .startsWith("/usr/local/bin/java ")
           .contains("-jar /usr/lib/frc-spotter/frc-spotter.jar");
 
-      try (AgentClient client = coprocessor.client("vision-front")) {
-        for (int i = 0; i < 50 && client.latest().answer() == null; i++) {
-          Thread.sleep(100);
-        }
-        Health health =
-            Objects.requireNonNull(client.latest().answer(), () -> client.latest().error());
-        assertThat(health.stamp().hostname()).isEqualTo("vision-java17");
-        assertThat(health.stamp().osRelease("ID")).isEqualTo("ubuntu");
-        assertThat(health.memory().totalMb()).isPositive();
-        assertThat(health.probes()).extracting(ProbeResult::id).contains("vision.unit");
-        // The stand-in's software isn't on this computer: its pack says so.
-        ProbeResult unit = client.runProbe("vision.unit");
-        assertThat(unit.status()).as("%s", unit).isEqualTo(ProbeResult.FAIL);
-        assertThat(unit.detail()).contains("isn't installed");
+      TestClient client = new TestClient(coprocessor.agentHost(), coprocessor.agentPort());
+      Spotter.Description description = client.describe();
+      assertThat(description.getIdentity().getHostname()).isEqualTo("vision-java17");
+      assertThat(description.getIdentity().getOsRelease())
+          .anyMatch(e -> e.getKey().equals("ID") && e.getValue().equals("ubuntu"));
+      assertThat(description.getValues().get(0).getId()).isEqualTo("standin.service.running");
+      // The stand-in's software isn't on this computer: its pack's values say so.
+      Map<String, Spotter.FieldValue> values = client.valuesById();
+      for (int i = 0;
+          i < 100
+              && values.values().stream()
+                  .anyMatch(v -> v.getUnavailable().equals("not collected yet"));
+          i++) {
+        Thread.sleep(100);
+        values = client.valuesById();
       }
-      System.out.printf("The -all.jar on Java 17: its unit %d MiB%n", coprocessor.agentMemoryMb());
+      assertThat(value(values, "standin.service.running").getText()).isEqualTo("inactive");
+      assertThat(value(values, "standin.web.outcome").getText()).isEqualTo("unreachable");
+      assertThat(value(values, "standin.web.state").getUnavailable())
+          .startsWith("connection refused (localhost:5800)");
     }
   }
 }

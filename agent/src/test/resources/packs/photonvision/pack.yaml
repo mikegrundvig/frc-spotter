@@ -1,0 +1,47 @@
+# PhotonVision: whether its service runs and it answers, and its settings' fingerprint. Restart it,
+# export its settings, and send it a field layout. Needs nothing beyond PhotonVision's own image.
+pack: photonvision
+version: 1.0.0
+collectors:
+  - id: service
+    run: [systemctl, is-active, photonvision.service]
+    every: 2s
+    fields:
+      running: {label: PhotonVision's service, type: text, fail: {notEquals: active}}
+  - id: web
+    http: {get: "http://localhost:5800/"}           # its web UI: any 200 means it answers
+    every: 5s
+    fields:
+      status: {label: PhotonVision answers, type: number, fail: {notEquals: 200, missing: true}}
+  - id: settings
+    run: [sha256sum, /opt/photonvision/photonvision_config/photon.sqlite]
+    every: 10s
+    fields:
+      hash: {label: Settings fingerprint, type: text}
+logs:
+  - id: log
+    label: PhotonVision's log
+    run: [./journal, --unit=photonvision.service]   # a copy of debian's ./journal, beside this file
+    map: {time: {from: __REALTIME_TIMESTAMP, unit: us}, level: PRIORITY, source: SYSLOG_IDENTIFIER, message: MESSAGE, cursor: __CURSOR}
+actions:
+  - id: restart
+    label: Restart PhotonVision
+    http: {post: "http://localhost:5800/api/utils/restartProgram"}
+    confirm: Restart PhotonVision? Its cameras stop for about 20 s.
+    response:
+      status: {type: number, fail: {notEquals: 200}}
+  - id: export
+    label: Download settings
+    http: {get: "http://localhost:5800/api/settings/photonvision_config.zip"}
+    timeout: 120s
+    response:
+      status: {type: number, fail: {notEquals: 200}}
+      body: {type: file, name: photonvision-settings.zip}
+  - id: layout
+    label: Send field layout
+    http: {post: "http://localhost:5800/api/settings/fieldLayout", form: data}
+    input: file
+    confirm: Send this layout? PhotonVision restarts to apply it.
+    response:
+      status: {type: number, fail: {notEquals: 200}}
+      body: {type: text}

@@ -1,7 +1,7 @@
-// The coprocessor agent: a small web service each coprocessor runs, which the robot polls for the
-// computer's health and the probes its packs define (docs/agent.md). It knows the computer,
-// not the software on it: what to check of that is a pack's. One runnable jar, with nothing but
-// :api inside, Java 17 bytecode.
+// The coprocessor agent: a small web service each coprocessor runs, speaking protocol 2 to the robot's
+// manager (docs/agent.md). It's a runner: it runs what its packs declare (collectors, logs,
+// actions) and measures nothing itself. One runnable jar, with :protocol, QuickBuffers' runtime,
+// avaje-jsonb and snakeyaml-engine inside, Java 17 bytecode.
 
 plugins {
     id "java"
@@ -29,7 +29,12 @@ repositories {
 }
 
 dependencies {
-    implementation project(":api")
+    implementation project(":protocol")
+    // Only its mapper (avaje-json-core's) is used; its avaje-inject plugin isn't.
+    implementation(libs.avaje.jsonb) {
+        exclude group: "io.avaje", module: "avaje-jsonb-inject-plugin"
+    }
+    implementation libs.snakeyaml.engine
 
     errorprone libs.errorprone.core
     errorprone libs.nullaway
@@ -43,10 +48,6 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
-    // Spotter's catalog of packs (packs/), which the tests read with the agent's own reader.
-    systemProperty "frc.projectDir", rootProject.projectDir.absolutePath
-    inputs.files(rootProject.fileTree("packs") { include "*.yaml" })
-    .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 // frc-spotter.jar: the agent with everything it needs (the shared code), run with
@@ -54,13 +55,15 @@ tasks.named("test") {
 tasks.named("jar") {
     archiveFileName = "frc-spotter.jar"
     manifest {
-        attributes("Main-Class": "com.michaelgrundvig.frc.spotter.agent.AgentMain")
+        attributes("Main-Class": "com.michaelgrundvig.frc.spotter.agent.AgentMain",
+        "Implementation-Version": project.version)
     }
     dependsOn configurations.runtimeClasspath
     from({
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }) {
-        exclude "META-INF/MANIFEST.MF", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"
+        exclude "META-INF/MANIFEST.MF", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA",
+                "module-info.class", "META-INF/versions/*/module-info.class"
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
@@ -77,13 +80,15 @@ apply from: rootProject.file("gradle/quality.gradle")
 // One set of files three ways: a .deb with its own Java runtime, a tarball of the same for systems
 // without dpkg, and the -all.jar alone, with its unit, polkit rules, and install script beside it,
 // for a board that already has Java 17 or newer. The runtime is jlink's, of the modules the agent
-// needs, for the computer building it: build an ARM package on ARM. No pack is installed: a team
-// copies the ones it wants from packs/ into /etc/frc-spotter/packs/.
+// needs, for the computer building it: build an ARM package on ARM. No pack is installed: packs are
+// folders an installer puts in /etc/frc-spotter/packs/, or the robot pushes.
 def agentVersion = (project.findProperty("agentVersion") ?: "0.1.0").toString()
 def debianArch = [amd64: "amd64", x86_64: "amd64", aarch64: "arm64", arm64: "arm64"]
 .get(System.getProperty("os.arch"), System.getProperty("os.arch"))
-// The runtime's modules: the agent's, and no more.
-def runtimeModules = "java.base,jdk.httpserver"
+// The runtime's modules: the agent's, and no more (jdeps --print-module-deps on its jar). QuickBuffers
+// reads and writes through sun.misc.Unsafe, which is jdk.unsupported's; a push's zip is read by
+// jdk.zipfs, which keeps each file's permissions.
+def runtimeModules = "java.base,jdk.httpserver,jdk.unsupported,jdk.zipfs"
 def packageRoot = layout.buildDirectory.dir("package/root")
 
 def agentRuntime = tasks.register("agentRuntime", Exec) {
@@ -112,11 +117,15 @@ def agentPackageTask = tasks.register("agentPackage", Sync) {
         filePermissions { unix("0755") }
     }
     from("package") {
-        include "*.service", "*.timer"
+        include "*.service"
         into "usr/lib/systemd/system"
     }
     from("package/frc-spotter.sysusers") {
         into "usr/lib/sysusers.d"
+        rename { "frc-spotter.conf" }
+    }
+    from("package/frc-spotter.tmpfiles") {
+        into "usr/lib/tmpfiles.d"
         rename { "frc-spotter.conf" }
     }
     from("package") {
@@ -204,7 +213,7 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
         }
     }
     from("package/launcher") {
-        include "frc-spotter", "frc-spotter-drive"
+        include "frc-spotter"
         filePermissions {
             unix("0755")
         }
@@ -214,7 +223,7 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
             unix("0755")
         }
     }
-    from("package") { include "*.rules", "*.service", "*.timer", "*.sysusers" }
+    from("package") { include "*.rules", "*.service", "*.sysusers", "*.tmpfiles" }
 }
 
 // The -all.jar with its files, as one download: unpack it and run its install.sh.

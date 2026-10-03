@@ -1,0 +1,5 @@
+#!/bin/sh
+# Waits until it's stopped, and says goodbye when asked politely.
+trap 'echo stopping >&2; exit 143' TERM
+echo waiting >&2
+while true; do sleep 0.1; done

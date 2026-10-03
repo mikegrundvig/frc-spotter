@@ -1,5 +1,0 @@
-ActiveState=active
-SubState=running
-Result=success
-NRestarts=1
-ActiveEnterTimestampMonotonic=9000000

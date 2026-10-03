@@ -1,11 +1,12 @@
 // The container harness: a library for container tests of the agent and its packs (src/main: a
-// coprocessor in a container under systemd, its images, the tests' network, the robot's client,
-// Toxiproxy), which a pack's own tests use too, and Spotter's own container tests (src/test,
-// @ContainerTest, tagged "container"): the agent installed from its .deb in a plain Debian 13
-// container under systemd, with no Java of its own, its root read-only and /data writable as on a
-// board; the -all.jar on a stock Java 17. The tests play the robot with Spotter's own client. They
-// need Docker or Podman running Linux containers, and skip themselves without (as on a Windows
-// laptop); in CI on Linux they must run. `test -Pquick` leaves them out unless --tests names them.
+// coprocessor in a container under systemd, its images, the tests' network, Toxiproxy), which a
+// pack's own tests use too, and Spotter's own container tests (src/test, @ContainerTest, tagged
+// "container"): the agent installed from its .deb in a plain Debian 13 container under systemd, with
+// no Java of its own, its root read-only and /data writable as on a board; the -all.jar on a stock
+// Java 17. The tests play the robot with a minimal test client of protocol 2 (the robot's manager is
+// coming). They need Docker or Podman running Linux containers, and skip themselves without (as on a
+// Windows laptop); in CI on Linux they must run. `test -Pquick` leaves them out unless --tests names
+// them.
 
 plugins {
     id "java-library"
@@ -45,7 +46,7 @@ dependencies {
     errorprone libs.errorprone.core
     errorprone libs.nullaway
 
-    api project(":client")
+    api project(":protocol")
     api platform(libs.testcontainers.bom)
     api libs.testcontainers.core
     api libs.testcontainers.toxiproxy
@@ -63,10 +64,6 @@ tasks.named("test") {
     def agentPackage = configurations.agentPackage
     inputs.files(agentJar).withPropertyName("agentJar").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(agentPackage).withPropertyName("agentPackage").withPathSensitivity(PathSensitivity.RELATIVE)
-    // Spotter's catalog of packs, whose programs one test runs as the agent would.
-    inputs.files(rootProject.fileTree("packs") { include "*.yaml" })
-    .withPropertyName("packs").withPathSensitivity(PathSensitivity.RELATIVE)
-    systemProperty "spotter.packs", rootProject.file("packs").absolutePath
     doFirst {
         systemProperty "spotter.agentJar", agentJar.singleFile.absolutePath
         systemProperty "spotter.agentPackage", agentPackage.singleFile.absolutePath

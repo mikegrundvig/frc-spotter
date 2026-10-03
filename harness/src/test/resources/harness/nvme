@@ -1,8 +1,0 @@
-#!/bin/sh
-# A stand-in for nvme-cli, for the drive-health timer's container test: a drive's SMART log and
-# identity, as nvme-cli's JSON says them.
-case "$1" in
-  smart-log) echo '{"critical_warning":0,"temperature":314,"percent_used":3,"power_cycles":140,"power_on_hours":75,"unsafe_shutdowns":23,"media_errors":0}' ;;
-  id-ctrl) echo '{"vid":5197,"mn":"Spotter Test NVMe"}' ;;
-  *) echo "nvme: $1 isn't stood in for" >&2; exit 1 ;;
-esac
