@@ -1,0 +1,64 @@
+# A Debian-family system's own health (Debian, Ubuntu, Raspberry Pi OS, Armbian): what it can say
+# about itself, judged by sensible defaults. Its scripts are beside this file (POSIX sh, reading
+# /proc and /sys). Drive health needs root: the installer adds the README's timer, which writes it
+# to /run/frc-spotter-debian/; without it, the drive fields are missing.
+pack: debian
+version: 1.0.0
+collectors:
+  - id: cpu
+    run: [./cpu]                                    # {"busiest": 87, "capped": false}
+    every: 1s
+    fields:
+      cpu.busiest: {label: Busiest core, type: number, unit: "%"}
+      cpu.capped: {label: CPU slowed for heat or power, type: boolean, warn: {equals: true}}
+  - id: thermal
+    run: [./thermal]                                # hottest zone, and its margin to the nearest trip
+    every: 2s
+    fields:
+      thermal.hottest: {label: Hottest zone, type: number, unit: "°C"}
+      thermal.margin: {label: Thermal margin, type: number, unit: "°C", warn: {below: 10}, fail: {below: 5}}
+  - id: memory
+    run: [./memory]
+    every: 5s
+    fields:
+      memory.available: {label: Memory available, type: number, unit: "%", warn: {below: 15}, fail: {below: 5}}
+  - id: disk
+    run: [./disk]
+    every: 30s
+    fields:
+      disk.root.free: {label: Root disk free, type: number, unit: "%", warn: {below: 10}, fail: {below: 5}}
+  - id: network
+    run: [./network, eth0]
+    every: 2s
+    fields:
+      net.up: {label: Ethernet link, type: boolean, fail: {equals: false}}
+      net.speed: {label: Link speed, type: number, unit: "Mb/s", warn: {below: 1000}}
+      net.drops: {label: Link drops since boot, type: number, warn: {above: 0}}
+  - id: usb
+    run: [./usb]
+    every: 2s
+    fields:
+      usb.devices: {label: USB devices, type: text}
+      usb.disconnects: {label: USB disconnects since boot, type: number, warn: {above: 0}}
+  - id: clock
+    run: [./clock]
+    every: 10s
+    fields:
+      clock.synced: {label: Clock synchronized, type: boolean, warn: {equals: false}}
+      clock.offset: {label: Clock offset, type: number, unit: s}
+  - id: drive
+    file: /run/frc-spotter-debian/drive.json      # written each minute by the README's root timer
+    every: 60s
+    fields:
+      drive.wear: {label: Drive wear, type: number, unit: "%", warn: {above: 80}, fail: {above: 95}}
+      drive.unsafe-shutdowns: {label: Unsafe shutdowns, type: number}
+  - id: uptime
+    file: /proc/uptime                            # "4123.55 15991.04": not JSON, one field
+    every: 10s
+    fields:
+      uptime: {label: Up for, type: number, unit: s}
+logs:
+  - id: journal
+    label: System log
+    run: [./journal]                                # journalctl -o json, paged by SPOTTER_*
+    map: {time: {from: __REALTIME_TIMESTAMP, unit: us}, level: PRIORITY, source: SYSLOG_IDENTIFIER, message: MESSAGE, cursor: __CURSOR}

@@ -1,0 +1,38 @@
+# Our game-piece detector: its health, its log file, a recalibration that takes minutes, and a way
+# to send it a new model.
+pack: detector
+version: 0.2.0
+collectors:
+  - id: health
+    run: [/opt/team/detector/health.py]     # prints JSON, judged however it likes
+    every: 1s
+    fields:
+      fps: {label: Detector frame rate, type: number, unit: fps, warn: {below: 25}, fail: {below: 10}}
+      model: {label: Model, type: text}
+      confidence: {label: Detection confidence, type: status}
+  - id: front-camera
+    file: /sys/bus/usb/devices/7-1/product  # gone when it's unplugged
+    every: 2s
+    fields:
+      front-camera: {label: Front camera, type: text, fail: {missing: true}}
+logs:
+  - id: log
+    label: Detector's log
+    run: [/opt/team/detector/log-page.sh]   # pages /var/log/detector.log by SPOTTER_*; cursor = byte offset
+actions:
+  - id: recalibrate
+    label: Recalibrate the detector
+    run: [/opt/team/detector/recalibrate.sh]   # steps on stderr, the result as JSON on stdout
+    confirm: Recalibrate? Detection stops until it finishes.
+    timeout: 10m
+    response:
+      exit: {type: number, fail: {notEquals: 0}}
+      reprojection-error: {label: Reprojection error, type: number, unit: px, warn: {above: 0.5}}
+      report: {type: json}
+  - id: model
+    label: Send a model
+    run: [/opt/team/detector/install-model.sh]  # reads the model on stdin
+    input: file
+    response:
+      exit: {type: number, fail: {notEquals: 0}}
+      version: {label: Installed model, type: text, fail: {missing: true}}

@@ -1,0 +1,13 @@
+# A Raspberry Pi's power: under-voltage episodes since boot, from the kernel's log (its power
+# driver logs "Undervoltage detected!" as each begins). Checked against the rpi-6.12.y kernel
+# source, not on a board.
+pack: raspberry-pi
+version: 1.0.0
+collectors:
+  - id: power
+    run: [/usr/lib/frc-spotter-raspberry-pi/undervoltage]
+    # prints {"episodes": 2, "status": {"level": "failing", "message": "2 since boot, latest 1234.6 s"}}
+    every: 5s
+    fields:
+      episodes: {label: Under-voltage episodes since boot, type: number}
+      status: {label: Power, type: status}

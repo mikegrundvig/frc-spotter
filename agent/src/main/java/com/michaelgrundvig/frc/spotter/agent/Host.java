@@ -20,40 +20,28 @@ import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 
 /**
- * The computer the agent reports on: its files, from a root ({@code /} on a coprocessor, a fixture
- * tree in tests), who owns them, its network addresses, the commands it may run, its monotonic
- * clock, and the journal the agent logs to. Every path the agent reads is written as on the
- * coprocessor ({@code /proc/stat}) and found under the root, so tests run anywhere, against any
- * tree.
+ * The computer the agent runs on: its files, from a root ({@code /} on a coprocessor, a folder in
+ * tests), who owns them, its network addresses, its monotonic clock, and the journal the agent logs
+ * to. Every path the agent uses is written as on the coprocessor ({@code /etc/frc-spotter/packs})
+ * and found under the root, so tests run anywhere, against any tree.
  */
 final class Host {
   /** The most addresses read: a coprocessor has one or two. */
   static final int MAX_ADDRESSES = 16;
 
+  /** The most of any one file {@link #read} reads, in bytes. */
+  static final int MAX_FILE = 256 * 1024;
+
   private final Path root;
-  private final Limits limits;
-  private final boolean escapeColons;
-  private final Commands commands;
-  private final Links links;
   private final Owners owners;
   private final Addresses addresses;
-  private final LongSupplier monotonicMicros;
+  private final LongSupplier monotonicNanos;
   private final Consumer<String> log;
 
   /**
-   * How a path's links resolve: in sysfs, a device's class entry links to where it really is. On a
-   * coprocessor that's the filesystem's own; in tests, a table of links, since a fixture tree in
-   * Git can't hold them on every system.
-   */
-  interface Links {
-    /** Where an absolute path (as on the coprocessor) really is, as an absolute path. */
-    String resolve(String path) throws IOException;
-  }
-
-  /**
-   * Who owns a file, and who may write it: a pack's file is trusted only when it's root's and
-   * nobody else may write it. On a coprocessor, the filesystem's own; in tests, a table, as a
-   * fixture tree in Git is the tester's.
+   * Who owns a file, and who may write it: an installed pack, and a program it names, is trusted
+   * only when it's root's and nobody else may write it. On a coprocessor, the filesystem's own; in
+   * tests, a table, as a test's files are the tester's.
    */
   interface Owners {
     /** The owner and mode of an absolute path (as on the coprocessor), its links followed. */
@@ -82,56 +70,26 @@ final class Host {
     List<String> read() throws IOException;
   }
 
-  /**
-   * A computer at {@code root}. {@code escapeColons} is for fixture trees: sysfs names hold colons
-   * ({@code 7-1:1.0}), which no file in Git may hold if Windows is to check it out, so a fixture
-   * writes them {@code %3A}.
-   */
   Host(
       Path root,
-      Limits limits,
-      boolean escapeColons,
-      Commands commands,
-      Links links,
       Owners owners,
       Addresses addresses,
-      LongSupplier monotonicMicros,
+      LongSupplier monotonicNanos,
       Consumer<String> log) {
     this.root = root;
-    this.limits = limits;
-    this.escapeColons = escapeColons;
-    this.commands = commands;
-    this.links = links;
     this.owners = owners;
     this.addresses = addresses;
-    this.monotonicMicros = monotonicMicros;
+    this.monotonicNanos = monotonicNanos;
     this.log = log;
   }
 
-  /** The coprocessor itself: the root filesystem, real links, the process clock. */
-  static Host system(Commands commands, Consumer<String> log) {
-    return system(Path.of("/"), commands, log);
-  }
-
   /**
-   * The computer's files from {@code root} rather than {@code /} (a fixture tree with real links,
-   * as a container test writes one), its commands, addresses, and clock its own. A link is followed
-   * within the tree: one that leads out of it is as if it led nowhere.
+   * The computer's files from {@code root} ({@code /}, or a folder a test writes), its addresses
+   * and clock its own: {@link System#nanoTime} is CLOCK_MONOTONIC on Linux.
    */
-  static Host system(Path root, Commands commands, Consumer<String> log) {
+  static Host system(Path root, Consumer<String> log) {
     return new Host(
         root,
-        Limits.DEFAULT,
-        false,
-        commands,
-        path -> {
-          Path top = root.toRealPath();
-          Path real = root.resolve(path.substring(1)).toRealPath();
-          if (!real.startsWith(top)) {
-            throw new IOException(path + " leads out of " + root);
-          }
-          return "/" + top.relativize(real).toString().replace(java.io.File.separatorChar, '/');
-        },
         path -> {
           Path file = root.resolve(path.substring(1));
           return new Owner(
@@ -139,7 +97,7 @@ final class Host {
               (Integer) Files.getAttribute(file, "unix:mode") & 07777);
         },
         Host::systemAddresses,
-        () -> System.nanoTime() / 1000,
+        System::nanoTime,
         log);
   }
 
@@ -172,24 +130,15 @@ final class Host {
     return all.subList(0, Math.min(all.size(), MAX_ADDRESSES));
   }
 
-  /** A path as on the coprocessor ({@code /proc/stat}), under the root. */
+  /** A path as on the coprocessor ({@code /etc/os-release}), under the root. */
   Path path(String absolute) {
-    String relative = absolute.startsWith("/") ? absolute.substring(1) : absolute;
-    return root.resolve(escapeColons ? relative.replace(":", "%3A") : relative);
+    return root.resolve(absolute.startsWith("/") ? absolute.substring(1) : absolute);
   }
 
-  /** How much the agent reads and sends. */
-  Limits limits() {
-    return limits;
-  }
-
-  /**
-   * A file's text, or empty when it doesn't exist; at most {@link Limits#maxFile} bytes of it (a
-   * longer file is cut short, which a JSON file won't survive).
-   */
+  /** A file's text, or empty when it doesn't exist; at most {@link #MAX_FILE} bytes of it. */
   Optional<String> read(String absolute) throws IOException {
     try (InputStream in = Files.newInputStream(path(absolute))) {
-      return Optional.of(new String(in.readNBytes(limits.maxFile()), StandardCharsets.UTF_8));
+      return Optional.of(new String(in.readNBytes(MAX_FILE), StandardCharsets.UTF_8));
     } catch (NoSuchFileException e) {
       return Optional.empty();
     }
@@ -208,11 +157,7 @@ final class Host {
     }
     try (Stream<Path> entries = Files.list(folder)) {
       List<String> names = new ArrayList<>();
-      entries.forEach(
-          entry -> {
-            String name = entry.getFileName().toString();
-            names.add(escapeColons ? name.replace("%3A", ":") : name);
-          });
+      entries.forEach(entry -> names.add(entry.getFileName().toString()));
       names.sort(null);
       return names;
     }
@@ -223,9 +168,9 @@ final class Host {
     return Files.exists(path(absolute));
   }
 
-  /** Where a path really is, its links resolved. */
-  String resolve(String absolute) throws IOException {
-    return links.resolve(absolute);
+  /** Whether a path is a folder. */
+  boolean isFolder(String absolute) {
+    return Files.isDirectory(path(absolute));
   }
 
   /** Who owns a path, and who may write it, its links followed. */
@@ -238,13 +183,9 @@ final class Host {
     return addresses.read();
   }
 
-  Commands commands() {
-    return commands;
-  }
-
-  /** The monotonic clock (CLOCK_MONOTONIC on Linux, the journal's), microseconds since boot. */
-  long monotonicMicros() {
-    return monotonicMicros.getAsLong();
+  /** The monotonic clock (CLOCK_MONOTONIC on Linux), nanoseconds since boot. */
+  long monotonicNanos() {
+    return monotonicNanos.getAsLong();
   }
 
   /** Writes a line to the agent's log: the journal, on a coprocessor. */
