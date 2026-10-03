@@ -5,9 +5,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.Reader;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
 import java.net.NoRouteToHostException;
@@ -21,11 +19,15 @@ import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -35,21 +37,29 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Runs a pack's commands: the only place the agent starts a process, asks a URL, or reads a pack's
- * file. Each is bounded: by its timeout (a process and its children are killed, a request is cut
+ * file. Each is bounded: by its timeout (a process and its children are stopped, a request is cut
  * off, a read is interrupted), and by the most of its output kept. Nothing here comes from a
- * request: every program, URL and path is its pack's, fixed when the agent started.
+ * request: every program, URL and path is its pack's, fixed when the agent started. What a request
+ * brings (an action's input, a log's paging) is data: on standard input, in a request's body, or in
+ * the environment, never on a command line.
  */
 final class Commands implements Runner, AutoCloseable {
   /** The most of a command's standard error kept to say why it failed: its first line. */
   static final int MAX_ERRORS = 200;
 
+  /** The longest line of standard error handed over whole; a longer one is cut. */
+  static final int MAX_LINE = 8 * 1024;
+
   /** How long the end of a command's standard error is waited for, once it has exited. */
-  private static final long ERRORS_WAIT_MILLIS = 200;
+  private static final long ERRORS_WAIT_MILLIS = 1000;
 
   /** The errno in why a program couldn't start. */
   private static final Pattern ERRNO = Pattern.compile("error(?:=|: )([0-9]+)");
@@ -109,20 +119,105 @@ final class Commands implements Runner, AutoCloseable {
     }
   }
 
+  /**
+   * What a command run for an action or a log is given, and how it's bounded.
+   *
+   * @param input its input: a process's standard input, a request's body; null for none
+   * @param environment variables added to the agent's own: a log's paging
+   * @param maxOutput the most of its output kept, in bytes
+   * @param maxErrors the most of its standard error handed over, in bytes
+   * @param errors each line of its standard error, as it's read
+   * @param grace how long a process stopped politely (SIGTERM) has before it's killed: zero kills
+   *     it at once
+   */
+  record Options(
+      @Nullable Path input,
+      Map<String, String> environment,
+      int maxOutput,
+      int maxErrors,
+      Consumer<String> errors,
+      Duration grace) {
+    /** A collector's: no input, its output bounded, its standard error's first line kept. */
+    static Options collector(int maxOutput) {
+      return new Options(null, Map.of(), maxOutput, 0, line -> {}, Duration.ZERO);
+    }
+  }
+
+  /**
+   * Stops a command from another thread: a process politely, then forcibly after its grace; a
+   * request by closing it. Asked before the command starts, it stops it as it starts.
+   */
+  static final class Cancellation {
+    private @Nullable Runnable stop;
+    private boolean cancelled;
+
+    /** Stops the command, once. */
+    void cancel() {
+      Runnable now;
+      synchronized (this) {
+        if (cancelled) {
+          return;
+        }
+        cancelled = true;
+        now = stop;
+      }
+      if (now != null) {
+        now.run();
+      }
+    }
+
+    synchronized boolean cancelled() {
+      return cancelled;
+    }
+
+    private void onCancel(Runnable stop) {
+      boolean already;
+      synchronized (this) {
+        this.stop = stop;
+        already = cancelled;
+      }
+      if (already) {
+        stop.run();
+      }
+    }
+  }
+
   @Override
   public Result run(String folder, Command command, Duration timeout, int maxOutput) {
+    return run(folder, command, timeout, Options.collector(maxOutput), new Cancellation());
+  }
+
+  /**
+   * Runs a command once, on the caller's thread.
+   *
+   * @param folder its pack's folder on the coprocessor: where it runs, and where its {@code ./}
+   *     programs are
+   * @param timeout how long it may take
+   * @param cancellation stops it from another thread
+   */
+  Result run(
+      String folder,
+      Command command,
+      Duration timeout,
+      Options options,
+      Cancellation cancellation) {
     if (command instanceof Command.Run) {
-      return process(folder, (Command.Run) command, timeout, maxOutput);
+      return process(folder, (Command.Run) command, timeout, options, cancellation);
     }
     if (command instanceof Command.Http) {
-      return http((Command.Http) command, timeout, maxOutput);
+      return http((Command.Http) command, timeout, options, cancellation);
     }
-    return read((Command.Read) command, timeout, maxOutput);
+    return read((Command.Read) command, timeout, options.maxOutput());
   }
 
   // ---- run ----
 
-  private Result process(String folder, Command.Run run, Duration timeout, int maxOutput) {
+  private Result process(
+      String folder,
+      Command.Run run,
+      Duration timeout,
+      Options options,
+      Cancellation cancellation) {
     List<String> argv = new ArrayList<>(run.argv());
     String program = run.programPath(folder);
     if (run.byPath()) {
@@ -130,49 +225,65 @@ final class Commands implements Runner, AutoCloseable {
     }
     Process process;
     try {
-      process =
+      ProcessBuilder builder =
           new ProcessBuilder(argv)
               .directory(host.path(folder).toFile())
-              .redirectInput(ProcessBuilder.Redirect.from(nullDevice()))
-              .start();
+              .redirectInput(
+                  ProcessBuilder.Redirect.from(
+                      options.input() == null ? nullDevice() : options.input().toFile()));
+      builder.environment().putAll(options.environment());
+      process = builder.start();
     } catch (IOException e) {
       return Result.failed(Kind.RUN, Spotter.Outcome.OUTCOME_COULD_NOT_START, why(e, program));
     }
-    Future<String> errors = errors(process);
-    AtomicBoolean timedOut = new AtomicBoolean();
+    Future<String> errors = errors(process, options);
+    AtomicReference<Spotter.Outcome> stopped = new AtomicReference<>();
+    Runnable stop = () -> stop(process, options.grace());
     ScheduledFuture<?> deadline =
         timer.schedule(
             () -> {
-              timedOut.set(true);
-              kill(process);
+              if (stopped.compareAndSet(null, Spotter.Outcome.OUTCOME_TIMED_OUT)) {
+                stop.run();
+              }
             },
             Math.max(1, timeout.toMillis()),
             TimeUnit.MILLISECONDS);
+    cancellation.onCancel(
+        () -> {
+          if (stopped.compareAndSet(null, Spotter.Outcome.OUTCOME_CANCELLED)) {
+            stop.run();
+          }
+        });
     ByteArrayOutputStream kept = new ByteArrayOutputStream();
     boolean truncated = false;
     try (InputStream out = process.getInputStream()) {
-      truncated = copy(out, kept, maxOutput, true);
+      truncated = copy(out, kept, options.maxOutput(), true);
     } catch (IOException e) {
-      // Killed as it was read: it timed out, said below.
+      // Stopped as it was read: said below.
     }
     try {
-      if (!process.waitFor(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS)) {
-        timedOut.set(true);
+      long most = timeout.plus(options.grace()).toMillis() + 1000;
+      if (!process.waitFor(most, TimeUnit.MILLISECONDS)) {
+        stopped.compareAndSet(null, Spotter.Outcome.OUTCOME_TIMED_OUT);
         kill(process);
+        process.waitFor(1, TimeUnit.SECONDS);
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      stopped.compareAndSet(null, Spotter.Outcome.OUTCOME_CANCELLED);
       kill(process);
-      timedOut.set(true);
     } finally {
       deadline.cancel(false);
     }
     String said = errorsOf(errors);
-    if (timedOut.get()) {
+    Spotter.Outcome outcome = stopped.get();
+    if (outcome != null) {
       return new Result(
           Kind.RUN,
-          Spotter.Outcome.OUTCOME_TIMED_OUT,
-          "timed out after " + PackReader.show(timeout),
+          outcome,
+          outcome == Spotter.Outcome.OUTCOME_TIMED_OUT
+              ? "timed out after " + PackReader.show(timeout)
+              : "cancelled",
           0,
           kept.toByteArray(),
           truncated,
@@ -205,6 +316,22 @@ final class Commands implements Runner, AutoCloseable {
     return String.valueOf(e.getMessage());
   }
 
+  /**
+   * Stops a process and everything it started: politely (SIGTERM), then, after its grace, forcibly
+   * (SIGKILL); at once with no grace.
+   */
+  private void stop(Process process, Duration grace) {
+    if (grace.isZero()) {
+      kill(process);
+      return;
+    }
+    // Through its handle, not Process.destroy, which closes its streams: what it says as it stops
+    // is still read, into its log.
+    process.descendants().forEach(ProcessHandle::destroy);
+    process.toHandle().destroy();
+    timer.schedule(() -> kill(process), grace.toMillis(), TimeUnit.MILLISECONDS);
+  }
+
   /** Kills a process and everything it started. */
   private static void kill(Process process) {
     process.descendants().forEach(ProcessHandle::destroyForcibly);
@@ -212,29 +339,51 @@ final class Commands implements Runner, AutoCloseable {
   }
 
   /**
-   * Reads a process's standard error until it closes: its first line kept, cut to {@link
-   * #MAX_ERRORS} characters, and the rest read and dropped, so the process never blocks writing it.
+   * Reads a process's standard error until it closes, so the process never blocks writing it: each
+   * line handed over (at most {@code maxErrors} bytes of them, each cut to {@link #MAX_LINE}), and
+   * the first that isn't blank kept, cut to {@link #MAX_ERRORS} characters, to say why it failed.
    */
-  private Future<String> errors(Process process) {
+  private Future<String> errors(Process process, Options options) {
     return errorReaders.submit(
         () -> {
-          StringBuilder first = new StringBuilder();
-          boolean ended = false;
-          try (Reader reader =
-              new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8)) {
-            int c;
-            while ((c = reader.read()) != -1) {
-              if (ended) {
-                continue;
-              }
-              if (c == '\n') {
-                ended = first.toString().strip().length() > 0;
-              } else if (first.length() < MAX_ERRORS) {
-                first.append((char) c);
+          String first = "";
+          long handed = 0;
+          ByteArrayOutputStream line = new ByteArrayOutputStream();
+          try (InputStream in = process.getErrorStream()) {
+            byte[] chunk = new byte[8192];
+            int read;
+            while ((read = in.read(chunk)) != -1) {
+              for (int i = 0; i < read; i++) {
+                if (chunk[i] != '\n') {
+                  if (line.size() < MAX_LINE) {
+                    line.write(chunk[i]);
+                  }
+                  continue;
+                }
+                String text = line.toString(StandardCharsets.UTF_8);
+                line.reset();
+                if (first.isEmpty() && !text.isBlank()) {
+                  first = text.strip();
+                  first = first.length() <= MAX_ERRORS ? first : first.substring(0, MAX_ERRORS);
+                }
+                if (handed + text.length() + 1 <= options.maxErrors()) {
+                  handed += text.length() + 1;
+                  options.errors().accept(text);
+                }
               }
             }
           }
-          return first.toString().strip();
+          String rest = line.toString(StandardCharsets.UTF_8);
+          if (!rest.isEmpty()) {
+            if (first.isEmpty() && !rest.isBlank()) {
+              first = rest.strip();
+              first = first.length() <= MAX_ERRORS ? first : first.substring(0, MAX_ERRORS);
+            }
+            if (handed + rest.length() <= options.maxErrors()) {
+              options.errors().accept(rest);
+            }
+          }
+          return first;
         });
   }
 
@@ -256,7 +405,8 @@ final class Commands implements Runner, AutoCloseable {
 
   // ---- http ----
 
-  private Result http(Command.Http http, Duration timeout, int maxOutput) {
+  private Result http(
+      Command.Http http, Duration timeout, Options options, Cancellation cancellation) {
     HttpURLConnection connection;
     try {
       connection = (HttpURLConnection) new URI(http.url()).toURL().openConnection(Proxy.NO_PROXY);
@@ -269,24 +419,27 @@ final class Commands implements Runner, AutoCloseable {
     connection.setReadTimeout(millis);
     connection.setInstanceFollowRedirects(false);
     connection.setUseCaches(false);
-    AtomicBoolean timedOut = new AtomicBoolean();
+    AtomicReference<Spotter.Outcome> stopped = new AtomicReference<>();
     ScheduledFuture<?> deadline =
         timer.schedule(
             () -> {
-              timedOut.set(true);
-              connection.disconnect();
+              if (stopped.compareAndSet(null, Spotter.Outcome.OUTCOME_TIMED_OUT)) {
+                connection.disconnect();
+              }
             },
             millis,
             TimeUnit.MILLISECONDS);
+    cancellation.onCancel(
+        () -> {
+          if (stopped.compareAndSet(null, Spotter.Outcome.OUTCOME_CANCELLED)) {
+            connection.disconnect();
+          }
+        });
     String where = where(http.url());
     try {
       connection.setRequestMethod(http.method());
       if (http.method().equals("POST")) {
-        connection.setDoOutput(true);
-        connection.setFixedLengthStreamingMode(0);
-        try (OutputStream body = connection.getOutputStream()) {
-          body.flush();
-        }
+        send(connection, http.form(), options.input());
       }
       int status = connection.getResponseCode();
       ByteArrayOutputStream kept = new ByteArrayOutputStream();
@@ -294,8 +447,11 @@ final class Commands implements Runner, AutoCloseable {
       InputStream in = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
       if (in != null) {
         try (in) {
-          truncated = copy(in, kept, maxOutput, false);
+          truncated = copy(in, kept, options.maxOutput(), false);
         }
+      }
+      if (stopped.get() == Spotter.Outcome.OUTCOME_CANCELLED) {
+        return Result.failed(Kind.HTTP, Spotter.Outcome.OUTCOME_CANCELLED, "cancelled");
       }
       return new Result(
           Kind.HTTP,
@@ -306,10 +462,7 @@ final class Commands implements Runner, AutoCloseable {
           truncated,
           "");
     } catch (SocketTimeoutException e) {
-      return Result.failed(
-          Kind.HTTP,
-          Spotter.Outcome.OUTCOME_TIMED_OUT,
-          "no answer within " + PackReader.show(timeout) + " (" + where + ")");
+      return timedOut(timeout, where);
     } catch (ConnectException e) {
       return Result.failed(
           Kind.HTTP, Spotter.Outcome.OUTCOME_UNREACHABLE, "connection refused (" + where + ")");
@@ -317,11 +470,11 @@ final class Commands implements Runner, AutoCloseable {
       return Result.failed(
           Kind.HTTP, Spotter.Outcome.OUTCOME_UNREACHABLE, "no route (" + where + ")");
     } catch (IOException e) {
-      if (timedOut.get()) {
-        return Result.failed(
-            Kind.HTTP,
-            Spotter.Outcome.OUTCOME_TIMED_OUT,
-            "no answer within " + PackReader.show(timeout) + " (" + where + ")");
+      if (stopped.get() == Spotter.Outcome.OUTCOME_TIMED_OUT) {
+        return timedOut(timeout, where);
+      }
+      if (stopped.get() == Spotter.Outcome.OUTCOME_CANCELLED) {
+        return Result.failed(Kind.HTTP, Spotter.Outcome.OUTCOME_CANCELLED, "cancelled");
       }
       return Result.failed(
           Kind.HTTP,
@@ -330,6 +483,53 @@ final class Commands implements Runner, AutoCloseable {
     } finally {
       deadline.cancel(false);
       connection.disconnect();
+    }
+  }
+
+  private static Result timedOut(Duration timeout, String where) {
+    return Result.failed(
+        Kind.HTTP,
+        Spotter.Outcome.OUTCOME_TIMED_OUT,
+        "no answer within " + PackReader.show(timeout) + " (" + where + ")");
+  }
+
+  /**
+   * Sends a POST's body: its input as it is, or as a form's one file field ({@code form}, as
+   * multipart/form-data); nothing when it has none.
+   */
+  private static void send(HttpURLConnection connection, String form, @Nullable Path input)
+      throws IOException {
+    connection.setDoOutput(true);
+    if (input == null) {
+      connection.setFixedLengthStreamingMode(0);
+      connection.getOutputStream().close();
+      return;
+    }
+    if (form.isEmpty()) {
+      connection.setRequestProperty("Content-Type", "application/octet-stream");
+      connection.setFixedLengthStreamingMode(Files.size(input));
+      try (OutputStream body = connection.getOutputStream()) {
+        Files.copy(input, body);
+      }
+      return;
+    }
+    String boundary = "spotter-" + UUID.randomUUID();
+    byte[] head =
+        ("--"
+                + boundary
+                + "\r\nContent-Disposition: form-data; name=\""
+                + form
+                + "\"; filename=\""
+                + form
+                + "\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+            .getBytes(StandardCharsets.UTF_8);
+    byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
+    connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+    connection.setFixedLengthStreamingMode(head.length + Files.size(input) + tail.length);
+    try (OutputStream body = connection.getOutputStream()) {
+      body.write(head);
+      Files.copy(input, body);
+      body.write(tail);
     }
   }
 

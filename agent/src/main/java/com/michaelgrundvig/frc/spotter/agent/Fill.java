@@ -126,6 +126,18 @@ final class Fill {
    * @param maxOutput the most of its output kept, to say so
    */
   static List<Spotter.FieldValue> fill(List<Field> fields, Commands.Result result, int maxOutput) {
+    return fill(fields, result, maxOutput, "");
+  }
+
+  /**
+   * The fields, in their order, from one run of a command, by the rule; a {@code file} field's
+   * value is where to fetch it.
+   *
+   * @param maxOutput the most of its output kept, to say so
+   * @param files where a run's file fields are fetched: {@code /v2/runs/<run>/files/}
+   */
+  static List<Spotter.FieldValue> fill(
+      List<Field> fields, Commands.Result result, int maxOutput, String files) {
     Map<String, Part> parts = parts(result.kind());
     String reason = reason(result, maxOutput);
     List<Field> own = new ArrayList<>();
@@ -158,7 +170,12 @@ final class Fill {
                   : unavailable(reason));
           break;
         default:
-          values.add(reason.isEmpty() ? whole(field, result.text()) : unavailable(reason));
+          values.add(
+              !reason.isEmpty()
+                  ? unavailable(reason)
+                  : field.type() == Spotter.FieldType.FIELD_TYPE_FILE
+                      ? Spotter.FieldValue.newInstance().setFileUrl(files + field.name())
+                      : whole(field, result.text()));
           break;
       }
     }
