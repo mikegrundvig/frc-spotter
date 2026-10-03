@@ -671,10 +671,24 @@ final class PackReader {
       return min;
     }
     String text = text(key.getValueNode(), "a duration").orElse("");
-    Matcher matcher = DURATION.matcher(text);
-    if (!matcher.matches()) {
+    Optional<Duration> read = duration(text);
+    if (read.isEmpty()) {
       problem(key, "a duration is a number and its unit (ms, s, m, h), such as 2s, not " + text);
       return min;
+    }
+    Duration duration = read.get();
+    if (duration.compareTo(min) < 0 || duration.compareTo(max) > 0) {
+      problem(key, text + " is out of range: " + show(min) + " to " + show(max));
+      return min;
+    }
+    return duration;
+  }
+
+  /** A duration as a pack (or a request) writes one: {@code 250ms}, {@code 2s}, {@code 10m}. */
+  static Optional<Duration> duration(String text) {
+    Matcher matcher = DURATION.matcher(text);
+    if (!matcher.matches()) {
+      return Optional.empty();
     }
     double amount = Double.parseDouble(matcher.group(1));
     double millis;
@@ -692,12 +706,7 @@ final class PackReader {
         millis = amount * 3_600_000;
         break;
     }
-    Duration duration = Duration.ofMillis(Math.round(millis));
-    if (duration.compareTo(min) < 0 || duration.compareTo(max) > 0) {
-      problem(key, text + " is out of range: " + show(min) + " to " + show(max));
-      return min;
-    }
-    return duration;
+    return Optional.of(Duration.ofMillis(Math.round(millis)));
   }
 
   /** A duration as a pack writes one. */

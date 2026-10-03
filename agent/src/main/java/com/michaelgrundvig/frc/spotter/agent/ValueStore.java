@@ -14,11 +14,20 @@ final class ValueStore {
 
   private final Spotter.FieldValue[] values;
   private final long[] changed;
+  private final Runnable onChange;
   private long changes;
 
   ValueStore(int size) {
+    this(size, () -> {});
+  }
+
+  /**
+   * @param onChange told, outside the store's lock, whenever a set changed a value
+   */
+  ValueStore(int size, Runnable onChange) {
     values = new Spotter.FieldValue[size];
     changed = new long[size];
+    this.onChange = onChange;
     for (int i = 0; i < size; i++) {
       values[i] = Fill.unavailable(NOT_YET).setIndex(i);
     }
@@ -30,14 +39,21 @@ final class ValueStore {
   }
 
   /** Sets values from {@code first} on, in order, counting those that changed. */
-  synchronized void set(int first, List<Spotter.FieldValue> filled) {
-    for (int i = 0; i < filled.size(); i++) {
-      int index = first + i;
-      Spotter.FieldValue value = filled.get(i).clone().setIndex(index);
-      if (!value.equals(values[index])) {
-        values[index] = value;
-        changed[index] = ++changes;
+  void set(int first, List<Spotter.FieldValue> filled) {
+    boolean any = false;
+    synchronized (this) {
+      for (int i = 0; i < filled.size(); i++) {
+        int index = first + i;
+        Spotter.FieldValue value = filled.get(i).clone().setIndex(index);
+        if (!value.equals(values[index])) {
+          values[index] = value;
+          changed[index] = ++changes;
+          any = true;
+        }
       }
+    }
+    if (any) {
+      onChange.run();
     }
   }
 
@@ -59,6 +75,19 @@ final class ValueStore {
    * @param nanos the time, on the monotonic clock
    */
   synchronized Spotter.Values since(long after, int revision, long nanos) {
+    return delta(after, revision, nanos).values();
+  }
+
+  /**
+   * What changed after a count, and the count it brings the reader to, read together.
+   *
+   * @param values the values, as {@link #since} answers them
+   * @param changes the count they bring the reader to
+   */
+  record Delta(Spotter.Values values, long changes) {}
+
+  /** What changed after the count {@code after} (every value when negative), and the count now. */
+  synchronized Delta delta(long after, int revision, long nanos) {
     Spotter.Values message =
         Spotter.Values.newInstance()
             .setRevision(revision)
@@ -69,6 +98,6 @@ final class ValueStore {
         message.addValues(values[i]);
       }
     }
-    return message;
+    return new Delta(message, changes);
   }
 }
