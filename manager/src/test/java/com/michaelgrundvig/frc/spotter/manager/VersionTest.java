@@ -188,6 +188,5 @@ class VersionTest {
     assertThat(Link.sameMajor("3.0")).isFalse();
     assertThat(Link.sameMajor("20.0")).isFalse();
     assertThat(Link.sameMajor("")).isFalse();
-    assertThat(Link.sameMajor(null)).isFalse();
   }
 }

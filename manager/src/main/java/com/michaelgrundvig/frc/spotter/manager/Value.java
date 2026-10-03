@@ -3,11 +3,13 @@ package com.michaelgrundvig.frc.spotter.manager;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 
 /**
- * One of a board's values, as of the last {@link Manager#update}: what it is, its level by its
- * limits, and why. Its id is {@code pack.collector.field}, such as {@code debian.memory.available}.
+ * One of a board's values, as of the last {@link Manager#update}, or a field of a run's response:
+ * what it is, its level by its limits, and why. A value's id is {@code pack.collector.field}, such
+ * as {@code debian.memory.available}; a response field's is its name.
  *
- * <p>The manager reuses it: read it in the loop that got it, and keep what's needed, never the
- * value itself, past the next {@link Manager#update}.
+ * <p>A board's values are reused: read one in the loop that got it, and keep what's needed, never
+ * the value itself, past the next {@link Manager#update}. A run's response is its own, never
+ * reused.
  */
 public final class Value {
   /** What it holds: one of {@code spotter.proto}'s {@code FieldValue} kinds. */

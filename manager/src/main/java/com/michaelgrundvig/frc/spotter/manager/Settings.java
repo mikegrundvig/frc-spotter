@@ -1,12 +1,14 @@
 package com.michaelgrundvig.frc.spotter.manager;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The manager's settings, each with a default ({@link #DEFAULTS}); robot code changes those it
- * needs: {@code Settings.DEFAULTS.withMissing(Duration.ofSeconds(2))}.
+ * needs: {@code Settings.DEFAULTS.withPacks(deploy.resolve("spotter-packs"))}.
  *
  * @param heartbeat how often each agent says it's there when nothing else happens: asked for on
  *     connect, kept by the agent between 50 ms and 5 s (default 250 ms)
@@ -16,14 +18,41 @@ import java.util.Map;
  * @param backoff the longest wait between attempts to reach a board: the first comes 250 ms after a
  *     failure, and each next one waits twice as long, up to this; a stream that opened starts it
  *     over (default 5 s)
- * @param limits robot code's limits for fields, by id ({@code pack.collector.field}), in place of
- *     their packs' (default none)
+ * @param limits robot code's limits for fields, by id, in place of their packs': a value's {@code
+ *     pack.collector.field}, or an action's response field's {@code pack.action.field} (default
+ *     none)
+ * @param refuseWhileEnabled whether to refuse an action while the robot is enabled or the field is
+ *     attached, unless the action says {@code whileEnabled: true} (default true)
+ * @param pushAutomatically whether to push the team's packs to a board whose packs differ, while
+ *     the robot is disabled and the field isn't attached; never on the field (default true)
+ * @param packs the team's packs: a folder of pack folders, which every board that accepts pushes is
+ *     to have (default none: nothing is pushed)
+ * @param key the private key that signs writes, for boards that require signatures (default {@code
+ *     /home/systemcore/spotter.key}); without it, reading still works
  */
 public record Settings(
-    Duration heartbeat, Duration missing, Duration backoff, Map<String, Limits> limits) {
+    Duration heartbeat,
+    Duration missing,
+    Duration backoff,
+    Map<String, Limits> limits,
+    boolean refuseWhileEnabled,
+    boolean pushAutomatically,
+    Optional<Path> packs,
+    Path key) {
+  /** Where the private key is unless robot code says: on the robot controller, outside Git. */
+  public static final Path KEY = Path.of("/home/systemcore/spotter.key");
+
   /** Every setting's default. */
   public static final Settings DEFAULTS =
-      new Settings(Duration.ofMillis(250), Duration.ofSeconds(1), Duration.ofSeconds(5), Map.of());
+      new Settings(
+          Duration.ofMillis(250),
+          Duration.ofSeconds(1),
+          Duration.ofSeconds(5),
+          Map.of(),
+          true,
+          true,
+          Optional.empty(),
+          KEY);
 
   public Settings {
     if (heartbeat.isNegative() || heartbeat.isZero()) {
@@ -44,23 +73,58 @@ public record Settings(
 
   /** These settings with another heartbeat interval. */
   public Settings withHeartbeat(Duration heartbeat) {
-    return new Settings(heartbeat, missing, backoff, limits);
+    return new Settings(
+        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
   }
 
   /** These settings with another missing threshold. */
   public Settings withMissing(Duration missing) {
-    return new Settings(heartbeat, missing, backoff, limits);
+    return new Settings(
+        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
   }
 
   /** These settings with another longest backoff. */
   public Settings withBackoff(Duration backoff) {
-    return new Settings(heartbeat, missing, backoff, limits);
+    return new Settings(
+        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
   }
 
   /** These settings with one field's limits overridden, by its id. */
   public Settings withLimits(String id, Limits override) {
     Map<String, Limits> all = new HashMap<>(limits);
     all.put(id, override);
-    return new Settings(heartbeat, missing, backoff, all);
+    return new Settings(
+        heartbeat, missing, backoff, all, refuseWhileEnabled, pushAutomatically, packs, key);
+  }
+
+  /** These settings, refusing actions while enabled or on the field, or not. */
+  public Settings withRefuseWhileEnabled(boolean refuseWhileEnabled) {
+    return new Settings(
+        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+  }
+
+  /** These settings, pushing the team's packs automatically off the field, or not. */
+  public Settings withPushAutomatically(boolean pushAutomatically) {
+    return new Settings(
+        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+  }
+
+  /** These settings with the team's packs: a folder of pack folders. */
+  public Settings withPacks(Path folder) {
+    return new Settings(
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        Optional.of(folder),
+        key);
+  }
+
+  /** These settings with the private key elsewhere. */
+  public Settings withKey(Path key) {
+    return new Settings(
+        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
   }
 }

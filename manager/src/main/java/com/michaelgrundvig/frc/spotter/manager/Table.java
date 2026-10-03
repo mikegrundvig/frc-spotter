@@ -43,6 +43,9 @@ final class Table {
   /** One alert per value at warning or failing, in the description's order. */
   List<Alert> alerts = List.of();
 
+  /** What its packs' alert says, when they differ from the robot's; empty when there's none. */
+  String packs = "";
+
   /** Takes a new description: its values, none sent yet. */
   void describe(Spotter.Description described, Field[] fields) {
     description = described;
@@ -82,5 +85,6 @@ final class Table {
     heardNanos = other.heardNanos;
     changes = other.changes;
     alerts = other.alerts;
+    packs = other.packs;
   }
 }

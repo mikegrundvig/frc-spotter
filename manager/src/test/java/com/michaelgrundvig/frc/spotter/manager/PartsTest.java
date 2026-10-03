@@ -188,6 +188,52 @@ class PartsTest {
   }
 
   @Test
+  void aLogQueryIsAPagesQuery() {
+    assertThat(LogQuery.latest(100).query()).isEqualTo("?from=latest&limit=100");
+    assertThat(LogQuery.before("a b/c", 5).atLeast("warning").query())
+        .isEqualTo("?from=before&limit=5&cursor=a+b%2Fc&level=warning");
+    assertThat(LogQuery.after("20", 1).query()).isEqualTo("?from=after&limit=1&cursor=20");
+    assertThatThrownBy(() -> new LogQuery("sideways", "", 5, ""))
+        .hasMessage("from is latest, before or after, not sideways");
+    assertThatThrownBy(() -> LogQuery.before("", 5)).hasMessage("from before pages from a cursor");
+    assertThatThrownBy(() -> LogQuery.latest(0)).hasMessage("limit is 1 to 1000, not 0");
+    assertThatThrownBy(() -> LogQuery.latest(1001)).hasMessage("limit is 1 to 1000, not 1001");
+  }
+
+  @Test
+  void theTeamsPacksAreZippedWithTheirPermissionsAsTheHashCountsThem(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+    java.nio.file.Path packs = dir.resolve("packs");
+    java.nio.file.Files.createDirectories(packs.resolve("team/scripts"));
+    java.nio.file.Files.writeString(packs.resolve("team/pack.yaml"), "pack: team\n");
+    java.nio.file.Files.writeString(packs.resolve("team/scripts/check"), "#!/bin/sh\n");
+    java.nio.file.Files.setPosixFilePermissions(
+        packs.resolve("team/scripts/check"),
+        java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+    TeamPacks team = java.util.Objects.requireNonNull(TeamPacks.of(packs));
+    assertThat(team.hash()).isEqualTo(com.michaelgrundvig.frc.spotter.protocol.PackHash.of(packs));
+    byte[] zip = team.bundle();
+    assertThat(team.bundle()).isSameAs(zip);
+    java.nio.file.Path file = dir.resolve("bundle.zip");
+    java.nio.file.Files.write(file, zip);
+    try (java.nio.file.FileSystem bundle =
+        java.nio.file.FileSystems.newFileSystem(
+            java.net.URI.create("jar:" + file.toUri()),
+            java.util.Map.of("enablePosixFileAttributes", "true"))) {
+      assertThat(
+              java.nio.file.attribute.PosixFilePermissions.toString(
+                  java.nio.file.Files.getPosixFilePermissions(
+                      bundle.getPath("/team/scripts/check"))))
+          .isEqualTo("rwxr-xr-x");
+      assertThat(
+              java.nio.file.attribute.PosixFilePermissions.toString(
+                  java.nio.file.Files.getPosixFilePermissions(bundle.getPath("/team/pack.yaml"))))
+          .isEqualTo("rw-r--r--");
+    }
+    assertThat(TeamPacks.of(dir.resolve("empty"))).isNull();
+  }
+
+  @Test
   void anAddressGivenTwiceIsRefused() {
     assertThatThrownBy(() -> new Manager(Boards.robot(), List.of("10.12.34.11", " 10.12.34.11")))
         .isInstanceOf(IllegalArgumentException.class)

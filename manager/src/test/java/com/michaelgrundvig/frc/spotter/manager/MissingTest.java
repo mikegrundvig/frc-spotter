@@ -170,7 +170,7 @@ class MissingTest {
             new Alert(
                 Level.WARNING,
                 "",
-                "Spotter's limits for vision.health.fsp match no value on any board"))
+                "Spotter's limits for vision.health.fsp match no value or response field on any board"))
         .noneMatch(alert -> alert.text().contains("vision.health.fps "));
   }
 
