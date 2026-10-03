@@ -39,12 +39,13 @@ says why. `docs/agent.md` has the format; the catalog of packs to copy is being 
 
 ## The robot's side
 
-The robot program's manager is coming: it will stream each agent's values, judge them, run their
-actions, and push the team's packs. Until then, `:protocol` has what it will be built on, published
-as `com.michaelgrundvig.frc:spotter-protocol` in Spotter's Maven repository at
-`https://mikegrundvig.github.io/frc-spotter/maven`: the generated messages, and the pack hash both
-sides compute. 0.3's client, and the `spotter-api` and `spotter-client` artifacts, are gone with
-protocol 1.
+The robot program's manager, `:manager` (`com.michaelgrundvig.frc:spotter-manager` in Spotter's Maven
+repository at `https://mikegrundvig.github.io/frc-spotter/maven`), keeps each agent's stream open on
+a thread of its own, judges each value against its limits (or robot code's), and gives the robot
+loop each board's state and the current alerts as data, without waiting on the network or making
+garbage. Running actions, paging logs, and pushing the team's packs come next. It needs nothing but
+`:protocol` (`spotter-protocol`): the generated messages, and the pack hash both sides compute.
+0.3's client, and the `spotter-api` and `spotter-client` artifacts, are gone with protocol 1.
 
 ## Releases
 
@@ -59,6 +60,7 @@ tmpfiles entry, and install script. `SHA256SUMS` has their checksums. Image buil
 
 - `protocol/`: the protocol (`spotter.proto`) and the code the agent and the manager share;
 - `agent/`: the agent, its systemd unit, polkit rules, and package (`docs/agent.md`);
+- `manager/`: the robot program's manager (`docs/robot.md`);
 - `harness/`: container tests of the agent, and a library a pack's own tests use.
 
 ## Building
