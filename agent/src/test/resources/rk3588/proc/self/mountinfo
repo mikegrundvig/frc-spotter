@@ -1,4 +1,0 @@
-22 28 0:20 / /sys rw,nosuid,nodev,noexec,relatime shared:7 - sysfs sysfs rw
-23 28 0:21 / /proc rw,nosuid,nodev,noexec,relatime shared:12 - proc proc rw
-28 1 259:2 / / ro,noatime shared:1 - ext4 /dev/root ro,errors=remount-ro
-40 28 259:3 / /data rw,noatime shared:20 - ext4 /dev/nvme0n1p3 rw,errors=remount-ro

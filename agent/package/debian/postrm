@@ -1,11 +1,12 @@
 #!/bin/sh
-# The coprocessor agent's package, removed: its unit's state forgotten when purged. Its account and
-# its configuration (/etc/frc-spotter) stay, as Debian's packages leave a system user.
+# The coprocessor agent's package, removed: its unit's state forgotten when purged. Its account, its
+# settings and installed packs (/etc/frc-spotter), and its pushed packs (/var/lib/frc-spotter) stay,
+# as Debian's packages leave a system user.
 set -e
 if [ -d /run/systemd/system ]; then
   systemctl --system daemon-reload >/dev/null || true
 fi
 if [ "$1" = purge ]; then
-  deb-systemd-helper purge frc-spotter.service frc-spotter-drive.timer >/dev/null || true
+  deb-systemd-helper purge frc-spotter.service >/dev/null || true
 fi
 exit 0

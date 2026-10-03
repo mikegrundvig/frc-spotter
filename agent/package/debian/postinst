@@ -1,19 +1,21 @@
 #!/bin/sh
-# The coprocessor agent's package, installed: its account made, its packs' folder made (empty: a
-# team copies in the packs it wants), its unit and its drive-health timer enabled, and on a running
-# system (not a chroot building an image) started. In a chroot, nothing is started: the image
-# starts them at its first boot.
+# The coprocessor agent's package, installed: its account made, its packs' folder made (empty: packs
+# are folders an installer puts there, or the robot pushes), its unit enabled, and on a running
+# system (not a chroot building an image) started. In a chroot, nothing is started: the image starts
+# it at its first boot. An upgrade from before 0.4.0 forgets the drive-health timer the agent had
+# then: a pack's installer adds what its pack needs now.
 set -e
 if [ "$1" = configure ]; then
   systemd-sysusers frc-spotter.conf
   mkdir -p /etc/frc-spotter/packs
-  for unit in frc-spotter.service frc-spotter-drive.timer; do
-    deb-systemd-helper unmask "$unit" >/dev/null || true
-    deb-systemd-helper enable "$unit" >/dev/null || true
-  done
+  if [ -n "$2" ] && dpkg --compare-versions "$2" lt 0.4.0; then
+    deb-systemd-helper purge frc-spotter-drive.timer >/dev/null || true
+  fi
+  deb-systemd-helper unmask frc-spotter.service >/dev/null || true
+  deb-systemd-helper enable frc-spotter.service >/dev/null || true
   if [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
-    deb-systemd-invoke restart frc-spotter.service frc-spotter-drive.timer >/dev/null || true
+    deb-systemd-invoke restart frc-spotter.service >/dev/null || true
   fi
 fi
 exit 0
