@@ -62,7 +62,7 @@ final class TestImages {
         # The software the stand-in pack watches: a web server on 5800, as a vision program's page is.
         COPY vision.service broken.service /etc/systemd/system/
         RUN mkdir -p /srv/vision/api \\
-         && printf '{"status": "up"}' > /srv/vision/api/status.json \\
+         && printf '{"state": "up"}' > /srv/vision/api/status.json \\
          && systemctl enable vision.service broken.service
         RUN mkdir -p /data/frc-spotter
         VOLUME /data

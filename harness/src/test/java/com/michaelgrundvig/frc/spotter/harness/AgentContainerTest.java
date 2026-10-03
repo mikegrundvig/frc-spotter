@@ -116,7 +116,10 @@ class AgentContainerTest {
         .containsExactly(
             "standin.running",
             "standin.broken",
+            "standin.exit",
+            "standin.outcome",
             "standin.status",
+            "standin.state",
             "standin.uptime",
             "standin.answer",
             "standin.mood",
@@ -137,9 +140,13 @@ class AgentContainerTest {
     values.forEach((id, value) -> said.append(id).append(": ").append(value).append('\n'));
     System.out.print(said);
     assertThat(value(values, "standin.running").getText()).as(said.toString()).isEqualTo("active");
-    // systemctl is-active exits 3 for a failed unit, saying so: its words are the value.
+    // systemctl is-active exits 3 for a failed unit, saying so: its words fill the value, and
+    // its exit code the named part, for the pack's limit to judge.
     assertThat(value(values, "standin.broken").getText()).isEqualTo("failed");
-    assertThat(value(values, "standin.status").getText()).isEqualTo("up");
+    assertThat(value(values, "standin.exit").getNumber()).isEqualTo(3);
+    assertThat(value(values, "standin.outcome").getText()).isEqualTo("completed");
+    assertThat(value(values, "standin.status").getNumber()).isEqualTo(200);
+    assertThat(value(values, "standin.state").getText()).isEqualTo("up");
     assertThat(value(values, "standin.uptime").getNumber()).isPositive();
     assertThat(value(values, "standin.answer").getNumber()).isEqualTo(42);
     assertThat(value(values, "standin.mood").getStatus().getLevel())

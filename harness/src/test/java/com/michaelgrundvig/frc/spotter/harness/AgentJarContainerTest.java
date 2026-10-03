@@ -3,6 +3,8 @@ package com.michaelgrundvig.frc.spotter.harness;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
+import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Network;
 
@@ -13,6 +15,10 @@ import org.testcontainers.containers.Network;
  */
 @ContainerTest
 class AgentJarContainerTest {
+  private static Spotter.FieldValue value(Map<String, Spotter.FieldValue> values, String id) {
+    return Objects.requireNonNull(values.get(id), id);
+  }
+
   @Test
   void theAllJarRunsOnJava17WithItsPacks() throws Exception {
     try (Network network = TestNetwork.create();
@@ -38,13 +44,18 @@ class AgentJarContainerTest {
           .anyMatch(e -> e.getKey().equals("ID") && e.getValue().equals("ubuntu"));
       assertThat(description.getValues().get(0).getId()).isEqualTo("standin.running");
       // The stand-in's software isn't on this computer: its pack's values say so.
-      Spotter.FieldValue running = Spotter.FieldValue.newInstance();
-      for (int i = 0; i < 50 && !running.hasText(); i++) {
+      Map<String, Spotter.FieldValue> values = client.valuesById();
+      for (int i = 0;
+          i < 100
+              && values.values().stream()
+                  .anyMatch(v -> v.getUnavailable().equals("not collected yet"));
+          i++) {
         Thread.sleep(100);
-        running = client.values().getValues().get(0);
+        values = client.valuesById();
       }
-      assertThat(running.getText()).isEqualTo("inactive");
-      assertThat(client.values().getValues().get(2).getUnavailable())
+      assertThat(value(values, "standin.running").getText()).isEqualTo("inactive");
+      assertThat(value(values, "standin.outcome").getText()).isEqualTo("unreachable");
+      assertThat(value(values, "standin.state").getUnavailable())
           .startsWith("connection refused (localhost:5800)");
     }
   }

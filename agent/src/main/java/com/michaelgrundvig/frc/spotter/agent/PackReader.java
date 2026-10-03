@@ -94,21 +94,6 @@ final class PackReader {
           "text", Spotter.Input.INPUT_TEXT,
           "file", Spotter.Input.INPUT_FILE);
 
-  /** The response fields every action has: the outcome, and why. */
-  static final String OUTCOME = "outcome";
-
-  static final String OUTCOME_MESSAGE = "outcomeMessage";
-
-  /** A {@code run} action's own response fields: its exit code, and its standard output. */
-  static final String EXIT = "exit";
-
-  static final String OUTPUT = "output";
-
-  /** An {@code http} action's own response fields: its status, and its body. */
-  static final String STATUS = "status";
-
-  static final String BODY = "body";
-
   private final String source;
   private final List<String> problems = new ArrayList<>();
 
@@ -241,8 +226,15 @@ final class PackReader {
           declared != null ? declared.getValueNode() : node,
           "collector " + id + " needs fields:, the values it fills");
     } else {
+      Map<String, Fill.Part> parts = command == null ? Map.of() : Fill.parts(Fill.kind(command));
       for (NodeTuple each : entries((MappingNode) declared.getValueNode())) {
-        Field field = field(each, VALUE_TYPES, "a value's type");
+        String name = keyText(each);
+        Fill.Part part = parts.get(name);
+        // A named part is the command's, as an action's: a value's types are text and number.
+        Field field =
+            part == null
+                ? field(each, VALUE_TYPES, "a value's type")
+                : field(each, Set.of(part == Fill.Part.CODE ? "number" : "text"), name + "'s type");
         if (field != null) {
           if (!fieldNames.add(field.name())) {
             problem(each, "field " + field.name() + " is filled by another collector already");
@@ -385,8 +377,8 @@ final class PackReader {
    */
   private List<Field> response(@Nullable NodeTuple declared, Command command) {
     boolean run = command instanceof Command.Run;
-    String code = run ? EXIT : STATUS;
-    String whole = run ? OUTPUT : BODY;
+    String code = run ? Fill.EXIT : Fill.STATUS;
+    String whole = run ? Fill.OUTPUT : Fill.BODY;
     Map<String, Field> builtIn = new LinkedHashMap<>();
     for (Field field : builtInResponse(run)) {
       builtIn.put(field.name(), field);
@@ -400,7 +392,7 @@ final class PackReader {
           String name = keyText(each);
           Set<String> types;
           String what;
-          if (name.equals(OUTCOME) || name.equals(OUTCOME_MESSAGE)) {
+          if (name.equals(Fill.OUTCOME) || name.equals(Fill.OUTCOME_MESSAGE)) {
             problem(each, name + " is every response's own, and can't be declared");
             continue;
           } else if (name.equals(code)) {
@@ -437,10 +429,10 @@ final class PackReader {
    */
   static List<Field> builtInResponse(boolean run) {
     return List.of(
-        Field.of(OUTCOME, Spotter.FieldType.FIELD_TYPE_TEXT),
-        Field.of(OUTCOME_MESSAGE, Spotter.FieldType.FIELD_TYPE_TEXT),
-        Field.of(run ? EXIT : STATUS, Spotter.FieldType.FIELD_TYPE_NUMBER),
-        Field.of(run ? OUTPUT : BODY, Spotter.FieldType.FIELD_TYPE_TEXT));
+        Field.of(Fill.OUTCOME, Spotter.FieldType.FIELD_TYPE_TEXT),
+        Field.of(Fill.OUTCOME_MESSAGE, Spotter.FieldType.FIELD_TYPE_TEXT),
+        Field.of(run ? Fill.EXIT : Fill.STATUS, Spotter.FieldType.FIELD_TYPE_NUMBER),
+        Field.of(run ? Fill.OUTPUT : Fill.BODY, Spotter.FieldType.FIELD_TYPE_TEXT));
   }
 
   // ---- commands ----

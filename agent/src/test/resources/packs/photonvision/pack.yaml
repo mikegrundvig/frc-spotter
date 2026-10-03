@@ -12,7 +12,7 @@ collectors:
     http: {get: "http://localhost:5800/api/status"}
     every: 5s
     fields:
-      answers: {label: PhotonVision answers, type: text, fail: {missing: true}}
+      status: {label: PhotonVision answers, type: number, fail: {notEquals: 200, missing: true}}
   - id: settings
     run: [sha256sum, /opt/photonvision/photonvision_config/photon.sqlite]
     every: 10s

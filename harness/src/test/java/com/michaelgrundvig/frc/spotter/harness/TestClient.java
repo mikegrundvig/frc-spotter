@@ -8,6 +8,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import us.hebi.quickbuf.ProtoMessage;
 
 /**
@@ -32,6 +34,17 @@ final class TestClient {
   /** Every value now. */
   Spotter.Values values() throws IOException {
     return get(Protocol.VALUES, Spotter.Values.newInstance());
+  }
+
+  /** Every value now, by its id in the description. */
+  Map<String, Spotter.FieldValue> valuesById() throws IOException {
+    Spotter.Description description = describe();
+    Spotter.Values values = values();
+    Map<String, Spotter.FieldValue> byId = new LinkedHashMap<>();
+    for (Spotter.FieldValue value : values.getValues()) {
+      byId.put(description.getValues().get(value.getIndex()).getId(), value);
+    }
+    return byId;
   }
 
   /**

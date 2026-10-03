@@ -150,23 +150,25 @@ final class Collectors implements AutoCloseable {
     Slot slot = slots.get(at);
     Pack.Collector collector = slot.collector();
     List<Spotter.FieldValue> values;
+    String failure;
     try {
       Commands.Result result =
           commands.run(slot.pack().folder(), collector.command(), collector.timeout(), MAX_OUTPUT);
-      values = Fill.collector(collector.fields(), result, MAX_OUTPUT);
+      values = Fill.fill(collector.fields(), result, MAX_OUTPUT);
+      failure = Fill.reason(result, MAX_OUTPUT);
     } catch (RuntimeException | StackOverflowError e) {
-      values = Fill.unavailable(collector.fields(), "the agent failed to run it: " + e);
+      failure = "the agent failed to run it: " + e;
+      values = Fill.unavailable(collector.fields(), failure);
     }
     store.set(slot.first(), values);
-    note(at, values);
+    note(at, failure);
   }
 
-  /** Logs a collector that stops filling its fields, once, and when it fills them again. */
-  private void note(int at, List<Spotter.FieldValue> values) {
-    String failure = "";
-    if (!values.isEmpty() && values.stream().allMatch(Spotter.FieldValue::hasUnavailable)) {
-      failure = values.get(0).getUnavailable();
-    }
+  /**
+   * Logs a collector whose command stops completing, once, and when it completes again: what its
+   * command says when it completes is its fields', for its pack's limits to judge.
+   */
+  private void note(int at, String failure) {
     State state = states.get(at);
     String was;
     synchronized (state) {
@@ -178,7 +180,7 @@ final class Collectors implements AutoCloseable {
       host.log(
           failure.isEmpty()
               ? "Collector " + name + " fills its fields again"
-              : "Collector " + name + " fills nothing: " + failure);
+              : "Collector " + name + " fills nothing but its outcome: " + failure);
     }
   }
 

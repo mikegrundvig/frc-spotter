@@ -13,11 +13,14 @@ collectors:
     every: 1s
     fields:
       broken: {type: text}
+      exit: {type: number, fail: {notEquals: 0}}
   - id: web
     http: {get: "http://localhost:5800/api/status.json"}
     every: 1s
     fields:
-      status: {label: Stand-in answers, type: text, fail: {missing: true}}
+      outcome: {type: text}
+      status: {label: Stand-in answers, type: number, fail: {notEquals: 200, missing: true}}
+      state: {type: text}
   - id: uptime
     file: /proc/uptime
     every: 1s

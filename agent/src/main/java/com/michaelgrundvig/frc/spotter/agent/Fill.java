@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.spotter.agent;
 
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -10,10 +11,22 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * How a command's output fills fields, the same for collectors and actions. A JSON object fills
- * each declared field from the key of its name (keys nobody declared are ignored); any other output
- * is one value, trimmed and converted to the type of the one field that holds it. A field that
- * can't be filled is unavailable, with the reason.
+ * How a command's output fills fields: one rule, the same for collectors and actions.
+ *
+ * <ul>
+ *   <li>The <b>named parts</b> are filled by the agent, by name, and never from a JSON key: {@code
+ *       outcome} and {@code outcomeMessage} (how the command went, and why), then a {@code run}
+ *       command's {@code exit} and {@code output} (its exit code and its standard output), or an
+ *       {@code http} request's {@code status} and {@code body}. A {@code file} read has only the
+ *       first two.
+ *   <li>Every other field: if the output is a JSON object, each takes the key with its name (keys
+ *       nobody declared are ignored), whatever the exit code or status; otherwise the output is one
+ *       value, trimmed and converted to the type of the one field that holds it. The pack's limits
+ *       on {@code exit} or {@code status} judge success, not the agent.
+ *   <li>When the command didn't complete (it couldn't start, timed out, couldn't reach its URL), or
+ *       printed more than is kept, {@code outcome} and {@code outcomeMessage} still say so, and
+ *       every other field is unavailable, with that as its reason.
+ * </ul>
  */
 final class Fill {
   /** A number as text: what a non-JSON output's first word must be to fill a number. */
@@ -23,44 +36,143 @@ final class Fill {
   /** The most of an output a reason quotes. */
   static final int QUOTED = 60;
 
+  /** The named parts every command fills: how it went, and why. */
+  static final String OUTCOME = "outcome";
+
+  static final String OUTCOME_MESSAGE = "outcomeMessage";
+
+  /** A {@code run} command's named parts: its exit code, and its standard output. */
+  static final String EXIT = "exit";
+
+  static final String OUTPUT = "output";
+
+  /** An {@code http} request's named parts: its status, and its body. */
+  static final String STATUS = "status";
+
+  static final String BODY = "body";
+
   private Fill() {}
 
+  /** What a named part is. */
+  enum Part {
+    OUTCOME,
+    OUTCOME_MESSAGE,
+    CODE,
+    WHOLE
+  }
+
+  /** The named parts of a kind of command, by name, in their order. */
+  static Map<String, Part> parts(Commands.Kind kind) {
+    Map<String, Part> parts = new LinkedHashMap<>();
+    parts.put(OUTCOME, Part.OUTCOME);
+    parts.put(OUTCOME_MESSAGE, Part.OUTCOME_MESSAGE);
+    if (kind == Commands.Kind.RUN) {
+      parts.put(EXIT, Part.CODE);
+      parts.put(OUTPUT, Part.WHOLE);
+    } else if (kind == Commands.Kind.HTTP) {
+      parts.put(STATUS, Part.CODE);
+      parts.put(BODY, Part.WHOLE);
+    }
+    return parts;
+  }
+
+  /** The kind of a command. */
+  static Commands.Kind kind(Command command) {
+    if (command instanceof Command.Run) {
+      return Commands.Kind.RUN;
+    }
+    return command instanceof Command.Http ? Commands.Kind.HTTP : Commands.Kind.READ;
+  }
+
+  /** An outcome's name, as the {@code outcome} part has it: {@code completed}, {@code timedOut}. */
+  static String name(Spotter.Outcome outcome) {
+    switch (outcome) {
+      case OUTCOME_COMPLETED:
+        return "completed";
+      case OUTCOME_UNREACHABLE:
+        return "unreachable";
+      case OUTCOME_COULD_NOT_START:
+        return "couldNotStart";
+      case OUTCOME_TIMED_OUT:
+        return "timedOut";
+      case OUTCOME_CANCELLED:
+        return "cancelled";
+      case OUTCOME_LOST:
+        return "lost";
+      default:
+        return "";
+    }
+  }
+
   /**
-   * A collector's fields from one run of its command: each unavailable, with the reason, when the
-   * command failed (it couldn't start, timed out, exited non-zero printing nothing, answered an
-   * HTTP error) or printed more than was kept.
+   * Why a command's output fills nothing but its outcome: it didn't complete, or printed more than
+   * was kept; empty when it fills its fields.
    *
    * @param maxOutput the most of its output kept, to say so
    */
-  static List<Spotter.FieldValue> collector(
-      List<Field> fields, Commands.Result result, int maxOutput) {
-    String failure = failure(result, maxOutput);
-    if (!failure.isEmpty()) {
-      return unavailable(fields, failure);
-    }
-    return fields(fields, result.text());
-  }
-
-  /** Why a collector's run fills nothing; empty when it fills its fields. */
-  static String failure(Commands.Result result, int maxOutput) {
+  static String reason(Commands.Result result, int maxOutput) {
     if (!result.completed()) {
       return result.message();
     }
     if (result.truncated()) {
       return "it printed more than the " + maxOutput / 1024 + " KiB kept";
     }
-    if (result.kind() == Commands.Kind.RUN
-        && result.code() != 0
-        && result.text().strip().isEmpty()) {
-      return "exit " + result.code() + (result.errors().isEmpty() ? "" : ": " + result.errors());
-    }
-    if (result.kind() == Commands.Kind.HTTP && (result.code() < 200 || result.code() > 299)) {
-      return "it answered HTTP " + result.code();
-    }
     return "";
   }
 
-  /** Fields from an output, by the rule. */
+  /**
+   * The fields, in their order, from one run of a command, by the rule.
+   *
+   * @param maxOutput the most of its output kept, to say so
+   */
+  static List<Spotter.FieldValue> fill(List<Field> fields, Commands.Result result, int maxOutput) {
+    Map<String, Part> parts = parts(result.kind());
+    String reason = reason(result, maxOutput);
+    List<Field> own = new ArrayList<>();
+    for (Field field : fields) {
+      if (!parts.containsKey(field.name())) {
+        own.add(field);
+      }
+    }
+    List<Spotter.FieldValue> filled =
+        reason.isEmpty() ? fields(own, result.text()) : unavailable(own, reason);
+    List<Spotter.FieldValue> values = new ArrayList<>();
+    int next = 0;
+    for (Field field : fields) {
+      Part part = parts.get(field.name());
+      if (part == null) {
+        values.add(filled.get(next++));
+        continue;
+      }
+      switch (part) {
+        case OUTCOME:
+          values.add(Spotter.FieldValue.newInstance().setText(name(result.outcome())));
+          break;
+        case OUTCOME_MESSAGE:
+          values.add(Spotter.FieldValue.newInstance().setText(result.message()));
+          break;
+        case CODE:
+          values.add(
+              reason.isEmpty()
+                  ? Spotter.FieldValue.newInstance().setNumber(result.code())
+                  : unavailable(reason));
+          break;
+        default:
+          values.add(reason.isEmpty() ? whole(field, result.text()) : unavailable(reason));
+          break;
+      }
+    }
+    return values;
+  }
+
+  /** The whole output, as its field's type has it: as it is, untrimmed, for text. */
+  private static Spotter.FieldValue whole(Field field, String output) {
+    return field.type() == Spotter.FieldType.FIELD_TYPE_JSON
+        ? Spotter.FieldValue.newInstance().setJson(output)
+        : Spotter.FieldValue.newInstance().setText(output);
+  }
+
+  /** Fields from an output: a JSON object's keys, or else the one value. */
   static List<Spotter.FieldValue> fields(List<Field> fields, String output) {
     Optional<Map<String, Object>> json = JsonText.asObject(output);
     List<Spotter.FieldValue> values = new ArrayList<>();

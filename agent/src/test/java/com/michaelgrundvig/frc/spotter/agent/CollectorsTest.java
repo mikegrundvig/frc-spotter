@@ -178,7 +178,7 @@ class CollectorsTest {
     }
     assertThat(fixture.log)
         .containsExactly(
-            "Collector p.c fills nothing: timed out after 5s",
+            "Collector p.c fills nothing but its outcome: timed out after 5s",
             "Collector p.c fills its fields again");
   }
 

@@ -87,7 +87,11 @@ class PackReaderTest {
         .isEqualTo("active");
     assertThat(vision.collectors().get(1).command())
         .isEqualTo(new Command.Http("GET", "http://localhost:5800/api/status", ""));
-    assertThat(vision.collectors().get(1).fields().get(0).fail().getMissing()).isTrue();
+    Field answers = vision.collectors().get(1).fields().get(0);
+    assertThat(answers.name()).isEqualTo("status");
+    assertThat(answers.type()).isEqualTo(Spotter.FieldType.FIELD_TYPE_NUMBER);
+    assertThat(answers.fail().getMissing()).isTrue();
+    assertThat(answers.fail().getNotEquals().getNumber()).isEqualTo(200);
     Pack.Action restart = vision.actions().get(0);
     assertThat(restart.command())
         .isEqualTo(new Command.Http("POST", "http://localhost:5800/api/utils/restartProgram", ""));
@@ -328,6 +332,64 @@ class PackReaderTest {
     assertThat(
             problems("p", collector("run: [a]\nevery: 1s\nfields: {n: {type: number, name: x}}")))
         .anyMatch(p -> p.endsWith("name is the file a file field downloads as"));
+  }
+
+  @Test
+  void aCollectorsNamedPartsAreItsCommandsAndTyped() {
+    Pack pack =
+        read(
+            "p",
+            """
+            pack: p
+            collectors:
+              - id: web
+                http: {get: "http://localhost:5800/"}
+                every: 1s
+                fields:
+                  outcome: {type: text}
+                  outcomeMessage: {type: text}
+                  status: {type: number, fail: {notEquals: 200}}
+                  body: {type: text}
+              - id: script
+                run: [./check]
+                every: 1s
+                fields:
+                  exit: {type: number}
+                  output: {type: text}
+                  # Not a run command's part: a JSON key.
+                  body2: {type: text}
+              - id: file
+                file: /proc/uptime
+                every: 1s
+                fields:
+                  # A file read's parts are only its outcome: exit is a JSON key here.
+                  uptime: {type: number}
+            """);
+    assertThat(pack.collectors().get(0).fields())
+        .extracting(Field::name)
+        .containsExactly("outcome", "outcomeMessage", "status", "body");
+    assertThat(
+            problems(
+                "p",
+                collector(
+                    "http: {get: \"http://localhost/\"}\nevery: 1s\nfields: {status: {type: text}}")))
+        .anyMatch(p -> p.endsWith("status's type is number, not text"));
+    assertThat(problems("p", collector("run: [a]\nevery: 1s\nfields: {output: {type: json}}")))
+        .anyMatch(p -> p.endsWith("output's type is text, not json"));
+    assertThat(problems("p", collector("run: [a]\nevery: 1s\nfields: {outcome: {type: status}}")))
+        .anyMatch(p -> p.endsWith("outcome's type is text, not status"));
+    // A run command's exit is a number, but a file read has none: there, exit is any value's name.
+    assertThat(
+            read("p", collector("file: /x\nevery: 1s\nfields: {exit: {type: text}}")).collectors())
+        .hasSize(1);
+    // One collector per pack may declare a part: its id is pack.part.
+    assertThat(
+            problems(
+                "p",
+                "pack: p\ncollectors:\n"
+                    + "  - {id: a, run: [a], every: 1s, fields: {exit: {type: number}}}\n"
+                    + "  - {id: b, run: [b], every: 1s, fields: {exit: {type: number}}}\n"))
+        .anyMatch(p -> p.endsWith("field exit is filled by another collector already"));
   }
 
   @Test
