@@ -542,12 +542,72 @@ compiler only, and `-XX:+ExitOnOutOfMemoryError`. **The unit** runs it unprivile
 capabilities, on the small cores (`AllowedCPUs=0-3`) at `Nice=10`, capped at 200 MB, read-only
 everywhere but its own `/tmp`, `/run/frc-spotter` and `/var/lib/frc-spotter`, able to reach only
 the robot network, link-local addresses, and itself, restarted a second after it exits. A pack's
-commands run as its user, in that sandbox: whatever more they need is their installer's to grant
-(the `systemd-journal` group for the journal, `video` for cameras, a polkit rule or sudoers entry
-for one command), and Spotter grants nothing itself.
+commands run as its user, in that sandbox (*Giving a pack more*, below), and Spotter grants nothing
+itself.
 
 **What it costs**, measured in the container tests (x86, rootless Podman): the agent's unit at 37
-MiB with the stand-in pack's nine collectors running.
+MiB with the stand-in pack's nine collectors running, and 32 tasks (42 at most with the catalog's
+packs), of the 256 its unit allows.
+
+### Giving a pack more
+
+A pack's commands are the agent's children, so they run in its sandbox, as its user:
+
+- the filesystem read-only (`ProtectSystem=strict`) but for its own folders, and `/home` hidden
+  (`ProtectHome=yes`), so a pack can't write a model or a calibration where its program keeps them;
+- devices closed (`DevicePolicy=closed`), so a group such as `video` alone opens no camera;
+- no new privileges (`NoNewPrivileges=yes`), so `sudo` can't run at all, whatever a sudoers file
+  says;
+- the network: the robot's (10/8), link-local, and the board itself;
+- 200 MB and 256 tasks, the JVM's and every pack process's together;
+- polkit refusing the agent's account everything but power-off and reboot
+  (`99-frc-spotter.rules`).
+
+Whatever more a pack needs is its installer's to grant, as root, on the board, and only that: a
+push can't change any of it. Each grant widens what every pack on that board can do, a pushed one
+included, so grant one pack's needs and no more, and say so in its README.
+
+**A systemd drop-in** for the agent's unit, `/etc/systemd/system/frc-spotter.service.d/<pack>.conf`
+(or `sudo systemctl edit frc-spotter`), then `sudo systemctl daemon-reload` and
+`sudo systemctl restart frc-spotter`:
+
+```ini
+# /etc/systemd/system/frc-spotter.service.d/detector.conf: what the detector pack needs.
+[Service]
+# Its cameras: the video group, and the video devices the sandbox otherwise closes.
+SupplementaryGroups=video
+DeviceAllow=char-video4linux rw
+# The folder its program keeps its model in, which its install-model action writes.
+ReadWritePaths=/opt/team/detector
+# Its program, under /home: read, never written.
+ProtectHome=read-only
+```
+
+`SupplementaryGroups=`, `DeviceAllow=` and `ReadWritePaths=` add to the unit's own; `ProtectHome=`
+replaces it. `MemoryMax=` and `TasksMax=` can be raised the same way for a heavy action.
+
+**A polkit rule** for one command that needs more than the agent's account may do, such as
+restarting one service, scoped to that unit and that verb. Its file must sort before
+`99-frc-spotter.rules`, which refuses the agent's account everything its package's rule doesn't
+grant: polkit runs the rules of `/etc/polkit-1/rules.d/` and `/usr/share/polkit-1/rules.d/`
+together, in the order of their names.
+
+```js
+// /etc/polkit-1/rules.d/50-frc-spotter-detector.rules: the agent may restart the detector.
+polkit.addRule(function (action, subject) {
+  if (subject.user === "frc-spotter" &&
+      action.id === "org.freedesktop.systemd1.manage-units" &&
+      action.lookup("unit") === "detector.service" &&
+      action.lookup("verb") === "restart") {
+    return polkit.Result.YES;
+  }
+  return polkit.Result.NOT_HANDLED;
+});
+```
+
+The pack's action then runs `[systemctl, restart, detector.service]`. A container test
+(`DropInContainerTest`) runs a pack whose action writes outside the sandbox: refused with
+"Read-only file system" until its drop-in names the folder.
 
 ## Tests
 

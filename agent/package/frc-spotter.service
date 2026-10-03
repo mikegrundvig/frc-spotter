@@ -16,7 +16,10 @@ Type=simple
 # Its own system user (its package makes it, with systemd-sysusers), in systemd-journal so a pack can
 # read the journal. Its one privilege, by its package's polkit rule, is powering off or rebooting (the
 # built-in actions core.power-off and core.reboot). A pack's commands run as this user, in this
-# sandbox: whatever more they need is their installer's to grant.
+# sandbox: whatever more they need is their installer's to grant, with a drop-in of its own in
+# /etc/systemd/system/frc-spotter.service.d/ (SupplementaryGroups=, DeviceAllow=, ReadWritePaths=,
+# ProtectHome=read-only) and, for one command, a polkit rule sorting before 99-frc-spotter.rules
+# (docs/agent.md, "Giving a pack more"). sudo can't work here: NoNewPrivileges.
 User=frc-spotter
 Group=frc-spotter
 SupplementaryGroups=systemd-journal
