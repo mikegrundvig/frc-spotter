@@ -1,0 +1,47 @@
+# The container tests' stand-in for the software a coprocessor runs (a web server on 5800, as a
+# vision program's page is), watched by every kind of collector.
+pack: standin
+version: 1.0.0
+collectors:
+  - id: service
+    run: [systemctl, is-active, vision.service]
+    every: 1s
+    fields:
+      running: {label: Stand-in's service, type: text, fail: {notEquals: active}}
+  - id: broken
+    run: [systemctl, is-active, broken.service]
+    every: 1s
+    fields:
+      broken: {type: text}
+  - id: web
+    http: {get: "http://localhost:5800/api/status.json"}
+    every: 1s
+    fields:
+      status: {label: Stand-in answers, type: text, fail: {missing: true}}
+  - id: uptime
+    file: /proc/uptime
+    every: 1s
+    fields:
+      uptime: {label: Up for, type: number, unit: s}
+  - id: answer
+    run: [./answer]
+    every: 1s
+    fields:
+      answer: {type: number}
+      mood: {type: status}
+  - id: user
+    run: [id, -un]
+    every: 1s
+    fields:
+      user: {type: text}
+  - id: slow
+    run: [sleep, "30"]
+    every: 2s
+    timeout: 1s
+    fields:
+      slow: {type: text}
+  - id: gone
+    file: /sys/bus/usb/devices/7-1/product
+    every: 1s
+    fields:
+      front-camera: {type: text, fail: {missing: true}}

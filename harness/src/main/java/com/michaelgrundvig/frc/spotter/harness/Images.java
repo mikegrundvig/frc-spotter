@@ -21,8 +21,8 @@ import org.testcontainers.images.builder.ImageFromDockerfile;
  * one. {@link #base} is Debian 13 under systemd with no Java; {@link #installAgent} adds the lines
  * that install the agent from its .deb, as a board's image build would (the package's maintainer
  * scripts run with no systemd running, as in a chroot), and {@link #installPacks} the lines that
- * copy packs in as a team does. A pack's tests build their own image on these, with their software
- * and their pack installed.
+ * put pack folders in as an installer does. A pack's tests build their own image on these, with
+ * their software and their pack installed.
  *
  * <p>The agent's package comes from the build: {@code spotter.agentDeb} (a .deb, as Spotter
  * releases it), or {@code spotter.agentPackage} (its files as installed, with {@code DEBIAN/},
@@ -90,28 +90,29 @@ public final class Images {
   }
 
   /**
-   * The Dockerfile lines that copy packs into {@code /etc/frc-spotter/packs/} as a team does: each
-   * {@code <name>.yaml}, root's, and written by root alone, so the agent trusts it. Adds them to
+   * The Dockerfile lines that put packs in {@code /etc/frc-spotter/packs/} as an installer does:
+   * each pack's folder, {@code <name>/pack.yaml} beside its programs, root's and written by root
+   * alone, so the agent trusts it, with every file but {@code pack.yaml} executable. Adds them to
    * the build's {@code context}.
    *
-   * @param packs each pack's YAML, by the name its file takes
+   * @param packs each pack's folder, by its name
    */
-  public static String installPacks(Map<String, Object> context, Map<String, String> packs) {
+  public static String installPacks(Map<String, Object> context, Map<String, Path> packs) {
     StringBuilder lines = new StringBuilder();
     packs.forEach(
-        (name, yaml) -> {
-          context.put("pack-" + name + ".yaml", yaml);
+        (name, folder) -> {
+          context.put("pack-" + name, folder);
           lines
               .append("COPY pack-")
               .append(name)
-              .append(".yaml /etc/frc-spotter/packs/")
+              .append(" /etc/frc-spotter/packs/")
               .append(name)
-              .append(".yaml\n");
+              .append("\n");
         });
     if (!packs.isEmpty()) {
       lines.append(
-          "RUN chown root:root /etc/frc-spotter/packs/*.yaml"
-              + " && chmod 0644 /etc/frc-spotter/packs/*.yaml\n");
+          "RUN chown -R root:root /etc/frc-spotter/packs && chmod -R go-w /etc/frc-spotter/packs"
+              + " && find /etc/frc-spotter/packs -type f ! -name pack.yaml -exec chmod 0755 {} +\n");
     }
     return lines.toString();
   }

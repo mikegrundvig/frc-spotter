@@ -1,7 +1,5 @@
 package com.michaelgrundvig.frc.spotter.harness;
 
-import com.michaelgrundvig.frc.spotter.client.AgentClient;
-import com.michaelgrundvig.frc.spotter.client.ClientSettings;
 import eu.rekawek.toxiproxy.Proxy;
 import eu.rekawek.toxiproxy.ToxiproxyClient;
 import java.io.IOException;
@@ -11,7 +9,7 @@ import org.testcontainers.toxiproxy.ToxiproxyContainer;
 /**
  * Toxiproxy between the robot (the test) and a coprocessor's agent, as over a robot's network that
  * misbehaves: the test adds latency, drops or resets connections, or stalls them through {@link
- * #proxy}, and the robot's client, made by {@link #client}, asks the agent through it.
+ * #proxy}, and asks the agent through it, at {@link #host} and {@link #port}.
  */
 public final class Toxiproxied implements AutoCloseable {
   /** Toxiproxy's image, pinned. */
@@ -61,18 +59,14 @@ public final class Toxiproxied implements AutoCloseable {
     return proxy;
   }
 
-  /**
-   * The robot's client, asking the agent through the proxy and the coprocessor's software directly.
-   * Close it when the test is done.
-   */
-  public AgentClient client(String name, Coprocessor coprocessor) {
-    return new AgentClient(
-        name,
-        container.getHost(),
-        container.getMappedPort(PORT),
-        coprocessor.softwarePort(),
-        ClientSettings.DEFAULTS,
-        System::nanoTime);
+  /** Where the robot (the test) reaches the agent through the proxy: this host... */
+  public String host() {
+    return container.getHost();
+  }
+
+  /** ... at this port. */
+  public int port() {
+    return container.getMappedPort(PORT);
   }
 
   @Override

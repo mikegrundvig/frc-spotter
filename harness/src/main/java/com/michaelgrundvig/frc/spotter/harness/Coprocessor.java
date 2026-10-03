@@ -2,8 +2,7 @@ package com.michaelgrundvig.frc.spotter.harness;
 
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.HostConfig;
-import com.michaelgrundvig.frc.spotter.client.AgentClient;
-import com.michaelgrundvig.frc.spotter.client.ClientSettings;
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -26,7 +25,7 @@ import org.testcontainers.utility.DockerImageName;
  */
 public final class Coprocessor extends GenericContainer<Coprocessor> {
   /** The agent's port. */
-  public static final int AGENT = 5808;
+  public static final int AGENT = Protocol.PORT;
 
   /** The software's port: a vision program's page, 5800, as the stand-in's is. */
   public static final int SOFTWARE = 5800;
@@ -85,7 +84,7 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
           }
         });
     waitingFor(
-        Wait.forHttp("/v1/stamp")
+        Wait.forHttp(Protocol.DESCRIBE)
             .forPort(AGENT)
             .forStatusCode(200)
             .withStartupTimeout(Duration.ofMinutes(2)));
@@ -102,17 +101,6 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
 
   public int softwarePort() {
     return getMappedPort(SOFTWARE);
-  }
-
-  /**
-   * The robot's client for this coprocessor's agent, as a robot program makes one: polling now,
-   * with the client's defaults. Close it when the test is done.
-   *
-   * @param name the computer's name, for the client's threads and messages
-   */
-  public AgentClient client(String name) {
-    return new AgentClient(
-        name, agentHost(), agentPort(), softwarePort(), ClientSettings.DEFAULTS, System::nanoTime);
   }
 
   /** Runs a command as root inside, and answers what it printed; fails if it fails. */
@@ -187,7 +175,7 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
       try {
         Container.ExecResult stamp =
             execInContainer(
-                "curl", "-sf", "-o", "/dev/null", "http://127.0.0.1:" + AGENT + "/v1/stamp");
+                "curl", "-sf", "-o", "/dev/null", "http://127.0.0.1:" + AGENT + Protocol.DESCRIBE);
         if (stamp.getExitCode() == 0) {
           return;
         }
@@ -214,7 +202,9 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
     try (java.net.Socket socket = new java.net.Socket(agentHost(), agentPort())) {
       // A request begun, never finished: a port forwarder may dial the container only once data
       // comes, and the agent holds a request that hasn't finished for up to 4 s.
-      socket.getOutputStream().write("GET /v1/stamp HTTP/1.1\r\n".getBytes(StandardCharsets.UTF_8));
+      socket
+          .getOutputStream()
+          .write(("GET " + Protocol.DESCRIBE + " HTTP/1.1\r\n").getBytes(StandardCharsets.UTF_8));
       socket.getOutputStream().flush();
       for (int i = 0; i < 30; i++) {
         // Java listens on a dual-stack socket, so an IPv4 connection shows in tcp6, IPv4-mapped.
