@@ -6,12 +6,12 @@ import java.io.BufferedInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.Proxy;
-import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -27,10 +27,10 @@ import us.hebi.quickbuf.Utf8String;
  * the stream can't be opened, or ends, or is silent for the missing threshold (its socket's own
  * timeout), it connects again, backing off.
  *
- * <p>In steady state, reading the stream allocates nothing: it's asked for with HTTP/1.0, so its
- * body is the events themselves, read from the socket through one buffer ({@link HttpHead}); one
- * event, one source and one table are reused; and text is decoded only when its bytes differ from
- * what the value holds. A description, a change of level and a text that changed allocate.
+ * <p>In steady state, decoding the stream into the table and publishing it allocate nothing: one
+ * event, one source and one table are reused, and text is decoded only when its bytes differ from
+ * what the value holds. A description, a change of level and a text that changed allocate. The
+ * JDK's HTTP client, which reads the stream's chunks, allocates a little of its own for each.
  */
 final class Link implements Runnable {
   /** The first wait after a failure. */
@@ -47,7 +47,7 @@ final class Link implements Runnable {
   private final Settings settings;
   private final Recorder recorder;
   private final Address address;
-  private final byte[] request;
+  private final URL url;
   private final Exchange exchange;
   private final Table current = new Table();
   private final Spotter.Event event = Spotter.Event.newInstance();
@@ -55,7 +55,8 @@ final class Link implements Runnable {
   private final ClockMap clock = new ClockMap();
   private Utf8String[] raws = new Utf8String[0];
   private volatile boolean closed;
-  private volatile @Nullable Socket socket;
+  private volatile @Nullable HttpURLConnection connection;
+  private volatile long events;
   private volatile @Nullable Thread thread;
 
   Link(Board board, Robot robot, Settings settings, Recorder recorder) {
@@ -65,19 +66,16 @@ final class Link implements Runnable {
     this.recorder = recorder;
     this.exchange = board.exchange();
     this.address = address(board.address());
-    this.request =
-        HttpHead.request(
-            Protocol.STREAM + "?heartbeat=" + settings.heartbeat().toMillis() + "ms",
-            address.authority(),
-            Protocol.PROTOBUF);
+    this.url =
+        url(address, Protocol.STREAM + "?heartbeat=" + settings.heartbeat().toMillis() + "ms");
   }
 
   /**
    * Where an agent is.
    *
-   * @param host its name or IP address, as a socket takes it (an IPv6 address without brackets)
+   * @param host its name or IP address (an IPv6 address without brackets)
    * @param port its port
-   * @param authority its host and port, as a request's {@code Host} header has them
+   * @param authority its host and port, as a URL has them
    */
   record Address(String host, int port, String authority) {}
 
@@ -113,6 +111,15 @@ final class Link implements Runnable {
     }
   }
 
+  /** A URL on an agent: its path, and maybe a query. */
+  static URL url(Address address, String path) {
+    try {
+      return URI.create("http://" + address.authority() + path).toURL();
+    } catch (MalformedURLException e) {
+      throw new IllegalArgumentException("not a URL on " + address.authority() + ": " + path, e);
+    }
+  }
+
   /** Starts its thread. */
   void start() {
     Thread started = new Thread(this, "Spotter " + board.address());
@@ -128,14 +135,15 @@ final class Link implements Runnable {
     if (running != null) {
       running.interrupt();
     }
-    Socket open = socket;
+    HttpURLConnection open = connection;
     if (open != null) {
-      try {
-        open.close();
-      } catch (IOException e) {
-        // Closed as far as it can be.
-      }
+      open.disconnect();
     }
+  }
+
+  /** How many events it's received: for tests, to measure what it allocates per event. */
+  long events() {
+    return events;
   }
 
   /** Its thread, once started: for tests, to measure what it allocates. */
@@ -178,39 +186,37 @@ final class Link implements Runnable {
   }
 
   /**
-   * Connects, asks for the stream, checks the version, and reads the stream until it fails: whether
-   * it opened. The socket's timeouts, connecting and reading, are the missing threshold: a stream
-   * silent that long is dropped.
+   * Connects, checks the version before reading a byte of the stream, and reads the stream until it
+   * fails: whether it opened. The connection's timeouts, connecting and reading, are the missing
+   * threshold: a stream silent that long is dropped.
    */
   private boolean attempt() throws IOException {
-    Socket s = new Socket(Proxy.NO_PROXY);
-    socket = s;
+    HttpURLConnection c = (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
+    connection = c;
     boolean opened = false;
-    try (s) {
+    try {
       if (closed) {
         return false;
       }
       int timeout = (int) Math.min(Integer.MAX_VALUE, settings.missing().toMillis());
-      s.connect(new InetSocketAddress(address.host(), address.port()), timeout);
-      s.setSoTimeout(timeout);
-      s.setTcpNoDelay(true);
-      OutputStream out = s.getOutputStream();
-      out.write(request);
-      out.flush();
-      InputStream in = new BufferedInputStream(s.getInputStream(), 8192);
-      HttpHead head = HttpHead.read(in);
+      c.setConnectTimeout(timeout);
+      c.setReadTimeout(timeout);
+      c.setUseCaches(false);
+      c.setInstanceFollowRedirects(false);
+      c.setRequestProperty("Accept", Protocol.PROTOBUF);
+      int code = c.getResponseCode();
       long now = robot.nanos().getAsLong();
-      String version = head.header(Protocol.HEADER);
+      String version = c.getHeaderField(Protocol.HEADER);
       if (version == null || !sameMajor(version)) {
         otherProtocol(version == null ? "" : version, now);
         return false;
       }
-      if (head.status() != 200) {
-        throw new IOException(refusal(head, in));
+      if (code != HttpURLConnection.HTTP_OK) {
+        throw new IOException(refusal(c, code));
       }
       opened(version, now);
       opened = true;
-      read(in);
+      read(new BufferedInputStream(c.getInputStream(), 8192));
       return true;
     } catch (IOException | RuntimeException e) {
       if (opened && !closed) {
@@ -219,7 +225,8 @@ final class Link implements Runnable {
       }
       throw e;
     } finally {
-      socket = null;
+      connection = null;
+      c.disconnect();
     }
   }
 
@@ -234,20 +241,18 @@ final class Link implements Runnable {
   }
 
   /** What a refusal says: its status, and its {@code Problem}'s message. */
-  private static String refusal(HttpHead head, InputStream body) {
+  static String refusal(HttpURLConnection c, int code) {
     String message = "";
-    try {
-      String length = head.header("Content-Length");
-      int most = MAX_PROBLEM;
-      if (length != null) {
-        most = (int) Math.min(MAX_PROBLEM, Long.parseLong(length.strip()));
+    try (InputStream body = c.getErrorStream()) {
+      if (body != null) {
+        message =
+            ProtoMessage.mergeFrom(Spotter.Problem.newInstance(), body.readNBytes(MAX_PROBLEM))
+                .getMessage();
       }
-      message =
-          ProtoMessage.mergeFrom(Spotter.Problem.newInstance(), body.readNBytes(most)).getMessage();
-    } catch (IOException | NumberFormatException e) {
+    } catch (IOException e) {
       // No reason given, or none that could be read: the status says enough.
     }
-    return "it answered " + head.status() + (message.isEmpty() ? "" : ": " + message);
+    return "it answered " + code + (message.isEmpty() ? "" : ": " + message);
   }
 
   /** Why something failed, in a few words: its message, or its kind without one. */
@@ -276,6 +281,7 @@ final class Link implements Runnable {
 
   /** Applies an event, and publishes the table. */
   void received(Spotter.Event received) {
+    events++;
     long now = robot.nanos().getAsLong();
     current.heard = true;
     current.heardNanos = now;

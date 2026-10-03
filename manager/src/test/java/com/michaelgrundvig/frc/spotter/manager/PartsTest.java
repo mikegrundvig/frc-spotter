@@ -177,57 +177,14 @@ class PartsTest {
         .isEqualTo(new Link.Address("fd00::11", 6000, "[fd00::11]:6000"));
     assertThat(Link.address("[fd00::11]"))
         .isEqualTo(new Link.Address("fd00::11", 5808, "[fd00::11]:5808"));
+    assertThat(Link.url(Link.address("fd00::11"), "/v2/describe").toString())
+        .isEqualTo("http://[fd00::11]:5808/v2/describe");
     for (String wrong : List.of("", "vision front", "a:b", "user@host", "host/path")) {
       assertThatThrownBy(() -> Link.address(wrong))
           .as(wrong)
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("an agent's address");
     }
-  }
-
-  static HttpHead head(String text) throws java.io.IOException {
-    return HttpHead.read(
-        new java.io.ByteArrayInputStream(
-            text.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)));
-  }
-
-  @Test
-  void anAnswersHeadIsItsStatusAndHeadersInAnyCase() throws Exception {
-    java.io.ByteArrayInputStream in =
-        new java.io.ByteArrayInputStream(
-            "HTTP/1.1 200 OK\r\nSpotter-protocol: 2.0\r\nContent-type:application/x-protobuf\n\r\nbody"
-                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
-    HttpHead head = HttpHead.read(in);
-    assertThat(head.status()).isEqualTo(200);
-    assertThat(head.header("Spotter-Protocol")).isEqualTo("2.0");
-    assertThat(head.header("content-type")).isEqualTo("application/x-protobuf");
-    assertThat(head.header("Content-Length")).isNull();
-    // It leaves the stream at the body.
-    assertThat(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.ISO_8859_1))
-        .isEqualTo("body");
-    assertThat(
-            new String(
-                HttpHead.request(
-                    "/v2/stream?heartbeat=250ms", "10.12.34.11:5808", "application/x-protobuf"),
-                java.nio.charset.StandardCharsets.ISO_8859_1))
-        .isEqualTo(
-            "GET /v2/stream?heartbeat=250ms HTTP/1.0\r\nHost: 10.12.34.11:5808\r\n"
-                + "Accept: application/x-protobuf\r\nUser-Agent: spotter-manager\r\n\r\n");
-  }
-
-  @Test
-  void anAnswerThatIsntHttpOrIsChunkedIsRefused() {
-    assertThatThrownBy(() -> head("SSH-2.0-OpenSSH_9.6\r\n\r\n"))
-        .hasMessage("it doesn't answer in HTTP: \"SSH-2.0-OpenSSH_9.6\"");
-    assertThatThrownBy(() -> head("HTTP/1.1 OK\r\n\r\n"))
-        .hasMessage("it doesn't answer in HTTP: \"HTTP/1.1 OK\"");
-    assertThatThrownBy(() -> head("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"))
-        .hasMessage("it answers HTTP/1.0 with a transfer coding: chunked");
-    assertThatThrownBy(() -> head("")).hasMessage("it closed the connection without answering");
-    assertThatThrownBy(() -> head("HTTP/1.1 200 OK\r\nA: b\r\n"))
-        .hasMessage("its answer ended in its headers");
-    assertThatThrownBy(() -> head("HTTP/1.1 200 OK\r\nA: " + "b".repeat(HttpHead.MAX)))
-        .hasMessage("its answer's headers are over 65536 bytes");
   }
 
   @Test
