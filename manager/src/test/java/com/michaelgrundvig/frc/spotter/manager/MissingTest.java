@@ -129,6 +129,52 @@ class MissingTest {
   }
 
   @Test
+  void anOverrideThatMatchesNoValueWarnsOnceEveryBoardHasDescribedItself() throws Exception {
+    LocalAgent running = new LocalAgent(dir, "vision-front");
+    agent = running;
+    running
+        .pack("vision", ManagerTest.PACK)
+        .script("vision", "health", ManagerTest.HEALTHY)
+        .start();
+    int port;
+    try (ServerSocket free = new ServerSocket(0)) {
+      port = free.getLocalPort();
+    }
+    Settings settings =
+        Settings.DEFAULTS
+            .withLimits("vision.health.fps", Limits.NONE)
+            .withLimits("vision.health.fsp", Limits.NONE);
+    Manager manager =
+        new Manager(
+            Boards.robot(clock),
+            List.of(running.address(), "127.0.0.1:" + port),
+            settings,
+            Recorder.NONE);
+    this.manager = manager;
+    manager.start();
+    Board vision = manager.boards().get(0);
+    Board away = manager.boards().get(1);
+    // One board has described itself; the other hasn't been reached yet, and may still: nothing.
+    await(
+        manager,
+        "vision described",
+        () -> vision.connection() == Connection.CONNECTED && !vision.values().isEmpty());
+    await(manager, "the other refused", () -> !away.why().isEmpty());
+    assertThat(manager.alerts()).isEmpty();
+
+    // The other is missing: it no longer holds the check back.
+    clock.addAndGet(SECOND + 1);
+    manager.update();
+    assertThat(manager.alerts())
+        .contains(
+            new Alert(
+                Level.WARNING,
+                "",
+                "Spotter's limits for vision.health.fsp match no value on any board"))
+        .noneMatch(alert -> alert.text().contains("vision.health.fps "));
+  }
+
+  @Test
   void aStreamSilentForTheThresholdIsDroppedAndMadeAgain() throws Exception {
     // A board whose agent stops answering without closing anything: a socket that accepts and says
     // nothing. The connection's own timeout drops it, and the board is missing on the robot's

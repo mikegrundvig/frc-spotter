@@ -1,9 +1,11 @@
 package com.michaelgrundvig.frc.spotter.manager;
 
+import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Spotter's manager, in the robot program: it keeps each coprocessor agent's stream open on a
@@ -29,8 +31,11 @@ public final class Manager implements AutoCloseable {
   private final List<Board> boardList;
   private final Link[] links;
   private final long missing;
+  private final Spotter.Description[] seen;
   private long started;
   private boolean running;
+  private boolean settled;
+  private List<Alert> setup = List.of();
   private List<Alert> alerts = List.of();
 
   /** A manager of these agents, with the default settings and no recorder; {@link #start} it. */
@@ -52,18 +57,20 @@ public final class Manager implements AutoCloseable {
     this.robot = robot;
     this.settings = settings;
     this.missing = settings.missing().toNanos();
-    Set<String> seen = new HashSet<>();
+    Set<String> given = new HashSet<>();
     boards = new Board[agents.size()];
     links = new Link[agents.size()];
     for (int i = 0; i < boards.length; i++) {
       String address = agents.get(i).strip();
-      if (!seen.add(address)) {
+      if (!given.add(address)) {
         throw new IllegalArgumentException("an agent's address is given twice: " + address);
       }
       boards[i] = new Board(address, settings);
       links[i] = new Link(boards[i], robot, settings, recorder);
     }
     boardList = List.of(boards);
+    seen = new Spotter.Description[boards.length];
+    java.util.Arrays.fill(seen, Table.NONE);
     started = robot.nanos().getAsLong();
   }
 
@@ -87,16 +94,63 @@ public final class Manager implements AutoCloseable {
   public void update() {
     long now = robot.nanos().getAsLong();
     boolean changed = false;
-    for (Board board : boards) {
+    boolean described = false;
+    boolean allSettled = true;
+    for (int i = 0; i < boards.length; i++) {
+      Board board = boards[i];
       changed |= board.update(now, started, missing);
+      Spotter.Description description = board.description();
+      if (description != seen[i]) {
+        seen[i] = description;
+        described = true;
+      }
+      allSettled &=
+          description != Table.NONE
+              || board.connection() == Connection.MISSING
+              || board.connection() == Connection.OTHER_PROTOCOL;
+    }
+    if (described || allSettled != settled) {
+      settled = allSettled;
+      List<Alert> current = setupAlerts();
+      if (!current.equals(setup)) {
+        setup = current;
+        changed = true;
+      }
     }
     if (changed) {
       List<Alert> all = new ArrayList<>();
       for (Board board : boards) {
         all.addAll(board.alerts());
       }
+      all.addAll(setup);
       alerts = List.copyOf(all);
     }
+  }
+
+  /**
+   * The alerts about robot code's own setup: one per limit override whose id matches no value on
+   * any board, once every board has described itself, or is missing or on another protocol (so a
+   * board that's away doesn't hold the check back for ever, and one still connecting does).
+   */
+  private List<Alert> setupAlerts() {
+    if (!settled || settings.limits().isEmpty()) {
+      return List.of();
+    }
+    Set<String> ids = new HashSet<>();
+    for (Spotter.Description description : seen) {
+      for (Spotter.FieldDeclaration value : description.getValues()) {
+        ids.add(value.getId());
+      }
+    }
+    List<Alert> unmatched = new ArrayList<>();
+    for (String id : new TreeSet<>(settings.limits().keySet())) {
+      if (!ids.contains(id)) {
+        unmatched.add(
+            new Alert(
+                Level.WARNING, "", "Spotter's limits for " + id + " match no value on any board"));
+      }
+    }
+    return List.copyOf(unmatched);
   }
 
   /** The boards, in the order their addresses were given. */
