@@ -69,7 +69,7 @@ final class AgentClient {
   private final @Nullable ScheduledExecutorService deadlines;
   private final long deadlineMillis;
   private final Object writes = new Object();
-  private final Set<HttpURLConnection> open = new HashSet<>();
+  private final Set<Exchange> open = new HashSet<>();
   private boolean closed;
 
   /**
@@ -134,11 +134,12 @@ final class AgentClient {
       throws IOException {
     HttpURLConnection c =
         (HttpURLConnection) Link.url(address, pathAndQuery).openConnection(Proxy.NO_PROXY);
+    Exchange exchange = new Exchange(c);
     synchronized (open) {
       if (closed) {
         throw new Refused(0, "the manager is closed");
       }
-      open.add(c);
+      open.add(exchange);
     }
     AtomicBoolean late = new AtomicBoolean();
     ScheduledFuture<?> deadline =
@@ -147,7 +148,7 @@ final class AgentClient {
             : deadlines.schedule(
                 () -> {
                   late.set(true);
-                  c.disconnect();
+                  exchange.drop();
                 },
                 deadlineMillis,
                 TimeUnit.MILLISECONDS);
@@ -182,15 +183,18 @@ final class AgentClient {
       if (code / 100 != 2) {
         throw new Refused(code, Link.refusal(c, code));
       }
-      // Read a chunk at a time, the deadline checked between them: dropping the connection
-      // doesn't stop a read of the JDK's that's under way, but each read ends within its timeout.
+      // Read a chunk at a time, a drop (the deadline, the manager closing) checked between them:
+      // each read ends within its timeout.
+      if (!exchange.reading()) {
+        throw new IOException("dropped");
+      }
       try (InputStream in = c.getInputStream()) {
         ByteArrayOutputStream answer = new ByteArrayOutputStream();
         byte[] chunk = new byte[8192];
         int read;
         while ((read = in.read(chunk)) != -1) {
-          if (late.get()) {
-            throw new IOException("past its deadline");
+          if (exchange.dropped()) {
+            throw new IOException("dropped");
           }
           answer.write(chunk, 0, read);
           if (answer.size() > MAX_ANSWER) {
@@ -204,15 +208,52 @@ final class AgentClient {
       throw e;
     } catch (IOException e) {
       throw new Refused(
-          0, late.get() ? "no complete answer within " + deadlineMillis + " ms" : Link.why(e));
+          0,
+          late.get()
+              ? "no complete answer within " + deadlineMillis + " ms"
+              : exchange.dropped() ? "the manager is closed" : Link.why(e));
     } finally {
       if (deadline != null) {
         deadline.cancel(false);
       }
       synchronized (open) {
-        open.remove(c);
+        open.remove(exchange);
       }
       c.disconnect();
+    }
+  }
+
+  /**
+   * A request's connection, which its deadline or the manager's close drops. Until its answer's
+   * body is read, a drop disconnects it, which ends a connect or a wait for the answer's head; from
+   * then on, the read sees the drop between its reads, and nothing else touches the connection: a
+   * disconnect then hands the stream to the JDK's keep-alive cleaner, which holds it while it reads
+   * what's left, so a read waiting on it would wait as long as the board takes to send it all.
+   */
+  private static final class Exchange {
+    private final HttpURLConnection c;
+    private boolean dropped;
+    private boolean reading;
+
+    Exchange(HttpURLConnection c) {
+      this.c = c;
+    }
+
+    synchronized void drop() {
+      dropped = true;
+      if (!reading) {
+        c.disconnect();
+      }
+    }
+
+    /** Its body is read from here on: false if it's dropped already. */
+    synchronized boolean reading() {
+      reading = true;
+      return !dropped;
+    }
+
+    synchronized boolean dropped() {
+      return dropped;
     }
   }
 
@@ -220,8 +261,8 @@ final class AgentClient {
   void close() {
     synchronized (open) {
       closed = true;
-      for (HttpURLConnection c : open) {
-        c.disconnect();
+      for (Exchange exchange : open) {
+        exchange.drop();
       }
       open.clear();
     }
