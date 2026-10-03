@@ -232,8 +232,39 @@ final class Host {
     return monotonicNanos.getAsLong();
   }
 
-  /** Writes a line to the agent's log: the journal, on a coprocessor. */
+  /** The most of a line written to the agent's log. */
+  static final int MAX_LOG_LINE = 2000;
+
+  /**
+   * Writes a line to the agent's log: the journal, on a coprocessor. Its control characters are
+   * written escaped ({@code \n}, {@code \u0000}), so what it quotes (a request's, a pack's) can't
+   * forge a line of its own or set a line's priority, and it's cut at {@link #MAX_LOG_LINE}.
+   */
   void log(String message) {
-    log.accept(message);
+    log.accept(escaped(message));
+  }
+
+  /** Text with its control characters escaped, cut at {@link #MAX_LOG_LINE}. */
+  static String escaped(String text) {
+    StringBuilder line = new StringBuilder(Math.min(text.length(), MAX_LOG_LINE) + 16);
+    for (int i = 0; i < text.length() && line.length() < MAX_LOG_LINE; i++) {
+      char c = text.charAt(i);
+      if (c == '\n') {
+        line.append("\\n");
+      } else if (c == '\r') {
+        line.append("\\r");
+      } else if (c == '\t') {
+        line.append("\\t");
+      } else if (c < ' ' || c == 0x7f || (c >= 0x80 && c < 0xa0)) {
+        line.append(String.format("\\u%04x", (int) c));
+      } else {
+        line.append(c);
+      }
+    }
+    if (line.length() >= MAX_LOG_LINE && text.length() > MAX_LOG_LINE) {
+      line.setLength(MAX_LOG_LINE);
+      line.append("...");
+    }
+    return line.toString();
   }
 }

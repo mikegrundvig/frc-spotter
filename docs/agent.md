@@ -70,7 +70,9 @@ A refusal or a failure answers its status with a `Problem` saying why:
 | `503` | Every write while `agent.json` can't be read; two actions running; four streams open (with `Retry-After`) |
 
 Each request has a thread of its own, so a client that's slow, or never finishes sending, holds up
-nobody else; a request must arrive within 4 seconds, and 32 connections are open at most.
+nobody else; a request must arrive within 4 seconds, and 32 connections are open at most. What the
+agent writes to its journal has its control characters escaped and is cut at 2,000 characters, so
+what it quotes can't forge a line; a failure (`500`) is written at most once in 10 seconds.
 
 ### The stream
 
@@ -181,7 +183,13 @@ line:
 | `SPOTTER_LEVEL` | The least important level wanted: `error`, `warning`, `info` or `debug` (`debug`, all of them, unless asked) |
 
 The command uses them as it likes: `journalctl --after-cursor="$SPOTTER_CURSOR"`, or a script that
-counts lines in a file. The agent hands back at most the limit (the newest, or for `after` the
+counts lines in a file.
+
+**`SPOTTER_*` values are anyone's:** anyone on the robot's network may page a log. The agent takes
+only what each can be (`SPOTTER_FROM` one of three words, `SPOTTER_LIMIT` a number, `SPOTTER_LEVEL` a
+level's name, `SPOTTER_CURSOR` printable ASCII with no spaces, at most 1,024 characters, else `400`),
+but a log's command treats them as data all the same: quote them (`"$SPOTTER_CURSOR"`), match them
+as fixed strings (`grep -F -e "$cursor"`), and never `eval` them or build a command from them. The agent hands back at most the limit (the newest, or for `after` the
 oldest), with `before`, the cursor to page back from (empty at the start: fewer than asked for,
 looking back), and `after`, the cursor to page on from. A request may ask `level` as a name or as
 syslog's 0 to 7.

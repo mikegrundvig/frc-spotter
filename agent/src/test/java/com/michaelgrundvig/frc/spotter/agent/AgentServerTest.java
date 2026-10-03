@@ -164,4 +164,29 @@ class AgentServerTest {
     assertThat(AgentServer.wantsJson("text/html,*/*;q=0.8")).isFalse();
     assertThat(AgentServer.wantsJson("application/x-protobuf, application/json;q=0.1")).isFalse();
   }
+
+  @Test
+  void aCursorThatIsntOneIsRefusedAndForgesNoLineInTheJournal() throws Exception {
+    // A NUL and a newline, URL-encoded: before, the JDK refused it as a process's environment, the
+    // agent answered 500, and its journal took the decoded value, newline and all.
+    for (String cursor :
+        new String[] {"%00x", "a%0A%3C3%3Eforged", "with%20space", "x".repeat(1025)}) {
+      HttpResponse<byte[]> answer =
+          get("/v2/logs/vision.log?from=after&cursor=" + cursor, Protocol.JSON);
+      assertThat(answer.statusCode()).as(cursor).isEqualTo(400);
+      assertThat(new String(answer.body(), StandardCharsets.UTF_8))
+          .contains("a cursor is printable ASCII");
+    }
+    assertThat(fixture.log).noneMatch(line -> line.contains("forged"));
+  }
+
+  @Test
+  void whatTheAgentLogsHasItsControlCharactersEscapedAndIsCut() {
+    assertThat(Host.escaped("a\nb\r\u0000c\td")).isEqualTo("a\\nb\\r\\u0000c\\td");
+    assertThat(Host.escaped("x".repeat(Host.MAX_LOG_LINE + 10)))
+        .hasSize(Host.MAX_LOG_LINE + 3)
+        .endsWith("...");
+    fixture.host.log("one\n<2>two");
+    assertThat(fixture.log).contains("one\\n<2>two");
+  }
 }

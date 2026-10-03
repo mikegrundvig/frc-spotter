@@ -32,6 +32,9 @@ final class Logs {
 
   static final int MAX_LIMIT = 1000;
 
+  /** The longest cursor taken: a journal's is about 100 characters. */
+  static final int MAX_CURSOR = 1024;
+
   /** A request that can't be answered as asked, with its status. */
   static final class Refused extends Exception {
     private static final long serialVersionUID = 1L;
@@ -62,6 +65,12 @@ final class Logs {
       if (!from.equals("latest") && cursor.isEmpty()) {
         throw new Refused(400, "from=" + from + " pages from a cursor: give cursor=");
       }
+      if (!cursor(cursor)) {
+        // It reaches a log's command as SPOTTER_CURSOR: anyone's, so only what a cursor is.
+        throw new Refused(
+            400,
+            "a cursor is printable ASCII, with no spaces, at most " + MAX_CURSOR + " characters");
+      }
       int limit = DEFAULT_LIMIT;
       String asked = query.getOrDefault("limit", "");
       if (!asked.isEmpty()) {
@@ -83,6 +92,20 @@ final class Logs {
         }
       }
       return new Paging(from, from.equals("latest") ? "" : cursor, limit, level);
+    }
+
+    /** Whether text is a cursor: printable ASCII, no space, at most {@link #MAX_CURSOR}. */
+    static boolean cursor(String text) {
+      if (text.length() > MAX_CURSOR) {
+        return false;
+      }
+      for (int i = 0; i < text.length(); i++) {
+        char c = text.charAt(i);
+        if (c <= ' ' || c > '~') {
+          return false;
+        }
+      }
+      return true;
     }
 
     /** What the log's command is told. */

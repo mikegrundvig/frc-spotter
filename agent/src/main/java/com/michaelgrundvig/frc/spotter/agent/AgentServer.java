@@ -65,6 +65,7 @@ final class AgentServer implements AutoCloseable {
   private final Semaphore streams = new Semaphore(STREAMS);
   private final Semaphore pushes = new Semaphore(1);
   private final RateLimitedLog refusals;
+  private final RateLimitedLog failures;
 
   /**
    * A thread for each request, made when one's needed: the server takes at most {@code
@@ -113,6 +114,7 @@ final class AgentServer implements AutoCloseable {
   AgentServer(Agent agent, InetSocketAddress address) throws IOException {
     this.agent = agent;
     this.refusals = new RateLimitedLog(agent::log, () -> agent.nanos() / 1000, REFUSAL_LOG_MICROS);
+    this.failures = new RateLimitedLog(agent::log, () -> agent.nanos() / 1000, REFUSAL_LOG_MICROS);
     this.server = HttpServer.create(address, 32);
     server.setExecutor(threads);
     server.createContext("/", this::handle);
@@ -153,8 +155,9 @@ final class AgentServer implements AutoCloseable {
         }
         send(exchange, e.status, problem, request.json);
       } catch (IOException | RuntimeException | Error e) {
-        // The detail (which may name files) goes to the journal; the answer says only that.
-        agent.log("Answering " + request.method + " " + request.path + " failed: " + e);
+        // The detail (which may name files) goes to the journal, at most a line each 10 s; the
+        // answer says only that.
+        failures.log("Answering " + request.method + " " + request.path + " failed: " + e);
         send(
             exchange,
             500,
