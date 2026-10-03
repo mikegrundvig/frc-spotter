@@ -1,0 +1,221 @@
+syntax = "proto3";
+package spotter.v2;
+option java_package = "com.michaelgrundvig.frc.spotter.protocol";
+
+// ---- The stream: each Event preceded by its length (a varint) ----
+
+// On connect: described, then values (complete), then runs. After that, as things happen.
+// The protocol's version is in HTTP (the path, and the Spotter-Protocol header), never in here.
+message Event {
+  oneof event {
+    Description described = 1;
+    Values values = 2;
+    Runs runs = 3;
+    RunEvent run = 4;
+    Heartbeat heartbeat = 5;
+  }
+}
+
+message Runs {
+  repeated RunState runs = 1;         // the runs the agent is keeping
+}
+
+message Heartbeat {
+  uint64 time_nanos = 1;
+}
+
+// ---- What a board has ----
+
+message Description {
+  uint32 revision = 1;                // changes whenever anything below does
+  string agent_version = 2;           // "0.4.0"
+  Identity identity = 3;
+  repeated Pack packs = 4;
+  repeated FieldDeclaration values = 5;     // a value's index is its place in this list
+  repeated LogDeclaration logs = 6;
+  repeated ActionDeclaration actions = 7;
+  repeated string problems = 8;       // what the agent ignored, and why
+  string pushed_packs = 9;            // the hash of its pushed packs; empty if none
+  bool refuses_pushes = 10;           // agent.json's acceptPushes: false
+  bool requires_signatures = 11;      // agent.json lists trustedKeys
+}
+
+message Identity {
+  string hostname = 1;
+  repeated string addresses = 2;
+  string mac = 3;
+  string boot_id = 4;
+  map<string, string> os_release = 5;
+}
+
+message Pack {
+  string name = 1;
+  string version = 2;
+  string folder = 3;
+  bool pushed = 4;                    // pushed by the robot, rather than installed
+}
+
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_NUMBER = 1;
+  FIELD_TYPE_TEXT = 2;
+  FIELD_TYPE_BOOLEAN = 3;
+  FIELD_TYPE_STATUS = 4;
+  FIELD_TYPE_JSON = 5;                // responses only
+  FIELD_TYPE_FILE = 6;                // responses only
+}
+
+// A value, or a field of an action's response.
+message FieldDeclaration {
+  string id = 1;                      // a value's "pack.field"; a response field's name
+  string label = 2;
+  FieldType type = 3;
+  string unit = 4;
+  Limit warn = 5;
+  Limit fail = 6;
+}
+
+// The limits grammar: any comparison that's set and matches triggers the level.
+message Limit {
+  optional double above = 1;
+  optional double below = 2;
+  Scalar equals = 3;
+  Scalar not_equals = 4;
+  bool missing = 5;                   // unavailable, or empty text
+}
+
+message Scalar {
+  oneof value {
+    double number = 1;
+    string text = 2;
+    bool flag = 3;
+  }
+}
+
+message LogDeclaration {
+  string id = 1;                      // "pack.log"
+  string label = 2;
+}
+
+enum Input {
+  INPUT_UNSPECIFIED = 0;
+  INPUT_NONE = 1;
+  INPUT_TEXT = 2;
+  INPUT_FILE = 3;
+}
+
+message ActionDeclaration {
+  string id = 1;                      // "pack.action", or "core.power-off", "core.reboot"
+  string label = 2;
+  string description = 3;
+  Input input = 4;
+  string confirm = 5;                 // empty: none
+  uint32 timeout_seconds = 6;
+  bool while_enabled = 7;
+  repeated FieldDeclaration response = 8;   // the built-in fields, then the pack's
+}
+
+// ---- Values ----
+
+message Values {
+  uint32 revision = 1;                // the description its indexes belong to
+  uint64 time_nanos = 2;
+  bool complete = 3;                  // every value, rather than what changed
+  repeated FieldValue values = 4;
+}
+
+// A field's value now, or why there's none.
+message FieldValue {
+  uint32 index = 1;                   // a value: its place in the description
+  string name = 2;                    // a response field: its name
+  oneof value {
+    double number = 3;
+    string text = 4;
+    bool flag = 5;
+    Status status = 6;
+    string json = 7;                  // JSON text, shown as it is
+    string file_url = 8;              // where to fetch a file field
+    string unavailable = 9;           // why it has no value
+  }
+}
+
+enum Level {
+  LEVEL_UNSPECIFIED = 0;
+  LEVEL_OK = 1;
+  LEVEL_WARNING = 2;
+  LEVEL_FAILING = 3;
+}
+
+message Status {
+  Level level = 1;
+  string message = 2;
+}
+
+// ---- Logs ----
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_ERROR = 1;
+  LOG_LEVEL_WARNING = 2;
+  LOG_LEVEL_INFO = 3;
+  LOG_LEVEL_DEBUG = 4;
+}
+
+message LogEntry {
+  int64 time_micros = 1;              // since the epoch
+  LogLevel level = 2;
+  string source = 3;
+  string message = 4;
+  string cursor = 5;                  // opaque
+}
+
+message LogPage {
+  repeated LogEntry entries = 1;      // oldest first
+  string before = 2;                  // the cursor to page back from; empty at the start
+  string after = 3;                   // the cursor to page on from
+}
+
+// ---- Actions ----
+
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_COMPLETED = 1;              // it exited, or a response came back
+  OUTCOME_UNREACHABLE = 2;            // http: refused, no route
+  OUTCOME_COULD_NOT_START = 3;        // run: not found, not allowed
+  OUTCOME_TIMED_OUT = 4;
+  OUTCOME_CANCELLED = 5;
+  OUTCOME_LOST = 6;                   // the agent restarted while it ran
+}
+
+message Started {
+  string run = 1;
+}
+
+message RunEvent {
+  string run = 1;
+  string action = 2;
+  uint64 time_nanos = 3;
+  oneof change {
+    bool started = 4;
+    LogEntry log = 5;                 // a line of a run action's standard error
+    RunResult finished = 6;
+  }
+}
+
+message RunResult {
+  Outcome outcome = 1;
+  string outcome_message = 2;
+  repeated FieldValue response = 3;   // by name: status or exit, body or output, the pack's fields
+}
+
+message RunState {
+  string run = 1;
+  string action = 2;
+  bool running = 3;
+  RunResult result = 4;               // once finished
+}
+
+message Problem {
+  string message = 1;
+  string pushed_packs = 2;            // on a 409 from /v2/stream: the agent's own hash
+}

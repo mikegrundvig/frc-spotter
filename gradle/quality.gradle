@@ -82,12 +82,13 @@ tasks.named("jacocoTestReport") {
         xml.required = true
         html.required = true
     }
-    // Generated code is not ours to test.
+    // Generated code is not ours to test: a project names its own with ext.coverageExcludes.
+    def excludes = [
+        "**/BuildConstants*",
+        "**/*AutoLogged*"
+    ] + (project.findProperty("coverageExcludes") ?: [])
     classDirectories.setFrom(files(classDirectories.files.collect {
-        fileTree(dir: it, exclude: [
-            "**/BuildConstants*",
-            "**/*AutoLogged*"
-        ])
+        fileTree(dir: it, exclude: excludes)
     }))
 }
 

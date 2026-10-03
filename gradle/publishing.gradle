@@ -55,9 +55,10 @@ publishing {
     }
 }
 
-// The javadoc of Java 17's API, as the code is compiled against it.
+// The javadoc of Java 17's API, as the code is compiled against it. A project whose generated code
+// has javadoc doclint would refuse sets ext.doclint (protocol: QuickBuffers' messages).
 tasks.named("javadoc") {
     options.encoding = "UTF-8"
     options.addStringOption("-release", "17")
-    options.addBooleanOption("Xdoclint:all,-missing", true)
+    options.addBooleanOption("Xdoclint:" + (project.findProperty("doclint") ?: "all,-missing"), true)
 }
