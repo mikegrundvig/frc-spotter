@@ -26,6 +26,8 @@ SupplementaryGroups=systemd-journal
 ExecStart=/usr/lib/frc-spotter/bin/frc-spotter
 Restart=always
 RestartSec=1
+# Java exits 143 on SIGTERM: a normal stop, not a failure.
+SuccessExitStatus=143
 # Stopping it signals the agent alone; whatever its actions were running is killed once it's gone.
 # So a run that was going when it stopped comes back lost, rather than racing the agent's exit to
 # record a finish (a run's own polite stop is for cancelling it).

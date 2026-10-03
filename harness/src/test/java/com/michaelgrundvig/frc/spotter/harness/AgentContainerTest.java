@@ -217,4 +217,21 @@ class AgentContainerTest {
     assertThat(root.getExitCode()).isNotZero();
     coprocessor.write("/data/frc-spotter/written", "yes\n");
   }
+
+  @Test
+  void aStopIsCleanNotAFailure() {
+    // Java exits 143 on SIGTERM, which the unit counts as success: a stop leaves it inactive, never
+    // failed.
+    coprocessor.run("systemctl", "stop", "frc-spotter.service");
+    try {
+      assertThat(
+              coprocessor
+                  .run("systemctl", "show", "frc-spotter.service", "--property=ActiveState,Result")
+                  .strip())
+          .contains("ActiveState=inactive", "Result=success");
+    } finally {
+      coprocessor.run("systemctl", "start", "frc-spotter.service");
+      coprocessor.awaitAgent();
+    }
+  }
 }
