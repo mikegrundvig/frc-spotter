@@ -224,7 +224,8 @@ kept in its log.
 its action runs again, or the runs kept pass 64 MiB, the oldest dropped first. `/run` survives an
 agent restart (a push's included) but not a reboot: a finished run stays fetchable after the agent
 restarts, and a run that was going when the agent stopped comes back `lost` ("the agent restarted
-while it ran"). A run's id is its start on the monotonic clock and some randomness, 16 hex
+while it ran"): stopping the agent stops it alone, and its unit kills what its runs were running once
+it's gone (`KillMode=mixed`). A run's id is its start on the monotonic clock and some randomness, 16 hex
 characters.
 
 ### Built in: power-off and reboot
