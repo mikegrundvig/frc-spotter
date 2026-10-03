@@ -597,17 +597,21 @@ class PackReaderTest {
   @Test
   void aPackNestedDeeperThanAnyNeedsIsRefusedBeforeItsBuilt() {
     assertThat(problems("p", "pack: p\nversion: " + "[".repeat(33) + "]".repeat(33) + "\n"))
-        .containsExactly(PACKS + "/p/pack.yaml:2: nested deeper than 32 (a pack needs five or six)");
+        .containsExactly(
+            PACKS + "/p/pack.yaml:2: nested deeper than 32 (a pack needs five or six)");
     // Deep enough to overflow the agent's stack, were it composed: refused all the same, at once.
     assertThat(problems("p", "pack: p\nversion: " + "[".repeat(100_000)))
-        .containsExactly(PACKS + "/p/pack.yaml:2: nested deeper than 32 (a pack needs five or six)");
+        .containsExactly(
+            PACKS + "/p/pack.yaml:2: nested deeper than 32 (a pack needs five or six)");
   }
 
   @Test
   void aPacksListsFieldsAndTextsAreBounded() {
     StringBuilder many = new StringBuilder("pack: p\ncollectors:\n");
     for (int i = 0; i <= PackReader.MAX_COLLECTORS; i++) {
-      many.append("  - {id: c").append(i).append(", file: /proc/uptime, every: 1s,")
+      many.append("  - {id: c")
+          .append(i)
+          .append(", file: /proc/uptime, every: 1s,")
           .append(" fields: {s: {type: number}}}\n");
     }
     assertThat(problems("p", many.toString()))

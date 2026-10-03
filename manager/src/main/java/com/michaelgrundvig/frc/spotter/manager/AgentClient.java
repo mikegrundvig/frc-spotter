@@ -21,9 +21,8 @@ import org.jspecify.annotations.Nullable;
  * the JDK's HTTP client; each answer's protocol version is checked before its body is read. Each is
  * bounded: a connection's own timeouts, and an overall {@link #DEADLINE_MILLIS}, past which its
  * connection is dropped and its answer refused within one more read, so an agent that answers a
- * byte at a time can't hold a thread. Writes are
- * signed when the manager has a key, over the board's current stream connection's challenge, one at
- * a time so their counters arrive in order.
+ * byte at a time can't hold a thread. Writes are signed when the manager has a key, over the
+ * board's current stream connection's challenge, one at a time so their counters arrive in order.
  */
 final class AgentClient {
   /** How long a request may wait for each read of its answer, once connected. */
@@ -205,10 +204,7 @@ final class AgentClient {
       throw e;
     } catch (IOException e) {
       throw new Refused(
-          0,
-          late.get()
-              ? "no complete answer within " + deadlineMillis + " ms"
-              : Link.why(e));
+          0, late.get() ? "no complete answer within " + deadlineMillis + " ms" : Link.why(e));
     } finally {
       if (deadline != null) {
         deadline.cancel(false);

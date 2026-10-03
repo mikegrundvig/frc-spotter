@@ -375,7 +375,11 @@ public final class Run {
       level = Level.FAILING;
       reason =
           why.isEmpty()
-              ? outcome.name().substring("OUTCOME_".length()).toLowerCase(Locale.ROOT).replace('_', ' ')
+              ? outcome
+                  .name()
+                  .substring("OUTCOME_".length())
+                  .toLowerCase(Locale.ROOT)
+                  .replace('_', ' ')
               : why;
       return;
     }

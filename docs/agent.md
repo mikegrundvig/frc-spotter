@@ -408,6 +408,35 @@ actions:
 - **Mistakes:** a key nobody reads is a problem, so a misspelling can't pass silently; a pack with
   any problem is ignored, each problem with its file and line.
 
+### Bounds
+
+A pushed pack is anyone's who can reach the controller's address, so the agent bounds what it loads,
+and a board's description always fits one of the stream's events (1 MiB):
+
+| What | At most | Past it |
+|---|---|---|
+| A `pack.yaml` | 256 KiB, nested 32 deep | the pack is ignored, saying where |
+| A pack's collectors, logs, actions | 64, 16, 32 | the pack is ignored |
+| A collector's fields, an action's own response fields | 64 | the pack is ignored |
+| A label, description, prompt, unit, version, comparison's text, file name | 1,024 characters | the pack is ignored |
+| A board's packs | 32 | packs are taken in the order of their names; the rest are ignored, each saying why |
+| A board's values, actions (its two built-in ones included) | 2,048, 128 (`Protocol.MAX_VALUES`, `MAX_ACTIONS`) | a pack that would pass them is ignored whole |
+| What a board's packs declare | 512 KiB, as the description carries it | a pack that would pass it is ignored whole |
+| A board's problems | 128 (`Protocol.MAX_PROBLEMS`), each 1,024 characters | the last says how many more; the journal has them all |
+
+Whatever reading one pack meets, a stack overflow included, the others load and the agent serves.
+The robot's manager holds a board to the same numbers.
+
+**The last good start.** Before it loads pushed packs, the agent leaves a marker,
+`/var/lib/frc-spotter/starting`, and takes it away once it has been up 60 s. A start that finds the
+marker still there knows the last start with those packs didn't stay up (they crashed it as it
+loaded them, or rebooted the board): it sets them aside for that start, and serves, takes pushes,
+and says why in `problems`. Once that start has been up 60 s it takes the marker away, so the next
+start tries the pushed packs again; a push takes it away too. Their hash is still what's on the
+board's disk, so the same packs aren't pushed again in a loop. A board powered off within a minute
+of starting counts as a start that didn't stay up, so its next start runs without its pushed packs,
+and says so.
+
 `agent/src/test/resources/packs/` has the design's example packs, copied as it writes them
 (`debian`, `photonvision`, `raspberry-pi`, `detector`), which the unit tests read. The catalog of
 packs to copy is the repository's `packs/` (`packs/README.md`): `debian` (the design's example,

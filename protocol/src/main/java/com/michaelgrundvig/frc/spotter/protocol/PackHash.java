@@ -27,8 +27,9 @@ import us.hebi.quickbuf.RepeatedByte;
  * <p>Permissions are one of two, {@value #EXECUTABLE} or {@value #PLAIN}, as the agent writes a
  * pushed pack's files: so a umask on either side can't make two copies of the same packs differ. A
  * file is executable when any execute bit is set, or when it starts with {@code #!}: a deploy that
- * copies files without their modes (as the robot's may) still pushes a script that runs. Folders count only by the files in them; a folder with no files at all hashes
- * to the empty text, as no packs do.
+ * copies files without their modes (as the robot's may) still pushes a script that runs. Folders
+ * count only by the files in them; a folder with no files at all hashes to the empty text, as no
+ * packs do.
  *
  * <p>A pushed bundle ({@code PackBundle}) hashes the same way from its files, without touching a
  * disk: what the robot sends, and what the agent writes and hashes again from its disk, agree.

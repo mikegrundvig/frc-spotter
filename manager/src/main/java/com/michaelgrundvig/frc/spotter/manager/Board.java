@@ -143,7 +143,9 @@ public final class Board {
     if (through == null || connection != Connection.CONNECTED) {
       return CompletableFuture.failedFuture(
           new IllegalStateException(
-              name + "'s logs can't be read: it isn't connected" + (why.isEmpty() ? "" : ": " + why)));
+              name
+                  + "'s logs can't be read: it isn't connected"
+                  + (why.isEmpty() ? "" : ": " + why)));
     }
     return through.log(id, query);
   }

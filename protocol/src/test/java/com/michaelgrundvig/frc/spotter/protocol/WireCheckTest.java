@@ -61,7 +61,7 @@ class WireCheckTest {
     assertThat(table.keySet()).containsExactlyInAnyOrderElementsOf(messages.keySet());
     messages.forEach(
         (name, message) -> {
-          WireCheck.Type type = table.get(name);
+          WireCheck.Type type = java.util.Objects.requireNonNull(table.get(name), name);
           Map<Integer, DescriptorProtos.FieldDescriptorProto> fields = new HashMap<>();
           for (DescriptorProtos.FieldDescriptorProto field : message.getFieldList()) {
             fields.put(field.getNumber(), field);
@@ -70,15 +70,15 @@ class WireCheckTest {
             WireCheck.Type held = type.message(field.getNumber());
             if (isMessage) {
               assertThat(held).as(name + "'s field " + field.getName()).isNotNull();
-              assertThat("." + held.name()).isEqualTo(field.getTypeName());
+              assertThat("." + java.util.Objects.requireNonNull(held).name())
+                  .isEqualTo(field.getTypeName());
             } else {
               assertThat(held).as(name + "'s field " + field.getName()).isNull();
             }
             assertThat(type.repeats(field.getNumber()))
                 .as(name + "'s field " + field.getName() + " repeats")
                 .isEqualTo(
-                    field.getLabel()
-                        == DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED);
+                    field.getLabel() == DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED);
           }
           // And it says nothing of fields the proto hasn't.
           for (int number = 0; number < type.fields(); number++) {

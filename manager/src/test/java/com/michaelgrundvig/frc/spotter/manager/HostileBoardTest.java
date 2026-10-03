@@ -63,8 +63,8 @@ class HostileBoardTest {
 
   @Test
   void aStringThatSays2GiBIsRefusedWithoutAllocatingIt() {
-    // Event { described: Description { problems: "2 GiB" } }, in eight bytes: QuickBuffers 1.4 alone
-    // allocates the 2 GiB before it finds there's nothing there.
+    // Event { described: Description { problems: "2 GiB" } }, in eight bytes: QuickBuffers 1.4
+    // on its own allocates the 2 GiB before it finds there's nothing there.
     byte[] event = {0x0a, 0x06, 0x42, (byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff, 0x07};
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     varint(out, event.length);
@@ -81,7 +81,9 @@ class HostileBoardTest {
     assertThat(allocated).as("bytes allocated refusing it").isLessThan(1 << 20);
   }
 
-  /** A description of {@code count} numbers, each warning below 10 or, past {@code warn}, failing. */
+  /**
+   * A description of {@code count} numbers, each warning below 10 or, past {@code warn}, failing.
+   */
   private static Spotter.Description numbers(int count, int warn) {
     Spotter.Description description = Spotter.Description.newInstance().setRevision(9);
     description.getMutableIdentity().setHostname("vision-front");
@@ -148,7 +150,9 @@ class HostileBoardTest {
     assertThat(alerts.get(Link.MAX_ALERTS - 1))
         .isEqualTo(
             new Alert(
-                Level.WARNING, "vision-front", "vision-front: 9 more values at warning or failing"));
+                Level.WARNING,
+                "vision-front",
+                "vision-front: 9 more values at warning or failing"));
   }
 
   @Test
@@ -165,7 +169,10 @@ class HostileBoardTest {
           }
         };
     try (LocalAgent agent = new LocalAgent(dir, "vision-front")) {
-      agent.pack("vision", ManagerTest.PACK).script("vision", "health", ManagerTest.HEALTHY).start();
+      agent
+          .pack("vision", ManagerTest.PACK)
+          .script("vision", "health", ManagerTest.HEALTHY)
+          .start();
       try (Manager manager =
           new Manager(
               Boards.robot(),

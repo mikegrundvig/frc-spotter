@@ -270,13 +270,23 @@ public final class WireCheck {
           int left = source.getBytesUntilLimit();
           if (length < 0 || length > left) {
             throw new Malformed(
-                type.name + "'s field " + field + " says " + (length & 0xffffffffL)
-                    + " bytes, and " + left + " are left");
+                type.name
+                    + "'s field "
+                    + field
+                    + " says "
+                    + (length & 0xffffffffL)
+                    + " bytes, and "
+                    + left
+                    + " are left");
           }
           if (type.repeats(field) && ++count > MAX_REPEATED) {
             throw new Malformed(
-                "more than " + MAX_REPEATED + " elements of lists in one message, at "
-                    + type.name + "'s field " + field);
+                "more than "
+                    + MAX_REPEATED
+                    + " elements of lists in one message, at "
+                    + type.name
+                    + "'s field "
+                    + field);
           }
           Type nested = type.message(field);
           if (nested == null) {
@@ -289,7 +299,11 @@ public final class WireCheck {
           break;
         default:
           throw new Malformed(
-              type.name + "'s field " + field + " has wire type " + (tag & 7)
+              type.name
+                  + "'s field "
+                  + field
+                  + " has wire type "
+                  + (tag & 7)
                   + ", which spotter.proto has none of");
       }
     }

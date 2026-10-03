@@ -48,8 +48,8 @@ import us.hebi.quickbuf.Utf8String;
  * checks it ({@link WireCheck}) first, so whatever a board sends, parsing it allocates within its
  * size; an event past that, or malformed, drops the connection, which is made again. It takes a
  * description of at most {@link Protocol#MAX_VALUES} values, {@link Protocol#MAX_ACTIONS} actions
- * and {@link Protocol#MAX_PROBLEMS} problems, and raises at most {@link #MAX_ALERTS} alerts for
- * its values. Whatever its thread meets, an {@link Error} included, it connects again.
+ * and {@link Protocol#MAX_PROBLEMS} problems, and raises at most {@link #MAX_ALERTS} alerts for its
+ * values. Whatever its thread meets, an {@link Error} included, it connects again.
  *
  * <p>In steady state, decoding the stream into the table and publishing it allocate nothing: one
  * event, one buffer, two sources and one table are reused, and text is decoded only when its bytes
@@ -58,12 +58,12 @@ import us.hebi.quickbuf.Utf8String;
  * for each.
  *
  * <p>It also follows the board's runs (each run event goes to its {@link Run}), sends the board's
- * requests on request threads of its own ({@link AgentClient}): at most {@link #REQUEST_THREADS}
- * at once and {@link #REQUESTS_WAITING} waiting, any more refused at once, so robot code asking
- * every loop can't pile threads up on the robot. And it keeps the board's packs the
- * robot's: it connects with their hash, and when the board's differ, pushes them while the robot is
- * disabled and off the field, once for each set of packs the board has, so a push that fails or
- * doesn't take is never repeated in a loop.
+ * requests on request threads of its own ({@link AgentClient}): at most {@link #REQUEST_THREADS} at
+ * once and {@link #REQUESTS_WAITING} waiting, any more refused at once, so robot code asking every
+ * loop can't pile threads up on the robot. And it keeps the board's packs the robot's: it connects
+ * with their hash, and when the board's differ, pushes them while the robot is disabled and off the
+ * field, once for each set of packs the board has, so a push that fails or doesn't take is never
+ * repeated in a loop.
  */
 final class Link implements Runnable, AgentClient.Challenges {
   /** The first wait after a failure. */
@@ -789,9 +789,9 @@ final class Link implements Runnable, AgentClient.Challenges {
   }
 
   /**
-   * The board's value alerts: one per value at warning or failing, in its pack's words. Past
-   * {@link #MAX_ALERTS}, the failing ones first, then one says how many more there are, at the
-   * worst of their levels.
+   * The board's value alerts: one per value at warning or failing, in its pack's words. Past {@link
+   * #MAX_ALERTS}, the failing ones first, then one says how many more there are, at the worst of
+   * their levels.
    */
   private List<Alert> alerts() {
     String name = board.name();
@@ -806,15 +806,16 @@ final class Link implements Runnable, AgentClient.Challenges {
       raised.sort(Comparator.comparing(value -> value.level != Level.FAILING));
     }
     List<Alert> alerts = new ArrayList<>();
-    for (int i = 0; i < raised.size() && i < MAX_ALERTS - (raised.size() > MAX_ALERTS ? 1 : 0); i++) {
+    for (int i = 0;
+        i < raised.size() && i < MAX_ALERTS - (raised.size() > MAX_ALERTS ? 1 : 0);
+        i++) {
       Value value = raised.get(i);
       alerts.add(new Alert(value.level, name, text(name, value)));
     }
     int more = raised.size() - alerts.size();
     if (more > 0) {
       Level worst = raised.get(alerts.size()).level;
-      alerts.add(
-          new Alert(worst, name, name + ": " + more + " more values at warning or failing"));
+      alerts.add(new Alert(worst, name, name + ": " + more + " more values at warning or failing"));
     }
     return List.copyOf(alerts);
   }
@@ -1051,8 +1052,8 @@ final class Link implements Runnable, AgentClient.Challenges {
   }
 
   /**
-   * Runs a request on one of the board's request threads: what it throws goes to {@code failed},
-   * as why; when they're all busy and as many wait as may, it's refused at once.
+   * Runs a request on one of the board's request threads: what it throws goes to {@code failed}, as
+   * why; when they're all busy and as many wait as may, it's refused at once.
    */
   private void execute(java.util.function.Consumer<String> failed, Task task) {
     try {

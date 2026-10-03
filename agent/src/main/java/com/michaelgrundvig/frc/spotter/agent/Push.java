@@ -139,7 +139,8 @@ final class Push {
     try (InputStream in = Files.newInputStream(file)) {
       WireCheck.check(WireCheck.PACK_BUNDLE, ProtoSource.newInstance(in), (int) Files.size(file));
     } catch (WireCheck.Malformed e) {
-      throw new Rejected("the bundle isn't a PackBundle that can be read safely: " + e.getMessage());
+      throw new Rejected(
+          "the bundle isn't a PackBundle that can be read safely: " + e.getMessage());
     }
     Spotter.PackBundle bundle;
     try (InputStream in = new BufferedInputStream(Files.newInputStream(file))) {

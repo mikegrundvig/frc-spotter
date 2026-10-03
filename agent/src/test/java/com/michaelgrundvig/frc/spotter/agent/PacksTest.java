@@ -112,8 +112,7 @@ class PacksTest {
     assertThat(vision.actions()).extracting(Pack.Action::id).containsExactly("restart");
     assertThat(loaded.problems())
         .containsExactly(
-            folder
-                + "/web: isn't root's (its owner is pi), so vision's collector web isn't run",
+            folder + "/web: isn't root's (its owner is pi), so vision's collector web isn't run",
             "/opt/vision/log: may be written by its group or others (mode 775), so vision's log log"
                 + " isn't run");
   }
@@ -256,8 +255,7 @@ class PacksTest {
   }
 
   @Test
-  void aBoardHasAtMostItsMostPacks(@org.junit.jupiter.api.io.TempDir Path other)
-      throws Exception {
+  void aBoardHasAtMostItsMostPacks(@org.junit.jupiter.api.io.TempDir Path other) throws Exception {
     Fixture board = new Fixture(other);
     for (int i = 0; i <= Packs.MAX_PACKS; i++) {
       board.pack(String.format("p%02d", i), String.format("pack: p%02d\n", i));

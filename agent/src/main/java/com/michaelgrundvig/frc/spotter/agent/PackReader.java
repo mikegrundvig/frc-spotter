@@ -37,11 +37,11 @@ import org.snakeyaml.engine.v2.schema.CoreSchema;
  * Pack}, every problem with its file and line. Everything is checked as it's read, so a mistake
  * shows at its line, and a key nobody reads is a problem, so a misspelling can't pass silently.
  *
- * <p>Bounded, as a pushed pack is anyone's who can reach the controller's address: its file at
- * most {@link Host#MAX_FILE}, nested at most {@link #MAX_DEPTH} deep (checked on snakeyaml-engine's
- * own events before anything's built, as its composer recurses), at most {@link #MAX_COLLECTORS}
- * collectors, {@link #MAX_LOGS} logs and {@link #MAX_ACTIONS} actions, {@link #MAX_FIELDS} fields to
- * a collector or a response, and {@link #MAX_TEXT} characters to any text a description carries.
+ * <p>Bounded, as a pushed pack is anyone's who can reach the controller's address: its file at most
+ * {@link Host#MAX_FILE}, nested at most {@link #MAX_DEPTH} deep (checked on snakeyaml-engine's own
+ * events before anything's built, as its composer recurses), at most {@link #MAX_COLLECTORS}
+ * collectors, {@link #MAX_LOGS} logs and {@link #MAX_ACTIONS} actions, {@link #MAX_FIELDS} fields
+ * to a collector or a response, and {@link #MAX_TEXT} characters to any text a description carries.
  */
 final class PackReader {
   /** What a pack's name may be: its folder's. */
@@ -175,8 +175,8 @@ final class PackReader {
   }
 
   /**
-   * Refuses YAML nested deeper than {@link #MAX_DEPTH}, from snakeyaml-engine's own parser
-   * events, before anything is built.
+   * Refuses YAML nested deeper than {@link #MAX_DEPTH}, from snakeyaml-engine's own parser events,
+   * before anything is built.
    */
   private static void depth(String yaml, LoadSettings settings, String source) {
     int depth = 0;
@@ -760,7 +760,9 @@ final class PackReader {
     if (type == Spotter.FieldType.FIELD_TYPE_BOOLEAN) {
       return Spotter.Scalar.newInstance().setFlag(bool(node, what));
     }
-    return described(node, what).map(text -> Spotter.Scalar.newInstance().setText(text)).orElse(null);
+    return described(node, what)
+        .map(text -> Spotter.Scalar.newInstance().setText(text))
+        .orElse(null);
   }
 
   // ---- scalars ----

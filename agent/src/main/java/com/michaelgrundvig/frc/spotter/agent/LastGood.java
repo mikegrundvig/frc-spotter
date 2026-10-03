@@ -11,8 +11,8 @@ import java.time.Duration;
  * can't keep the board from serving and taking the next push. Before the agent loads pushed packs,
  * it leaves a marker, {@link #MARKER}; once it has been up {@link #HEALTHY} it takes it away. A
  * start that finds the marker still there knows the last start with them didn't stay up: it sets
- * them aside for this start (it serves, takes pushes, and says why in its problems), and once it has
- * been up {@link #HEALTHY} it takes the marker away, so the next start tries them again. A push
+ * them aside for this start (it serves, takes pushes, and says why in its problems), and once it
+ * has been up {@link #HEALTHY} it takes the marker away, so the next start tries them again. A push
  * takes it away too: new packs get a fresh try. The marker is kept with the pushed packs, so a
  * reboot doesn't forget it.
  */

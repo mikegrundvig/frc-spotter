@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -80,22 +79,33 @@ final class Host {
     static Owner of(PosixFileAttributes attributes) {
       int mode = 0;
       for (PosixFilePermission permission : attributes.permissions()) {
-        mode |= BITS.get(permission);
+        mode |= bit(permission);
       }
       return new Owner(attributes.owner().getName(), mode);
     }
 
-    private static final Map<PosixFilePermission, Integer> BITS =
-        Map.of(
-            PosixFilePermission.OWNER_READ, 0400,
-            PosixFilePermission.OWNER_WRITE, 0200,
-            PosixFilePermission.OWNER_EXECUTE, 0100,
-            PosixFilePermission.GROUP_READ, 0040,
-            PosixFilePermission.GROUP_WRITE, 0020,
-            PosixFilePermission.GROUP_EXECUTE, 0010,
-            PosixFilePermission.OTHERS_READ, 0004,
-            PosixFilePermission.OTHERS_WRITE, 0002,
-            PosixFilePermission.OTHERS_EXECUTE, 0001);
+    private static int bit(PosixFilePermission permission) {
+      switch (permission) {
+        case OWNER_READ:
+          return 0400;
+        case OWNER_WRITE:
+          return 0200;
+        case OWNER_EXECUTE:
+          return 0100;
+        case GROUP_READ:
+          return 0040;
+        case GROUP_WRITE:
+          return 0020;
+        case GROUP_EXECUTE:
+          return 0010;
+        case OTHERS_READ:
+          return 0004;
+        case OTHERS_WRITE:
+          return 0002;
+        default:
+          return 0001;
+      }
+    }
   }
 
   /** The computer's network addresses: the system's on a coprocessor, a list in tests. */

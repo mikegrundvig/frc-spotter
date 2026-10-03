@@ -111,7 +111,9 @@ final class Describer {
     return problem.length() <= MAX_PROBLEM ? problem : problem.substring(0, MAX_PROBLEM) + "...";
   }
 
-  /** How many bytes a pack's declarations take in a description: its entry, values, logs, actions. */
+  /**
+   * How many bytes a pack's declarations take in a description: its entry, values, logs, actions.
+   */
   static long declared(Pack pack) {
     Spotter.Description part = Spotter.Description.newInstance().addPacks(pack.description());
     for (Collectors.Slot slot : Collectors.slots(List.of(pack))) {
