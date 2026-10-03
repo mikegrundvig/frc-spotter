@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -70,6 +71,9 @@ final class Runs implements AutoCloseable {
 
   /** Why a run that was going when the agent stopped has no result. */
   static final String LOST = "the agent restarted while it ran";
+
+  /** How long a stop waits for the runs going to end. */
+  static final long CLOSE_MILLIS = 2000;
 
   /** A refusal of a request about runs, with its status. */
   static final class Refused extends Exception {
@@ -117,6 +121,8 @@ final class Runs implements AutoCloseable {
           });
   private final long maxKept;
   private int running;
+  // Set as the agent stops: a run its stop ends keeps the state it had, going.
+  private volatile boolean closed;
 
   /**
    * @param actions every action the board offers: the built-in ones, then its packs'
@@ -318,6 +324,12 @@ final class Runs implements AutoCloseable {
                   "the agent couldn't run it: " + e.getMessage()),
               declared.action().response(),
               run.run);
+    }
+    if (closed) {
+      // The agent stopped while it ran, and its process with it: its state is left as it was,
+      // going, so the next start takes it up as lost, as after any restart.
+      host.log("Run " + run.run + " of " + run.action + " ended as the agent stopped");
+      return;
     }
     try {
       write(folder.resolve("state"), state);
@@ -566,8 +578,20 @@ final class Runs implements AutoCloseable {
     Files.move(part, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
   }
 
+  /**
+   * Stops the runs going (their processes, at once) and waits a moment for them to end, so none
+   * writes its state once another agent may be taking it up.
+   */
   @Override
   public void close() {
+    closed = true;
     threads.shutdownNow();
+    try {
+      if (!threads.awaitTermination(CLOSE_MILLIS, TimeUnit.MILLISECONDS)) {
+        host.log("A run hadn't ended " + CLOSE_MILLIS + " ms after the agent stopped");
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 }

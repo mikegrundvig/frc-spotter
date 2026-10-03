@@ -15,6 +15,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import us.hebi.quickbuf.ProtoMessage;
 
 /** Actions' runs, for real: their responses, logs, limits, and what's kept of them. */
 class RunsTest {
@@ -255,6 +256,29 @@ class RunsTest {
     finished(runs.start("team.big2", null).getRun());
     assertThat(runs.state(second)).isEmpty();
     assertThat(runs.states()).extracting(Spotter.RunState::getAction).containsExactly("team.big2");
+  }
+
+  @Test
+  void aRunGoingAsTheAgentStopsIsTakenUpLostByTheNextStart() throws Exception {
+    String going = runs.start("team.stubborn", null).getRun();
+    for (int i = 0;
+        i < 100 && runs.log(going, Logs.Paging.of(Map.of())).getEntries().length() == 0;
+        i++) {
+      Thread.sleep(50);
+    }
+    // The stop ends its process, and it writes no outcome of its own: it was going.
+    runs.close();
+    assertThat(
+            ProtoMessage.mergeFrom(
+                    Spotter.RunState.newInstance(),
+                    Files.readAllBytes(fixture.path(Runs.FOLDER + "/" + going + "/state")))
+                .getRunning())
+        .isTrue();
+    runs = runs(Runs.MAX_KEPT);
+    runs.restore();
+    Spotter.RunState lost = runs.state(going).orElseThrow();
+    assertThat(lost.getResult().getOutcome()).isEqualTo(Spotter.Outcome.OUTCOME_LOST);
+    assertThat(lost.getResult().getOutcomeMessage()).isEqualTo(Runs.LOST);
   }
 
   @Test
