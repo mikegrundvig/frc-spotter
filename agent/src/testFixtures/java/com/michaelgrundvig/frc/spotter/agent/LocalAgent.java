@@ -45,7 +45,7 @@ public final class LocalAgent implements AutoCloseable {
     host =
         new Host(
             root,
-            path -> new Host.Owner(0, Files.isExecutable(path(path)) ? 0755 : 0644),
+            path -> Host.Owner.root(Files.isExecutable(path(path)) ? 0755 : 0644),
             () -> List.of("127.0.0.1"),
             System::nanoTime,
             log::add);

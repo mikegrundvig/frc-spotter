@@ -82,17 +82,17 @@ class PacksTest {
   @Test
   void anInstalledPackWhoseFileAnyoneButRootCouldChangeIsIgnored() {
     fixture.pack("mine", "pack: mine\n");
-    fixture.owners.put(Packs.INSTALLED + "/mine/pack.yaml", new Host.Owner(1000, 0644));
+    fixture.owners.put(Packs.INSTALLED + "/mine/pack.yaml", new Host.Owner("pi", 0644));
     fixture.pack("shared", "pack: shared\n");
-    fixture.owners.put(Packs.INSTALLED + "/shared/pack.yaml", new Host.Owner(0, 0664));
+    fixture.owners.put(Packs.INSTALLED + "/shared/pack.yaml", Host.Owner.root(0664));
     // A pushed pack is the agent's own, trusted because the controller alone may push.
     fixture.pushed("pushed", "pack: pushed\n");
-    fixture.owners.put(Packs.PUSHED + "/pushed/pack.yaml", new Host.Owner(999, 0644));
+    fixture.owners.put(Packs.PUSHED + "/pushed/pack.yaml", new Host.Owner("frc-spotter", 0644));
     Packs.Loaded loaded = Packs.load(fixture.host, true);
     assertThat(loaded.packs()).extracting(Pack::name).containsExactly("pushed");
     assertThat(loaded.problems())
         .containsExactly(
-            Packs.INSTALLED + "/mine/pack.yaml: isn't root's (its owner is user 1000), ignored",
+            Packs.INSTALLED + "/mine/pack.yaml: isn't root's (its owner is pi), ignored",
             Packs.INSTALLED
                 + "/shared/pack.yaml: may be written by its group or others (mode 664), ignored");
   }
@@ -101,9 +101,9 @@ class PacksTest {
   void aProgramAnyoneButRootCouldChangeIsntRunAndTheRestOfItsPackIs() {
     String folder = fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
     fixture.script(folder + "/web", "echo true");
-    fixture.owners.put(folder + "/web", new Host.Owner(1000, 0755));
+    fixture.owners.put(folder + "/web", new Host.Owner("pi", 0755));
     fixture.script("/opt/vision/log", "true");
-    fixture.owners.put("/opt/vision/log", new Host.Owner(0, 0775));
+    fixture.owners.put("/opt/vision/log", Host.Owner.root(0775));
     Packs.Loaded loaded = Packs.load(fixture.host, true);
     Pack vision = loaded.packs().get(0);
     assertThat(vision.collectors()).isEmpty();
@@ -113,7 +113,7 @@ class PacksTest {
     assertThat(loaded.problems())
         .containsExactly(
             folder
-                + "/web: isn't root's (its owner is user 1000), so vision's collector web isn't run",
+                + "/web: isn't root's (its owner is pi), so vision's collector web isn't run",
             "/opt/vision/log: may be written by its group or others (mode 775), so vision's log log"
                 + " isn't run");
   }
@@ -138,10 +138,10 @@ class PacksTest {
                   hash: {type: text}
             """);
     fixture.write(folder + "/check.py", "print('true')\n");
-    fixture.owners.put(folder + "/check.py", new Host.Owner(1000, 0644));
+    fixture.owners.put(folder + "/check.py", new Host.Owner("pi", 0644));
     // An absolute path past the program is data, such as a file to hash: not checked.
     fixture.write("/opt/team/data.db", "data");
-    fixture.owners.put("/opt/team/data.db", new Host.Owner(1000, 0664));
+    fixture.owners.put("/opt/team/data.db", new Host.Owner("pi", 0664));
     Packs.Loaded loaded = Packs.load(fixture.host, true);
     assertThat(loaded.packs().get(0).collectors())
         .extracting(Pack.Collector::id)
@@ -149,7 +149,7 @@ class PacksTest {
     assertThat(loaded.problems())
         .containsExactly(
             folder
-                + "/check.py: isn't root's (its owner is user 1000), so team's collector check"
+                + "/check.py: isn't root's (its owner is pi), so team's collector check"
                 + " isn't run");
   }
 

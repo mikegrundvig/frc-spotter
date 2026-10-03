@@ -50,7 +50,7 @@ final class Fixture {
             root,
             path ->
                 owners.getOrDefault(
-                    path, new Host.Owner(0, Files.isExecutable(path(path)) ? 0755 : 0644)),
+                    path, Host.Owner.root(Files.isExecutable(path(path)) ? 0755 : 0644)),
             () -> new ArrayList<>(addresses),
             nanos::get,
             log::add);

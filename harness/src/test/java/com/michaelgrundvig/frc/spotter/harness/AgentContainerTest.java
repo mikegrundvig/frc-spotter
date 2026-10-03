@@ -180,11 +180,11 @@ class AgentContainerTest {
   void whatItCantTrustIsIgnoredAndSaysWhy() throws Exception {
     assertThat(client.describe().getProblems())
         .containsExactlyInAnyOrder(
-            "/etc/frc-spotter/packs/mine/pack.yaml: isn't root's (its owner is user 65534),"
+            "/etc/frc-spotter/packs/mine/pack.yaml: isn't root's (its owner is nobody),"
                 + " ignored",
             "/etc/frc-spotter/packs/shared/pack.yaml: may be written by its group or others (mode"
                 + " 664), ignored",
-            "/etc/frc-spotter/packs/program/check: isn't root's (its owner is user 65534), so"
+            "/etc/frc-spotter/packs/program/check: isn't root's (its owner is nobody), so"
                 + " program's collector check isn't run");
     assertThat(coprocessor.run("journalctl", "-u", "frc-spotter", "--no-pager"))
         .contains("/etc/frc-spotter/packs/mine/pack.yaml: isn't root's");

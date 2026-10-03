@@ -28,9 +28,6 @@ final class Packs {
   /** Where the packs the robot pushed are, each a folder. */
   static final String PUSHED = "/var/lib/frc-spotter/packs";
 
-  /** The user ID an installed pack's files must be owned by: root. */
-  static final int ROOT = 0;
-
   private Packs() {}
 
   /**
@@ -201,8 +198,8 @@ final class Packs {
 
   /** Why a file isn't to be trusted; empty when root alone may change it. */
   private static String untrusted(Host.Owner owner) {
-    if (owner.uid() != ROOT) {
-      return "isn't root's (its owner is user " + owner.uid() + ")";
+    if (!owner.root()) {
+      return "isn't root's (its owner is " + owner.user() + ")";
     }
     if (owner.writableByOthers()) {
       return "may be written by its group or others (mode "

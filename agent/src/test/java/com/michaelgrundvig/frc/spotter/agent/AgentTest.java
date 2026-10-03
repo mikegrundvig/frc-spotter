@@ -181,14 +181,14 @@ class AgentTest {
   void whatItIgnoredIsInItsProblems() {
     fixture.config("{\"packs\": []}");
     fixture.pack("mine", "pack: mine\n");
-    fixture.owners.put(Packs.INSTALLED + "/mine/pack.yaml", new Host.Owner(1000, 0644));
+    fixture.owners.put(Packs.INSTALLED + "/mine/pack.yaml", new Host.Owner("pi", 0644));
     try (Agent agent = fixture.agent()) {
       assertThat(agent.description().getProblems())
           .containsExactly(
               "/etc/frc-spotter/agent.json: can't be read, so every write is refused: it may"
                   + " set acceptPushes, bind, controller, port, trustedKeys only, not packs (packs"
                   + " are folders in /etc/frc-spotter/packs/)",
-              Packs.INSTALLED + "/mine/pack.yaml: isn't root's (its owner is user 1000), ignored");
+              Packs.INSTALLED + "/mine/pack.yaml: isn't root's (its owner is pi), ignored");
     }
   }
 
@@ -201,7 +201,7 @@ class AgentTest {
     Host failing =
         new Host(
             fixture.root,
-            path -> new Host.Owner(0, 0644),
+            path -> Host.Owner.root(0644),
             () -> {
               throw new java.io.IOException("no interfaces");
             },

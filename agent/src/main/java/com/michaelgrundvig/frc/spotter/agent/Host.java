@@ -10,10 +10,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -51,14 +54,48 @@ final class Host {
   /**
    * A file's owner and permissions.
    *
-   * @param uid its owner's user ID: 0 is root
+   * @param user its owner's name, such as {@code root}
    * @param mode its permission bits, such as {@code 0644}
    */
-  record Owner(int uid, int mode) {
+  record Owner(String user, int mode) {
+    /** The account an installed pack, and a program it names, must belong to. */
+    static final String ROOT = "root";
+
+    /** A file of root's, with these permission bits. */
+    static Owner root(int mode) {
+      return new Owner(ROOT, mode);
+    }
+
+    /** Whether it's root's. */
+    boolean root() {
+      return user.equals(ROOT);
+    }
+
     /** Whether its group or anyone else may write it. */
     boolean writableByOthers() {
       return (mode & 0022) != 0;
     }
+
+    /** A file's owner and permission bits, as the filesystem's POSIX attributes give them. */
+    static Owner of(PosixFileAttributes attributes) {
+      int mode = 0;
+      for (PosixFilePermission permission : attributes.permissions()) {
+        mode |= BITS.get(permission);
+      }
+      return new Owner(attributes.owner().getName(), mode);
+    }
+
+    private static final Map<PosixFilePermission, Integer> BITS =
+        Map.of(
+            PosixFilePermission.OWNER_READ, 0400,
+            PosixFilePermission.OWNER_WRITE, 0200,
+            PosixFilePermission.OWNER_EXECUTE, 0100,
+            PosixFilePermission.GROUP_READ, 0040,
+            PosixFilePermission.GROUP_WRITE, 0020,
+            PosixFilePermission.GROUP_EXECUTE, 0010,
+            PosixFilePermission.OTHERS_READ, 0004,
+            PosixFilePermission.OTHERS_WRITE, 0002,
+            PosixFilePermission.OTHERS_EXECUTE, 0001);
   }
 
   /** The computer's network addresses: the system's on a coprocessor, a list in tests. */
@@ -90,12 +127,9 @@ final class Host {
   static Host system(Path root, Consumer<String> log) {
     return new Host(
         root,
-        path -> {
-          Path file = root.resolve(path.substring(1));
-          return new Owner(
-              (Integer) Files.getAttribute(file, "unix:uid"),
-              (Integer) Files.getAttribute(file, "unix:mode") & 07777);
-        },
+        path ->
+            Owner.of(
+                Files.readAttributes(root.resolve(path.substring(1)), PosixFileAttributes.class)),
         Host::systemAddresses,
         System::nanoTime,
         log);
