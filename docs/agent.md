@@ -389,9 +389,11 @@ actions:
 - **Mistakes:** a key nobody reads is a problem, so a misspelling can't pass silently; a pack with
   any problem is ignored, each problem with its file and line.
 
-`agent/src/test/resources/packs/` has the design's example packs, copied as it writes them (`debian`, `photonvision`,
-`raspberry-pi`, `detector`), which the unit tests read. The catalog of packs to copy is being
-rewritten for this format (milestone 3).
+`agent/src/test/resources/packs/` has the design's example packs, copied as it writes them
+(`debian`, `photonvision`, `raspberry-pi`, `detector`), which the unit tests read. The catalog of
+packs to copy is the repository's `packs/` (`packs/README.md`): `debian` (the design's example,
+with its scripts and its drive-health root timer), `photonvision` and `raspberry-pi`, each with a
+README saying what it measures and how it was checked. None is installed by default.
 
 ## `agent.json`: the board's own settings
 

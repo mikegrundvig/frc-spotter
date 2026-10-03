@@ -35,7 +35,9 @@ when the board's `/etc/frc-spotter/agent.json` lists trusted keys, only when the
 (installed, root's) or `/var/lib/frc-spotter/packs/` (pushed by the robot). The agent reads them as
 it starts (`sudo systemctl restart frc-spotter` after changing them); an installed pack that anyone
 but root could change, or that names such a program, is ignored, and the description's `problems`
-says why. `docs/agent.md` has the format; the catalog of packs to copy is being rewritten for it.
+says why. `docs/agent.md` has the format. The catalog, `packs/`, has ready-made packs to copy in
+(`debian` for a board's own health and journal, `photonvision`, `raspberry-pi`); none is installed
+by default.
 
 ## The robot's side
 
@@ -62,7 +64,9 @@ tmpfiles entry, and install script. `SHA256SUMS` has their checksums. Image buil
 - `protocol/`: the protocol (`spotter.proto`) and the code the agent and the manager share;
 - `agent/`: the agent, its systemd unit, polkit rules, and package (`docs/agent.md`);
 - `manager/`: the robot program's manager (`docs/robot.md`);
-- `harness/`: container tests of the agent, and a library a pack's own tests use.
+- `packs/`: the catalog of packs to copy in (`packs/README.md`);
+- `harness/`: container tests of the agent and the catalog's packs, and a library a pack's own
+  tests use.
 
 ## Building
 
