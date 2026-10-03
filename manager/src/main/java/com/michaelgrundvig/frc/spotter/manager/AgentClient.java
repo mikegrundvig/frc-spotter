@@ -33,8 +33,11 @@ final class AgentClient {
    */
   static final long DEADLINE_MILLIS = 30_000;
 
-  /** The most of an answer read, in bytes: a run's file is the largest, at 1 MB. */
-  static final int MAX_ANSWER = 16 << 20;
+  /**
+   * The most an answer may be, in bytes: a page of a thousand log entries, or a run's file (at most
+   * 1 MiB), is well within it. A longer one is refused.
+   */
+  static final int MAX_ANSWER = 8 << 20;
 
   /** A request that wasn't answered as hoped: an HTTP status, or no answer at all. */
   static final class Refused extends IOException {
@@ -179,7 +182,12 @@ final class AgentClient {
         throw new Refused(code, Link.refusal(c, code));
       }
       try (InputStream in = c.getInputStream()) {
-        return in.readNBytes(MAX_ANSWER);
+        byte[] answer = in.readNBytes(MAX_ANSWER + 1);
+        if (answer.length > MAX_ANSWER) {
+          throw new Refused(
+              code, "its answer is past the " + (MAX_ANSWER >> 20) + " MiB the manager takes");
+        }
+        return answer;
       }
     } catch (Refused e) {
       throw e;

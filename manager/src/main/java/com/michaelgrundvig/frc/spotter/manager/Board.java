@@ -31,6 +31,7 @@ public final class Board {
   private List<Alert> valueAlerts = List.of();
   private String packsAlert = "";
   private String problemsAlert = "";
+  private String refusedAlert = "";
   private String alertsName;
   private List<Alert> alerts = List.of();
 
@@ -122,9 +123,10 @@ public final class Board {
   }
 
   /**
-   * Its alerts: one for it, when it's missing or on another protocol; otherwise one per value at
-   * warning or failing, one when its packs differ from the robot's and won't be pushed now, and one,
-   * a warning, while its description lists problems ({@link #problems}).
+   * Its alerts: one for it, when it's missing or on another protocol, or describes more than the
+   * manager takes; otherwise one per value at warning or failing (at most 32, the last saying how
+   * many more), one when its packs differ from the robot's and won't be pushed now, and one, a
+   * warning, while its description lists problems ({@link #problems}).
    */
   public List<Alert> alerts() {
     return alerts;
@@ -255,6 +257,7 @@ public final class Board {
             || table.alerts != valueAlerts
             || !table.packs.equals(packsAlert)
             || !table.problemsAlert.equals(problemsAlert)
+            || !table.refused.equals(refusedAlert)
             || !named.equals(alertsName);
     connection = judged;
     why = because;
@@ -264,11 +267,14 @@ public final class Board {
     valueAlerts = table.alerts;
     packsAlert = table.packs;
     problemsAlert = table.problemsAlert;
+    refusedAlert = table.refused;
     alertsName = named;
     if (judged == Connection.MISSING) {
       alerts = List.of(new Alert(Level.FAILING, named, named + " is missing: " + because));
     } else if (judged == Connection.OTHER_PROTOCOL) {
       alerts = List.of(new Alert(Level.FAILING, named, named + ": " + because));
+    } else if (!refusedAlert.isEmpty()) {
+      alerts = List.of(new Alert(Level.FAILING, named, refusedAlert));
     } else if (packsAlert.isEmpty() && problemsAlert.isEmpty()) {
       alerts = valueAlerts;
     } else {

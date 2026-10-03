@@ -89,6 +89,18 @@ each board's own request threads, never the loop's: three at once and eight wait
 more refused at once ("too many requests to vision-front at once"), each finished within 30 s
 however slowly the board answers. Closing the manager finishes every request, refused or dropped.
 
+**What a board may send.** Whatever a board sends, by fault or on purpose, the robot allocates
+within what it sent, and never loses the board for good:
+
+- each event is read whole, at most 1 MiB (`Protocol.MAX_EVENT`), and checked before it's parsed
+  (`WireCheck`: every string within what holds it, at most 16,384 list elements); one past that,
+  or malformed, drops the connection, which is made again;
+- a description of more than 2,048 values, 128 actions or 128 problems isn't used, and says so (the
+  agent loads no more, so only a broken or hostile board does);
+- a board's values raise at most 32 alerts;
+- an answer to a request is at most 8 MiB, checked the same way;
+- whatever a board's thread meets, an `Error` included, it connects again after its backoff.
+
 **Garbage.** Decoding the stream into the board's state, publishing it, and `update()` allocate
 nothing in steady state: one event, one source and the buffers are reused, and text is decoded only
 when it changes (measured with the JVM's own per-thread count, over 100,000 messages). The JDK's HTTP
@@ -125,6 +137,8 @@ until one changes. Robot code maps them onto its own, WPILib's `Alert` say: `FAI
 | A value at warning or failing | its level | `vision-front: Frames per second below 30 fps` |
 | A missing board | failing | `vision-front is missing: Connection refused` |
 | A board on another major version of the protocol | failing | `vision-front: it speaks Spotter protocol 3.0, the robot 2.0` |
+| A board that describes more than the manager takes | failing | `vision-front describes 2049 values (at most 2048), more than the manager takes: its values and actions aren't used` |
+| More than 32 values at warning or failing on one board | the worst of the rest | the failing ones first, then `vision-front: 9 more values at warning or failing` |
 | Packs that differ and won't be pushed now | warning | `vision-front's packs differ from the robot's: they'll be pushed off the field` |
 | A board that reports problems | warning | `vision-front reports 2 problems, the first: /var/lib/frc-spotter/packs/detector/pack.yaml:8: unknown key "evry" in a collector; ...` |
 | No key pair, while a board requires signatures | warning | `no Spotter key pair on this controller (/home/systemcore/spotter.key, /home/systemcore/spotter.pub): boards that require signatures will refuse its actions and pushes` |

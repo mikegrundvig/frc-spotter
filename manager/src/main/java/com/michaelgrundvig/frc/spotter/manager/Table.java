@@ -52,6 +52,12 @@ final class Table {
   /** What its problems' alert says, while it has any; empty when there are none. */
   String problemsAlert = "";
 
+  /**
+   * Why its description wasn't taken (it has more than the manager takes), as its alert says it;
+   * empty when it was.
+   */
+  String refused = "";
+
   /** Takes a new description: its values, none sent yet. */
   void describe(Spotter.Description described, Field[] fields) {
     description = described;
@@ -94,5 +100,6 @@ final class Table {
     packs = other.packs;
     problems = other.problems;
     problemsAlert = other.problemsAlert;
+    refused = other.refused;
   }
 }
