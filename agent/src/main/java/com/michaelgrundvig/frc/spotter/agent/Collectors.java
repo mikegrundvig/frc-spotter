@@ -60,6 +60,11 @@ final class Collectors implements AutoCloseable {
     String name() {
       return pack.name() + "." + collector.id();
     }
+
+    /** A value's id: {@code pack.collector.field}, as a response's fields are named in it. */
+    String id(Field field) {
+      return name() + "." + field.name();
+    }
   }
 
   /** A slot's state as it runs. */
@@ -180,7 +185,7 @@ final class Collectors implements AutoCloseable {
       host.log(
           failure.isEmpty()
               ? "Collector " + name + " fills its fields again"
-              : "Collector " + name + " fills nothing but its outcome: " + failure);
+              : "Collector " + name + " fills nothing from its output: " + failure);
     }
   }
 

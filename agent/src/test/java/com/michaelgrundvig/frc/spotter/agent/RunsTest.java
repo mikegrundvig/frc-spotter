@@ -229,6 +229,7 @@ class RunsTest {
     Spotter.RunState big = finished(first);
     assertThat(part(big, "output").getUnavailable())
         .isEqualTo("it printed more than the 1024 KiB kept");
+    assertThat(part(big, "exit").getNumber()).isZero();
     assertThat(Files.size(fixture.path(Runs.FOLDER + "/" + first + "/output")))
         .isEqualTo(Runs.MAX_OUTPUT);
     // A run is kept until its action runs again.

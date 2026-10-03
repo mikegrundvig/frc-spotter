@@ -189,14 +189,31 @@ class FillTest {
   }
 
   @Test
-  void outputPastTheMostKeptFillsOnlyTheOutcome() {
+  void outputPastTheMostKeptLeavesTheCallsOwnPartsAndNothingReadFromIt() {
     Commands.Result truncated =
         new Commands.Result(
-            Commands.Kind.RUN, Spotter.Outcome.OUTCOME_COMPLETED, "", 0, new byte[2048], true, "");
-    List<Spotter.FieldValue> values = Fill.fill(List.of(OUTCOME, EXIT, TEXT), truncated, 2048);
+            Commands.Kind.RUN, Spotter.Outcome.OUTCOME_COMPLETED, "", 3, new byte[2048], true, "");
+    List<Spotter.FieldValue> values =
+        Fill.fill(List.of(OUTCOME, WHY, EXIT, OUTPUT, TEXT), truncated, 2048);
+    // The call completed: its outcome and exit code stand.
     assertThat(values.get(0).getText()).isEqualTo("completed");
-    assertThat(values.get(1).getUnavailable()).isEqualTo("it printed more than the 2 KiB kept");
-    assertThat(values.get(2).getUnavailable()).isEqualTo("it printed more than the 2 KiB kept");
+    assertThat(values.get(1).getText()).isEmpty();
+    assertThat(values.get(2).getNumber()).isEqualTo(3);
+    // What was read from its output, the whole of it and its keys, isn't.
+    assertThat(values.get(3).getUnavailable()).isEqualTo("it printed more than the 2 KiB kept");
+    assertThat(values.get(4).getUnavailable()).isEqualTo("it printed more than the 2 KiB kept");
+    Commands.Result page =
+        new Commands.Result(
+            Commands.Kind.HTTP,
+            Spotter.Outcome.OUTCOME_COMPLETED,
+            "",
+            200,
+            new byte[2048],
+            true,
+            "");
+    assertThat(Fill.fill(List.of(CODE, BODY), page, 2048))
+        .extracting(v -> v.hasNumber() ? Double.toString(v.getNumber()) : v.getUnavailable())
+        .containsExactly("200.0", "it printed more than the 2 KiB kept");
   }
 
   @Test

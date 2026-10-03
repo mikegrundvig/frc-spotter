@@ -161,6 +161,8 @@ class ActionsContainerTest {
     Spotter.RunState big = client.finished(client.start("standin.big", new byte[0]));
     assertThat(part(big, "output").getUnavailable())
         .isEqualTo("it printed more than the 1024 KiB kept");
+    // The call completed: its exit code stands.
+    assertThat(part(big, "exit").getNumber()).isZero();
     assertThat(
             coprocessor
                 .run("stat", "-c", "%s", "/run/frc-spotter/runs/" + big.getRun() + "/output")

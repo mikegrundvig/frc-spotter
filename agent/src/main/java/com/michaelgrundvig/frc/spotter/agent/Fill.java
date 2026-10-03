@@ -23,9 +23,12 @@ import org.jspecify.annotations.Nullable;
  *       nobody declared are ignored), whatever the exit code or status; otherwise the output is one
  *       value, trimmed and converted to the type of the one field that holds it. The pack's limits
  *       on {@code exit} or {@code status} judge success, not the agent.
- *   <li>When the command didn't complete (it couldn't start, timed out, couldn't reach its URL), or
- *       printed more than is kept, {@code outcome} and {@code outcomeMessage} still say so, and
- *       every other field is unavailable, with that as its reason.
+ *   <li>When the command didn't complete (it couldn't start, timed out, couldn't reach its URL),
+ *       {@code outcome} and {@code outcomeMessage} say so, and every other field is unavailable,
+ *       with that as its reason.
+ *   <li>When it completed but printed more than is kept, its {@code outcome}, {@code
+ *       outcomeMessage}, and {@code exit} or {@code status} stand, and every field read from its
+ *       output (its whole output, and the rest) is unavailable, with that as its reason.
  * </ul>
  */
 final class Fill {
@@ -105,8 +108,8 @@ final class Fill {
   }
 
   /**
-   * Why a command's output fills nothing but its outcome: it didn't complete, or printed more than
-   * was kept; empty when it fills its fields.
+   * Why a command's output fills none of its fields: it didn't complete, or printed more than was
+   * kept; empty when it fills them.
    *
    * @param maxOutput the most of its output kept, to say so
    */
@@ -164,8 +167,9 @@ final class Fill {
           values.add(Spotter.FieldValue.newInstance().setText(result.message()));
           break;
         case CODE:
+          // The call completed, whatever became of its output: its status or exit code stands.
           values.add(
-              reason.isEmpty()
+              result.completed()
                   ? Spotter.FieldValue.newInstance().setNumber(result.code())
                   : unavailable(reason));
           break;
