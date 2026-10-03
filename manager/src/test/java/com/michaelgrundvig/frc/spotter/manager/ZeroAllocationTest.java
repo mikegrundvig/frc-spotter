@@ -211,15 +211,17 @@ class ZeroAllocationTest {
   void decodingTheStreamIntoTheSnapshotAllocatesNothing() {
     Board board = new Board("10.12.34.11", Settings.DEFAULTS);
     Link link = link(board);
-    // 20,000 messages to warm up (the JIT compiles the decoding), 100,000 measured.
-    Measured in = new Measured(stream(0, 20_000, false), stream(20_000, 100_000, false));
+    // 60,000 messages to warm up, 100,000 measured: the JIT compiles the decoding, and swaps
+    // read()'s
+    // loop to compiled code (at about 41,000), before anything's counted.
+    Measured in = new Measured(stream(0, 60_000, false), stream(60_000, 100_000, false));
     assertThatThrownBy(() -> link.read(in)).isInstanceOf(EOFException.class);
     assertThat(in.allocated()).as("bytes allocated decoding 100,000 messages").isZero();
 
     // And what it decoded is what was sent.
     board.update(clock.get(), 0, Settings.DEFAULTS.missing().toNanos());
-    // The last values sent: message 119,999 (120,000 is a heartbeat).
-    assertThat(value(board, "vision.health.fps").number()).isEqualTo(40 + 119_999 % 10);
+    // The last message sent, 160,000, is values.
+    assertThat(value(board, "vision.health.fps").number()).isEqualTo(40 + 160_000 % 10);
     assertThat(value(board, "vision.health.mode").text()).isEqualTo("tracking");
     assertThat(value(board, "vision.health.detector").level()).isEqualTo(Level.WARNING);
     assertThat(value(board, "vision.camera.product").unavailable())
@@ -251,44 +253,38 @@ class ZeroAllocationTest {
               ? heartbeat(i)
               : Spotter.Event.newInstance().setValues(values(i, i == 1, false));
     }
-    // Warm up on the same paths as what's measured, the robot's clock moving 1 ms a loop: over
-    // 60 s of it, so the agent's clock map has switched windows (each 10 s) before the JIT settles,
-    // not first while measured.
-    for (int i = 0; i < 60_000; i++) {
+    // One loop, warm-up and measurement alike, the robot's clock moving 1 ms a turn; counted from
+    // turn 60,000, after the agent's clock map has switched windows (each 10 s) a few times. Each
+    // turn's own calls are counted, from just before the event to just after the update: never the
+    // loop between turns, where the JIT swaps a hot loop to compiled code (about 41,000 turns after
+    // it starts, or after a branch it hadn't seen), which can cost the test's thread a few hundred
+    // bytes the manager never allocated.
+    int warm = 60_000;
+    int measured = 100_000;
+    long received = 0;
+    long ticked = 0;
+    long updated = 0;
+    int first = -1;
+    for (int i = 0; i < warm + measured; i++) {
+      long before = THREADS.getCurrentThreadAllocatedBytes();
       link.received(events[i < events.length ? i : 1 + i % (events.length - 1)]);
+      long afterEvent = THREADS.getCurrentThreadAllocatedBytes();
       clock.addAndGet(1_000_000);
+      long afterClock = THREADS.getCurrentThreadAllocatedBytes();
       manager.update();
-    }
-    // Counted after each call, so a failure says where: which call, at which loop, how much.
-    StringBuilder where = new StringBuilder(4096);
-    long start = THREADS.getCurrentThreadAllocatedBytes();
-    long last = start;
-    for (int i = 0; i < 100_000; i++) {
-      link.received(events[1 + i % (events.length - 1)]);
-      long received = THREADS.getCurrentThreadAllocatedBytes();
-      clock.addAndGet(1_000_000);
-      long ticked = THREADS.getCurrentThreadAllocatedBytes();
-      manager.update();
-      long updated = THREADS.getCurrentThreadAllocatedBytes();
-      if (updated != last && where.length() < 2000) {
-        where
-            .append(" loop ")
-            .append(i)
-            .append(": received ")
-            .append(received - last)
-            .append(", clock ")
-            .append(ticked - received)
-            .append(", update ")
-            .append(updated - ticked)
-            .append(';');
-        last = THREADS.getCurrentThreadAllocatedBytes();
-      } else {
-        last = updated;
+      long afterUpdate = THREADS.getCurrentThreadAllocatedBytes();
+      if (i >= warm && afterUpdate != before) {
+        received += afterEvent - before;
+        ticked += afterClock - afterEvent;
+        updated += afterUpdate - afterClock;
+        first = first < 0 ? i - warm : first;
       }
     }
-    long allocated = last - start;
-    assertThat(where.length() == 0 ? 0 : allocated)
-        .as("bytes allocated in 100,000 events and updates," + where)
+    assertThat(received + ticked + updated)
+        .as(
+            "bytes allocated in 100,000 events and updates: received %d, clock %d, update %d,"
+                + " the first at turn %d",
+            received, ticked, updated, first)
         .isZero();
     assertThat(manager.boards().get(0).connection()).isEqualTo(Connection.CONNECTED);
     assertThat(manager.alerts()).hasSize(1);
@@ -296,10 +292,9 @@ class ZeroAllocationTest {
 
   @Test
   void aBoardsThreadAllocatesLittleReadingARealAgentsStream(@TempDir Path dir) throws Exception {
-    // Decoding and publishing allocate nothing (above); what the board's thread does allocate is
-    // the
-    // JDK's HTTP client's, reading each event's chunk: a few dozen bytes. A bound, not a zero, so a
-    // regression shows without fighting the JDK.
+    // Decoding and publishing allocate nothing (above). What the board's thread does allocate is
+    // the JDK's HTTP client's, reading each event's chunk: a few dozen bytes. A bound, not a zero,
+    // so a regression shows without fighting the JDK.
     try (LocalAgent agent = new LocalAgent(dir, "vision-front")) {
       agent
           .pack("vision", ManagerTest.PACK)
