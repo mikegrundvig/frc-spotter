@@ -155,10 +155,13 @@ class MissingTest {
     Board vision = manager.boards().get(0);
     Board away = manager.boards().get(1);
     // One board has described itself; the other hasn't been reached yet, and may still: nothing.
+    // Its values collected: until then, fps is unavailable, which its missing rule makes failing.
     await(
         manager,
-        "vision described",
-        () -> vision.connection() == Connection.CONNECTED && !vision.values().isEmpty());
+        "vision's values",
+        () ->
+            vision.value("vision.health.fps") != null
+                && value(vision, "vision.health.fps").available());
     await(manager, "the other refused", () -> !away.why().isEmpty());
     assertThat(manager.alerts()).isEmpty();
 
