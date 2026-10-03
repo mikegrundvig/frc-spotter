@@ -476,13 +476,28 @@ final class Link implements Runnable, AgentClient.Challenges {
     return "it answered " + code + (message.isEmpty() ? "" : ": " + message);
   }
 
-  /** Why something failed, in a few words: its message, or its kind without one. */
+  /**
+   * Why something failed, in a few words: a connection's failure in plain ones ("connection
+   * refused: is frc-spotter running on it?"), else its message, or its kind without one.
+   */
   static String why(Throwable e) {
     Throwable cause = e.getCause();
     if (!(e instanceof CompletionException) || cause == null) {
       cause = e;
     }
     String message = cause.getMessage();
+    if (cause instanceof java.net.UnknownHostException) {
+      return "its name doesn't resolve" + (message == null ? "" : " (" + message.strip() + ")");
+    }
+    if (cause instanceof java.net.ConnectException) {
+      return "connection refused: is frc-spotter running on it?";
+    }
+    if (cause instanceof java.net.NoRouteToHostException) {
+      return "no route to it: is it on the robot's network?";
+    }
+    if (cause instanceof java.net.SocketTimeoutException) {
+      return "no answer in time: is it on the robot's network?";
+    }
     return message == null || message.isBlank()
         ? cause.getClass().getSimpleName()
         : message.strip();

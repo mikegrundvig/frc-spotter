@@ -234,5 +234,14 @@ class PartsTest {
     assertThat(Link.why(new java.io.IOException(" Connection refused ")))
         .isEqualTo("Connection refused");
     assertThat(Link.why(new java.io.EOFException())).isEqualTo("EOFException");
+    // A connection's failures, in plain words.
+    assertThat(Link.why(new java.net.UnknownHostException("vision-frnt")))
+        .isEqualTo("its name doesn't resolve (vision-frnt)");
+    assertThat(Link.why(new java.net.ConnectException("Connection refused")))
+        .isEqualTo("connection refused: is frc-spotter running on it?");
+    assertThat(Link.why(new java.net.NoRouteToHostException("No route to host")))
+        .isEqualTo("no route to it: is it on the robot's network?");
+    assertThat(Link.why(new java.net.SocketTimeoutException("Connect timed out")))
+        .isEqualTo("no answer in time: is it on the robot's network?");
   }
 }

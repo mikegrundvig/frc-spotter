@@ -136,7 +136,7 @@ until one changes. Robot code maps them onto its own, WPILib's `Alert` say: `FAI
 | Alert | Level | Says |
 |---|---|---|
 | A value at warning or failing | its level | `vision-front: Frames per second below 30 fps` |
-| A missing board | failing | `vision-front is missing: Connection refused` |
+| A missing board | failing | `vision-front is missing: connection refused: is frc-spotter running on it?` (or `its name doesn't resolve`, `no answer in time: is it on the robot's network?`) |
 | A board on another major version of the protocol | failing | `vision-front: it speaks Spotter protocol 3.0, the robot 2.0` |
 | A board that describes more than the manager takes | failing | `vision-front describes 2049 values (at most 2048), more than the manager takes: its values and actions aren't used` |
 | More than 32 values at warning or failing on one board | the worst of the rest | the failing ones first, then `vision-front: 9 more values at warning or failing` |
