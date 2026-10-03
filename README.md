@@ -43,7 +43,8 @@ sudo systemctl restart frc-spotter
 (installed, root's) or `/var/lib/frc-spotter/packs/` (pushed by the robot). The agent reads them as
 it starts (`sudo systemctl restart frc-spotter` after changing them); an installed pack that anyone
 but root could change, or that names such a program, is ignored, and the description's `problems`
-says why. `docs/agent.md` has the format. The catalog, `packs/`, has ready-made packs to copy in
+says why. `docs/agent.md` has the format; `spotter-tools check` (`docs/tools.md`) checks a pack
+on any computer, and `spotter-tools status` reads a board. The catalog, `packs/`, has ready-made packs to copy in
 (`debian` for a board's own health and journal, `photonvision`, `raspberry-pi`); none is installed
 by default.
 
@@ -72,6 +73,8 @@ tmpfiles entry, and install script. `SHA256SUMS` has their checksums. Image buil
 - `protocol/`: the protocol (`spotter.proto`) and the code the agent and the manager share;
 - `agent/`: the agent, its systemd unit, polkit rules, and package (`docs/agent.md`);
 - `manager/`: the robot program's manager (`docs/robot.md`);
+- `tools/`: the tools for a pack's author and a board's installer: check packs, read a board
+  (`docs/tools.md`);
 - `packs/`: the catalog of packs to copy in (`packs/README.md`);
 - `harness/`: container tests of the agent and the catalog's packs, and a library a pack's own
   tests use.

@@ -27,6 +27,9 @@ project(":spotter-agent").projectDir = file("agent")
 // The robot program's manager: each agent's stream, judged, as robot code reads it.
 include "spotter-manager"
 project(":spotter-manager").projectDir = file("manager")
+// The tools a pack's author and a board's installer run: check a folder of packs, read a board.
+include "spotter-tools"
+project(":spotter-tools").projectDir = file("tools")
 // The container tests: the agent installed from its package in a Java-less Debian 13 container, with
 // a minimal test client playing the robot.
 include "spotter-harness"

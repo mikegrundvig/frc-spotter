@@ -121,7 +121,7 @@ final class Packs {
   }
 
   /** The packs, in order, as many as a board may have: one that would pass a bound is ignored. */
-  private static List<Pack> bounded(Iterable<Pack> packs, List<String> problems) {
+  static List<Pack> bounded(Iterable<Pack> packs, List<String> problems) {
     List<Pack> kept = new ArrayList<>();
     int values = 0;
     int actions = Describer.BUILT_IN.size();

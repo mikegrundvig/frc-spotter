@@ -1,0 +1,88 @@
+// Spotter's tools for a pack's author and a board's installer: a plain Java command line, with no
+// Gradle in it, that a robot program's build runs (a JavaExec), as CI and a laptop do.
+//
+//   java -jar spotter-tools-all.jar check <folder>...   packs, read as the agent reads them
+//   java -jar spotter-tools-all.jar status <board>      a board's problems, values, identity, packs
+//
+// check reads packs with the agent's own reader (:spotter-agent's PackCheck); status reads a board
+// with the robot's own manager (:spotter-manager). Published as com.michaelgrundvig.frc:spotter-tools,
+// its jar the runnable -all.jar, with everything inside and no dependencies of its own.
+
+plugins {
+    id "java"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// Java 17 bytecode and APIs, as the agent's: see agent/build.gradle.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(":spotter-agent")
+    implementation project(":spotter-manager")
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+    // A real agent in the test's own process, for status to read.
+    testImplementation testFixtures(project(":spotter-agent"))
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+    // The catalog's packs (packs/), which the tests check as a robot program's build would.
+    def catalog = rootProject.file("packs")
+    inputs.files(fileTree(catalog) { exclude "**/build/**" })
+    .withPropertyName("catalog").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty "spotter.catalog", catalog.absolutePath
+}
+
+// spotter-tools-all.jar: the tools with everything they need, run with java -jar on Java 17 or
+// newer, on Windows, macOS or Linux.
+def allJar = tasks.register("allJar", Jar) {
+    group = "build"
+    description = "The tools with everything they need: java -jar spotter-tools-all.jar."
+    archiveFileName = "spotter-tools-all.jar"
+    manifest {
+        attributes("Main-Class": "com.michaelgrundvig.frc.spotter.tools.SpotterTools",
+        "Implementation-Version": project.version)
+    }
+    from(sourceSets.main.output)
+    dependsOn configurations.runtimeClasspath
+    from({
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }) {
+        exclude "META-INF/MANIFEST.MF", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA",
+                "module-info.class", "META-INF/versions/*/module-info.class"
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+tasks.named("assemble") {
+    dependsOn allJar
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
+apply from: rootProject.file("gradle/quality.gradle")
+
+// Published as com.michaelgrundvig.frc:spotter-tools (gradle/publishing.gradle): its jar the -all.jar,
+// so a robot program's build needs it alone.
+ext.mavenDescription = "Spotter's tools, for an FRC robot program's build and a laptop: check a folder of packs as the agent reads them, and read a board's status. Runnable: java -jar."
+ext.mavenJar = allJar
+apply from: rootProject.file("gradle/publishing.gradle")

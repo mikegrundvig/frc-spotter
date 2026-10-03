@@ -32,5 +32,6 @@ its name, or its values' ids change with it.
 ## A team's own
 
 A pack for the team's own program follows the same format (`docs/agent.md`, *The format*): a
-folder, `pack.yaml` beside the scripts its commands run (`./name`). The design's `detector`
+folder, `pack.yaml` beside the scripts its commands run (`./name`). `spotter-tools check
+<folder>` (`docs/tools.md`) reads it as a board's agent would, on any computer. The design's `detector`
 example (`agent/src/test/resources/packs/detector/`) shows one with a log and actions.

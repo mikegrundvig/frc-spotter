@@ -128,9 +128,27 @@ final class PackReader {
 
   private final String source;
   private final List<String> problems = new ArrayList<>();
+  private final @Nullable Checks checks;
 
-  private PackReader(String source) {
+  private PackReader(String source, @Nullable Checks checks) {
     this.source = source;
+    this.checks = checks;
+  }
+
+  /**
+   * What a check off any board looks for, beyond what the agent refuses (spotter-tools' check):
+   * mistakes the agent takes but a pack shouldn't have, each a problem at its line, and notes. Null
+   * on a board, where only what the agent refuses counts.
+   */
+  interface Checks {
+    /**
+     * Why a program a pack names as its own ({@code ./name}, relative to its folder) won't run once
+     * pushed; null when it will.
+     */
+    @Nullable String program(String relative);
+
+    /** A note at its line: worth knowing, never a problem. */
+    void note(String note);
   }
 
   /**
@@ -142,8 +160,19 @@ final class PackReader {
    * @throws PackException listing every problem, each with its file and line
    */
   static Pack read(String yaml, String folder, boolean pushed) {
+    return read(yaml, folder, pushed, null);
+  }
+
+  /**
+   * Reads and checks a pack, and, given checks, looks for what a check off any board looks for
+   * besides.
+   *
+   * @param checks what more to look for; null for none, as on a board
+   * @throws PackException listing every problem, each with its file and line
+   */
+  static Pack read(String yaml, String folder, boolean pushed, @Nullable Checks checks) {
     String source = folder + "/" + Pack.FILE;
-    PackReader reader = new PackReader(source);
+    PackReader reader = new PackReader(source, checks);
     Optional<Node> root;
     try {
       LoadSettings settings = settings(source);
@@ -304,6 +333,19 @@ final class PackReader {
       for (NodeTuple each : entries((MappingNode) declared.getValueNode())) {
         String name = keyText(each);
         Fill.Part part = parts.get(name);
+        if (part != null && checks != null) {
+          checks.note(
+              at(each)
+                  + "collector "
+                  + id
+                  + "'s field "
+                  + name
+                  + " is its command's own "
+                  + (part == Fill.Part.CODE
+                      ? "exit code or HTTP status"
+                      : part == Fill.Part.WHOLE ? "whole output" : "outcome")
+                  + ", not a key of its output");
+        }
         // A named part is the command's, as an action's: a value's types are text and number.
         Field field =
             part == null
@@ -568,6 +610,12 @@ final class PackReader {
       problem(key, "run names a program first");
       return null;
     }
+    if (checks != null && argv.get(0).startsWith("./")) {
+      String why = checks.program(argv.get(0).substring(2));
+      if (why != null) {
+        problem(key, why);
+      }
+    }
     return new Command.Run(argv);
   }
 
@@ -660,6 +708,9 @@ final class PackReader {
       problem(entry, "field \"" + name + "\" isn't a name: letters, digits, and . _ -");
       return null;
     }
+    if (checks != null && name.contains(".")) {
+      problem(entry, dotted("field", name));
+    }
     if (!(entry.getValueNode() instanceof MappingNode)) {
       problem(entry, "field " + name + " is a mapping: {type: ..., label: ...}");
       return null;
@@ -730,6 +781,18 @@ final class PackReader {
         }
       }
     }
+    if (checks != null && type == Spotter.FieldType.FIELD_TYPE_STATUS) {
+      for (String compared : List.of("equals", "notEquals")) {
+        NodeTuple at = keys.get(compared);
+        if (at != null) {
+          problem(
+              at,
+              compared
+                  + " on a status is never applied: a status's level is its script's, and only"
+                  + " missing applies to one");
+        }
+      }
+    }
     NodeTuple equals = keys.get("equals");
     if (equals != null) {
       Spotter.Scalar scalar = scalar(equals.getValueNode(), type, "equals");
@@ -776,6 +839,8 @@ final class PackReader {
     String id = text(key.getValueNode(), "id").orElse("");
     if (!ID.matcher(id).matches()) {
       problem(key, what + " id \"" + id + "\" isn't a name: letters, digits, and . _ -");
+    } else if (checks != null && id.contains(".")) {
+      problem(key, dotted(what + " id", id));
     }
     return id;
   }
@@ -969,6 +1034,20 @@ final class PackReader {
   }
 
   // ---- problems ----
+
+  /** Why a name with a dot is a mistake: a value's id joins names with dots. */
+  private static String dotted(String what, String name) {
+    return what
+        + " \""
+        + name
+        + "\" has a dot, so its values' ids (pack.collector.field) can read two ways: use - or _";
+  }
+
+  /** Where a node is, as a problem starts: {@code file:line: }. */
+  private String at(NodeTuple entry) {
+    int line = entry.getKeyNode().getStartMark().map(m -> m.getLine() + 1).orElse(0);
+    return source + (line > 0 ? ":" + line : "") + ": ";
+  }
 
   private void problem(@Nullable NodeTuple entry, String message) {
     problem(entry == null ? null : entry.getKeyNode(), message);

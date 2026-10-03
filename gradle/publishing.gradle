@@ -1,7 +1,8 @@
-// Publishing a library the robot program uses (spotter-protocol, spotter-manager) to Spotter's Maven
-// repository: the static one on the gh-pages branch, served by GitHub Pages at
+// Publishing what a robot program uses (spotter-protocol, spotter-manager, spotter-tools) to Spotter's
+// Maven repository: the static one on the gh-pages branch, served by GitHub Pages at
 // https://mikegrundvig.github.io/frc-spotter/maven, as com.michaelgrundvig.frc:<project>. A project
-// applies this with ext.mavenDescription set. The release workflow checks out gh-pages and publishes into it
+// applies this with ext.mavenDescription set; and with ext.mavenJar, a jar task whose jar is
+// published in place of the project's own, with no dependencies (spotter-tools: its -all.jar). The release workflow checks out gh-pages and publishes into it
 // (-PpagesRepository=<its maven folder>); Gradle reads the maven-metadata.xml already there, so a
 // new version is added and the old ones kept. Each file gets its .md5, .sha1, .sha256, and .sha512.
 //
@@ -17,7 +18,13 @@ java {
 publishing {
     publications {
         maven(MavenPublication) {
-            from components.java
+            if (project.ext.has("mavenJar")) {
+                artifact project.ext.mavenJar
+                artifact tasks.named("sourcesJar")
+                artifact tasks.named("javadocJar")
+            } else {
+                from components.java
+            }
             groupId = project.group
             artifactId = project.name
             pom {
