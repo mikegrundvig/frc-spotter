@@ -1,9 +1,9 @@
 package com.michaelgrundvig.frc.spotter.manager;
 
 /**
- * An alert, as data: robot code maps each onto its own (a WPILib {@code Alert}, {@code kError} for
- * failing and {@code kWarning} for warning). The manager keeps the current set ({@link
- * Manager#alerts}):
+ * An alert, as data: robot code maps each onto its own (WPILib 2027's {@code Alert}: {@code
+ * Level.HIGH} for failing, {@code Level.MEDIUM} for warning). The manager keeps the current set
+ * ({@link Manager#alerts}):
  *
  * <ul>
  *   <li>one per value at warning or failing, in its pack's words;

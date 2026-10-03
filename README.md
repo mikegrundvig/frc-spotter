@@ -43,9 +43,10 @@ The robot program's manager, `:manager` (`com.michaelgrundvig.frc:spotter-manage
 repository at `https://mikegrundvig.github.io/frc-spotter/maven`), keeps each agent's stream open on
 a thread of its own, judges each value against its limits (or robot code's), and gives the robot
 loop each board's state and the current alerts as data, without waiting on the network or making
-garbage. Running actions, paging logs, and pushing the team's packs come next. It needs nothing but
-`:protocol` (`spotter-protocol`): the generated messages, and the pack hash both sides compute.
-0.3's client, and the `spotter-api` and `spotter-client` artifacts, are gone with protocol 1.
+garbage. It pages a board's logs, runs its actions, pushes the team's packs (off the field), and
+signs its writes for boards that require it. It needs nothing but `:protocol` (`spotter-protocol`):
+the generated messages, and the pack hash both sides compute. `docs/robot.md` has it all. 0.3's
+client, and the `spotter-api` and `spotter-client` artifacts, are gone with protocol 1.
 
 ## Releases
 

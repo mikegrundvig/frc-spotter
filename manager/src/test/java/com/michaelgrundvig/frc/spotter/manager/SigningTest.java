@@ -155,6 +155,27 @@ class SigningTest {
   }
 
   @Test
+  void aKeyOpensslMadeIsReadAndItsPublicKeyIsOpensslsToo() throws Exception {
+    // As docs/robot.md says to make one; skipped where openssl isn't installed.
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        Files.isExecutable(Path.of("/usr/bin/openssl")), "openssl isn't installed");
+    Path made = dir.resolve("openssl.key");
+    run("openssl", "genpkey", "-algorithm", "ed25519", "-out", made.toString());
+    String expected =
+        Base64.getEncoder()
+            .encodeToString(
+                run("openssl", "pkey", "-in", made.toString(), "-pubout", "-outform", "DER"));
+    assertThat(Signer.read(made).publicKey()).isEqualTo(expected);
+  }
+
+  private static byte[] run(String... command) throws Exception {
+    Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+    byte[] out = process.getInputStream().readAllBytes();
+    assertThat(process.waitFor()).as(String.join(" ", command)).isZero();
+    return out;
+  }
+
+  @Test
   void aKeysPublicKeyIsWorkedOutFromItAsTheBoardListsIt() throws Exception {
     KeyPair pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
     String expected = Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
