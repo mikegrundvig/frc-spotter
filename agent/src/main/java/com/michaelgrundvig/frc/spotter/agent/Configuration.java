@@ -42,12 +42,21 @@ record Configuration(
       problems.add(
           AgentConfig.PATH + ": can't be read, so every write is refused: " + e.getMessage());
     }
-    Packs.Loaded packs =
-        Packs.load(
-            host,
-            !unreadable.isEmpty()
-                ? "agent.json can't be read"
-                : config.acceptPushes() ? "" : "agent.json refuses pushes");
+    String refused =
+        !unreadable.isEmpty()
+            ? "agent.json can't be read"
+            : config.acceptPushes() ? "" : "agent.json refuses pushes";
+    // The last good start (LastGood): pushed packs are loaded behind a marker, and set aside for
+    // a start that finds the last one with them didn't stay up.
+    boolean setAside = false;
+    try {
+      if (refused.isEmpty() && !host.list(Packs.PUSHED).isEmpty()) {
+        setAside = !LastGood.begin(host);
+      }
+    } catch (IOException e) {
+      // The folder can't be read: Packs.load says so.
+    }
+    Packs.Loaded packs = Packs.load(host, refused, setAside);
     problems.addAll(packs.problems());
     return new Configuration(config, packs, problems, unreadable);
   }

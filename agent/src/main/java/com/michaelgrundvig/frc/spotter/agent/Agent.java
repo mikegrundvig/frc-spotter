@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -40,6 +42,7 @@ final class Agent implements AutoCloseable {
   private final @Nullable String controllerOverride;
   private Spotter.@Nullable Description description;
   private long describedNanos;
+  private volatile boolean closed;
 
   /**
    * An agent on a board.
@@ -76,12 +79,19 @@ final class Agent implements AutoCloseable {
 
   /**
    * Takes up the runs a previous agent kept, tidies pushed bundles, and starts the collectors on
-   * their schedules.
+   * their schedules; once it has been up {@link LastGood#HEALTHY}, this start counts as good.
    */
   void start() {
     runs.restore();
     push.tidy();
     collectors.start();
+    CompletableFuture.delayedExecutor(LastGood.HEALTHY.toMillis(), TimeUnit.MILLISECONDS)
+        .execute(
+            () -> {
+              if (!closed) {
+                LastGood.healthy(host);
+              }
+            });
   }
 
   /** The settings and packs it read. */
@@ -233,6 +243,7 @@ final class Agent implements AutoCloseable {
 
   @Override
   public void close() {
+    closed = true;
     collectors.close();
     runs.close();
     commands.close();

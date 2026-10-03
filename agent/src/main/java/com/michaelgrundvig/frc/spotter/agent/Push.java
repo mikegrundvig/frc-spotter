@@ -102,6 +102,7 @@ final class Push {
       Files.deleteIfExists(received);
     }
     host.log("Packs pushed (" + PackHash.of(unpacked) + "): restarting to read them");
+    LastGood.pushed(host);
     tidy();
   }
 

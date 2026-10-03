@@ -74,12 +74,27 @@ final class Packs {
    * @param refused why it refuses pushed packs; empty when it accepts them
    */
   static Loaded load(Host host, String refused) {
+    return load(host, refused, false);
+  }
+
+  /**
+   * Reads the board's packs: its installed ones, and its pushed ones unless it refuses them or sets
+   * them aside for this start ({@link LastGood}), when their hash is still what's on its disk.
+   *
+   * @param refused why it refuses pushed packs; empty when it accepts them
+   * @param setAside whether the last start with its pushed packs didn't stay up
+   */
+  static Loaded load(Host host, String refused, boolean setAside) {
     List<String> problems = new ArrayList<>();
     Map<String, Optional<Pack>> installed = folder(host, INSTALLED, false, problems);
     Map<String, Optional<Pack>> pushed = Map.of();
     String hash = "";
     if (refused.isEmpty()) {
-      pushed = folder(host, PUSHED, true, problems);
+      if (setAside) {
+        problems.add(LastGood.setAside());
+      } else {
+        pushed = folder(host, PUSHED, true, problems);
+      }
       try {
         hash = PackHash.of(host.path(PUSHED));
       } catch (IOException e) {
