@@ -4,8 +4,8 @@ name: Release
 # release, with their SHA-256 checksums: the .deb and the tarball for 64-bit ARM and x86 Linux, each
 # built on its own architecture (jlink links the runtime of the computer it runs on), and the
 # -all.jar, alone and with its files. Image builders pin a release by its version and checksums.
-# It also publishes the library a robot program uses, com.michaelgrundvig.frc:spotter-protocol, with
-# its sources, javadoc, and checksums, into the static Maven repository on the gh-pages branch
+# It also publishes the libraries a robot program uses, com.michaelgrundvig.frc:spotter-protocol and
+# spotter-manager, with their sources, javadoc, and checksums, into the static Maven repository on the gh-pages branch
 # (maven/), which GitHub Pages serves at https://mikegrundvig.github.io/frc-spotter/maven: the new
 # version added, the old ones kept.
 on:
@@ -74,7 +74,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --verify-tag --title "Spotter $GITHUB_REF_NAME" \
-            --notes "The coprocessor agent $GITHUB_REF_NAME: its .deb and tarball for arm64 and amd64 Linux, and the -all.jar for a board with Java 17 or newer, alone and with its unit, polkit rules, and install script. SHA256SUMS has every file's checksum. The protocol's library, com.michaelgrundvig.frc:spotter-protocol ${GITHUB_REF_NAME#v}, is in the Maven repository at https://mikegrundvig.github.io/frc-spotter/maven."
+            --notes "The coprocessor agent $GITHUB_REF_NAME: its .deb and tarball for arm64 and amd64 Linux, and the -all.jar for a board with Java 17 or newer, alone and with its unit, polkit rules, and install script. SHA256SUMS has every file's checksum. The robot's libraries, com.michaelgrundvig.frc:spotter-manager and spotter-protocol ${GITHUB_REF_NAME#v}, are in the Maven repository at https://mikegrundvig.github.io/frc-spotter/maven."
 
   maven:
     name: Maven
@@ -100,7 +100,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - name: Publish into the repository
         run: |
-          ./gradlew :protocol:publishAllPublicationsToPagesRepository \
+          ./gradlew :protocol:publishAllPublicationsToPagesRepository :manager:publishAllPublicationsToPagesRepository \
             "-PagentVersion=${GITHUB_REF_NAME#v}" "-PpagesRepository=$GITHUB_WORKSPACE/pages/maven"
           find pages/maven -path "*/${GITHUB_REF_NAME#v}/*" -type f | sort
       - name: Push gh-pages
@@ -109,5 +109,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add maven
-          git commit -m "Publish spotter-protocol ${GITHUB_REF_NAME#v}"
+          git commit -m "Publish spotter-protocol and spotter-manager ${GITHUB_REF_NAME#v}"
           git push origin gh-pages
