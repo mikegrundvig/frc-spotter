@@ -7,6 +7,7 @@ import com.michaelgrundvig.frc.spotter.manager.Level;
 import com.michaelgrundvig.frc.spotter.manager.LogQuery;
 import com.michaelgrundvig.frc.spotter.manager.Manager;
 import com.michaelgrundvig.frc.spotter.manager.Robot;
+import com.michaelgrundvig.frc.spotter.manager.Run;
 import com.michaelgrundvig.frc.spotter.manager.Value;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.nio.charset.StandardCharsets;
@@ -48,6 +49,12 @@ class CatalogContainerTest {
     network = TestNetwork.create();
     coprocessor = new Coprocessor(TestImages.catalog(), network, 81, "vision-catalog");
     coprocessor.start();
+    // Writes from the test, as the robot controller: the photonvision pack's actions.
+    try {
+      coprocessor.restartAgent("--controller=" + coprocessor.robotAddress());
+    } catch (java.io.IOException e) {
+      throw new java.io.UncheckedIOException(e);
+    }
   }
 
   @AfterAll
@@ -211,6 +218,9 @@ class CatalogContainerTest {
    */
   private Board restarted() throws Exception {
     closeTheManager();
+    // Restarted this often, the agent would pass systemd's start limit (five in ten seconds):
+    // reset-failed clears its count.
+    coprocessor.run("systemctl", "reset-failed", "frc-spotter.service");
     coprocessor.run("systemctl", "restart", "frc-spotter.service");
     coprocessor.awaitAgent();
     return connected();
@@ -356,5 +366,47 @@ class CatalogContainerTest {
     assertThat(log.getEntries())
         .extracting(Spotter.LogEntry::getMessage)
         .anyMatch(message -> message.contains("PhotonVision stand-in"));
+  }
+
+  @Test
+  void photonvisionsActionsAreAnsweredAsPhotonVisionAnswersThem() throws Exception {
+    Board board = connected();
+    Run restart = board.run("photonvision.restart").whenDone().get(30, TimeUnit.SECONDS);
+    assertThat(restart.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+    assertThat(response(restart, "status").number()).isEqualTo(204);
+    assertThat(response(restart, "status").level()).isEqualTo(Level.OK);
+
+    Run export = board.run("photonvision.export").whenDone().get(30, TimeUnit.SECONDS);
+    assertThat(response(export, "status").number()).isEqualTo(200);
+    assertThat(response(export, "status").level()).isEqualTo(Level.OK);
+    assertThat(new String(export.file("body").get(30, TimeUnit.SECONDS), StandardCharsets.UTF_8))
+        .isEqualTo("PK its settings");
+
+    // A field layout, as a form's field "data" whose file is named layout.json: taken.
+    String layout = "{\"tags\": [], \"field\": {\"length\": 16.54, \"width\": 8.07}}";
+    Run sent = board.run("photonvision.layout", layout).whenDone().get(30, TimeUnit.SECONDS);
+    assertThat(response(sent, "status").number()).isEqualTo(200);
+    assertThat(response(sent, "status").level()).isEqualTo(Level.OK);
+    assertThat(response(sent, "body").text())
+        .isEqualTo("Successfully saved the uploaded FieldLayout, rebooting...");
+    assertThat(coprocessor.run("cat", "/run/stand-in-layout"))
+        .contains("name=\"data\"; filename=\"layout.json\"")
+        .contains(layout);
+
+    // The file named after the field, as before a pack could name it: refused, as PhotonVision
+    // refuses it.
+    assertThat(
+            coprocessor.run(
+                "curl",
+                "-s",
+                "-F",
+                "data=@/etc/hostname;filename=data",
+                "http://localhost:5800/api/settings/fieldLayout"))
+        .isEqualTo(
+            "The uploaded file was not of type 'json'. The uploaded file should be a .json file.");
+  }
+
+  private static Value response(Run run, String name) {
+    return Objects.requireNonNull(run.response(name), () -> run + " has no " + name);
   }
 }

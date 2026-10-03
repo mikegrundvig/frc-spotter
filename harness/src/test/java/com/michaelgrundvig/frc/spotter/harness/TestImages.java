@@ -81,8 +81,8 @@ final class TestImages {
    * The agent with the catalog's packs, as a board's installer puts them: each pack's folder in
    * /etc/frc-spotter/packs, root's; the debian pack's root timer copied to /etc/systemd/system and
    * enabled, as its README has an installer do; PhotonVision's service as a stand-in answering on
-   * 5800, with a settings file; and stand-ins for nvme-cli, chronyc, timedatectl and journalctl in
-   * /opt/stand-ins, off the PATH, for the scripts' parsing.
+   * 5800 as PhotonVision does, with a settings file; and stand-ins for nvme-cli, chronyc,
+   * timedatectl and journalctl in /opt/stand-ins, off the PATH, for the scripts' parsing.
    */
   static String catalog() {
     Map<String, Object> context = new LinkedHashMap<>();
@@ -112,8 +112,7 @@ final class TestImages {
         RUN mv /opt/stand-ins/photonvision.service /etc/systemd/system/ \\
          && chmod 0644 /etc/systemd/system/photonvision.service && chmod 0755 /opt/stand-ins/* \\
          && systemctl enable photonvision.service \\
-         && mkdir -p /srv/photonvision /opt/photonvision/photonvision_config \\
-         && printf '<html>PhotonVision</html>' > /srv/photonvision/index.html \\
+         && mkdir -p /opt/photonvision/photonvision_config \\
          && printf 'its settings' > /opt/photonvision/photonvision_config/photon.sqlite \\
          && chmod 0644 /opt/photonvision/photonvision_config/photon.sqlite
         RUN mkdir -p /data/frc-spotter

@@ -1,7 +1,7 @@
 # PhotonVision: whether its service runs and it answers, and its settings' fingerprint. Restart it,
-# and export its settings. Needs nothing beyond PhotonVision's own image. Checked against
-# PhotonVision's source at the commit WPILib 2027's alpha PhotonLib names (71416112), not on a
-# board: README.md says what was and what wasn't.
+# export its settings, and send it a field layout. Needs nothing beyond PhotonVision's own image.
+# Checked against PhotonVision's source at the commit WPILib 2027's alpha PhotonLib names
+# (71416112), not on a board: README.md says what was and what wasn't.
 pack: photonvision
 version: 1.0.0
 collectors:
@@ -39,3 +39,11 @@ actions:
     response:
       status: {type: number, fail: {notEquals: 200}}
       body: {type: file, name: photonvision-settings.zip}
+  - id: layout
+    label: Send field layout
+    http: {post: "http://localhost:5800/api/settings/fieldLayout", form: {field: data, filename: layout.json}}
+    input: file
+    confirm: Send this layout? PhotonVision restarts to apply it.
+    response:
+      status: {type: number, fail: {notEquals: 200}}
+      body: {type: text}

@@ -117,8 +117,7 @@ class CatalogTest {
         .containsExactly("photonvision.log");
     assertThat(description.getActions())
         .extracting(Spotter.ActionDeclaration::getId)
-        .contains("photonvision.restart", "photonvision.export")
-        .doesNotContain("photonvision.layout");
+        .contains("photonvision.restart", "photonvision.export", "photonvision.layout");
   }
 
   @Test
