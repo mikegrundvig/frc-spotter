@@ -21,18 +21,21 @@ if [ -d "$here/usr" ]; then
   cp -R "$here/usr" "$root/"
 else
   mkdir -p "$lib/bin" "$root/usr/lib/systemd/system" "$root/usr/lib/sysusers.d" \
-    "$root/usr/share/polkit-1/rules.d"
+    "$root/usr/lib/tmpfiles.d" "$root/usr/share/polkit-1/rules.d"
   jar=$(ls "$here"/frc-spotter-*-all.jar | head -n 1)
   install -m 0644 "$jar" "$lib/frc-spotter.jar"
   install -m 0755 "$here/frc-spotter" "$lib/bin/"
   install -m 0644 "$here/frc-spotter.service" "$root/usr/lib/systemd/system/"
   install -m 0644 "$here/frc-spotter.sysusers" \
     "$root/usr/lib/sysusers.d/frc-spotter.conf"
+  install -m 0644 "$here/frc-spotter.tmpfiles" \
+    "$root/usr/lib/tmpfiles.d/frc-spotter.conf"
   install -m 0644 "$here"/*-frc-spotter.rules "$root/usr/share/polkit-1/rules.d/"
 fi
 mkdir -p "$root/etc/frc-spotter/packs"
 if [ "$root" = / ]; then
   systemd-sysusers frc-spotter.conf
+  systemd-tmpfiles --create frc-spotter.conf || true
   systemctl enable frc-spotter.service
   if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
@@ -40,6 +43,7 @@ if [ "$root" = / ]; then
   fi
 else
   systemd-sysusers --root="$root" frc-spotter.conf
+  systemd-tmpfiles --root="$root" --create frc-spotter.conf || true
   systemctl --root="$root" enable frc-spotter.service
 fi
 echo "install.sh: the coprocessor agent is installed; packs are folders in /etc/frc-spotter/packs/"

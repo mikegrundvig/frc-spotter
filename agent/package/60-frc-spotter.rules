@@ -1,13 +1,15 @@
-// The coprocessor agent's soft-off (docs/agent.md): its account may power the computer off,
-// also while someone is logged in over SSH. Its POST /v1/shutdown takes requests from its
-// controller only. The agent package's 99 refuses its account everything else: packs bring no
-// rules.
+// The coprocessor agent's built-in actions (docs/agent.md): its account may power the computer off
+// (core.power-off) or reboot it (core.reboot), also while someone is logged in over SSH. It takes
+// them from the robot controller only. The agent package's 99 refuses its account everything else:
+// packs bring no rules.
 polkit.addRule(function (action, subject) {
   if (subject.user !== "frc-spotter") {
     return polkit.Result.NOT_HANDLED;
   }
   if (action.id === "org.freedesktop.login1.power-off" ||
-      action.id === "org.freedesktop.login1.power-off-multiple-sessions") {
+      action.id === "org.freedesktop.login1.power-off-multiple-sessions" ||
+      action.id === "org.freedesktop.login1.reboot" ||
+      action.id === "org.freedesktop.login1.reboot-multiple-sessions") {
     return polkit.Result.YES;
   }
   return polkit.Result.NOT_HANDLED;

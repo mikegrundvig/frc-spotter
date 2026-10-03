@@ -86,8 +86,9 @@ def agentVersion = (project.findProperty("agentVersion") ?: "0.1.0").toString()
 def debianArch = [amd64: "amd64", x86_64: "amd64", aarch64: "arm64", arm64: "arm64"]
 .get(System.getProperty("os.arch"), System.getProperty("os.arch"))
 // The runtime's modules: the agent's, and no more (jdeps --print-module-deps on its jar). QuickBuffers
-// reads and writes through sun.misc.Unsafe, which is jdk.unsupported's.
-def runtimeModules = "java.base,jdk.httpserver,jdk.unsupported"
+// reads and writes through sun.misc.Unsafe, which is jdk.unsupported's; a push's zip is read by
+// jdk.zipfs, which keeps each file's permissions.
+def runtimeModules = "java.base,jdk.httpserver,jdk.unsupported,jdk.zipfs"
 def packageRoot = layout.buildDirectory.dir("package/root")
 
 def agentRuntime = tasks.register("agentRuntime", Exec) {
@@ -121,6 +122,10 @@ def agentPackageTask = tasks.register("agentPackage", Sync) {
     }
     from("package/frc-spotter.sysusers") {
         into "usr/lib/sysusers.d"
+        rename { "frc-spotter.conf" }
+    }
+    from("package/frc-spotter.tmpfiles") {
+        into "usr/lib/tmpfiles.d"
         rename { "frc-spotter.conf" }
     }
     from("package") {
@@ -218,7 +223,7 @@ def agentJarReleaseTask = tasks.register("agentJarRelease", Sync) {
             unix("0755")
         }
     }
-    from("package") { include "*.rules", "*.service", "*.sysusers" }
+    from("package") { include "*.rules", "*.service", "*.sysusers", "*.tmpfiles" }
 }
 
 // The -all.jar with its files, as one download: unpack it and run its install.sh.
