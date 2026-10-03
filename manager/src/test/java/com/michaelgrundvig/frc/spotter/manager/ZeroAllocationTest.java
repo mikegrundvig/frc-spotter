@@ -259,14 +259,37 @@ class ZeroAllocationTest {
       clock.addAndGet(1_000_000);
       manager.update();
     }
+    // Counted after each call, so a failure says where: which call, at which loop, how much.
+    StringBuilder where = new StringBuilder(4096);
     long start = THREADS.getCurrentThreadAllocatedBytes();
+    long last = start;
     for (int i = 0; i < 100_000; i++) {
       link.received(events[1 + i % (events.length - 1)]);
+      long received = THREADS.getCurrentThreadAllocatedBytes();
       clock.addAndGet(1_000_000);
+      long ticked = THREADS.getCurrentThreadAllocatedBytes();
       manager.update();
+      long updated = THREADS.getCurrentThreadAllocatedBytes();
+      if (updated != last && where.length() < 2000) {
+        where
+            .append(" loop ")
+            .append(i)
+            .append(": received ")
+            .append(received - last)
+            .append(", clock ")
+            .append(ticked - received)
+            .append(", update ")
+            .append(updated - ticked)
+            .append(';');
+        last = THREADS.getCurrentThreadAllocatedBytes();
+      } else {
+        last = updated;
+      }
     }
-    long allocated = THREADS.getCurrentThreadAllocatedBytes() - start;
-    assertThat(allocated).as("bytes allocated in 100,000 events and updates").isZero();
+    long allocated = last - start;
+    assertThat(where.length() == 0 ? 0 : allocated)
+        .as("bytes allocated in 100,000 events and updates," + where)
+        .isZero();
     assertThat(manager.boards().get(0).connection()).isEqualTo(Connection.CONNECTED);
     assertThat(manager.alerts()).hasSize(1);
   }
