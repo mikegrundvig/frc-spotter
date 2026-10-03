@@ -1,12 +1,13 @@
 name: CI
 
 # Runs ./gradlew ci, the same command anyone runs before pushing: formatting, static analysis,
-# tests, and coverage for every project; the checks live in Gradle, not here. x86 Linux only: Docker is there for the container tests (the
-# agent's .deb on Debian 13 under systemd, Toxiproxy, the -all.jar on Java 17), and they must run,
-# not skip (CI=true). The .deb built here is x86's; an ARM one is built on ARM.
+# tests, and coverage for every project; the checks live in Gradle, not here. On every branch's
+# pushes, and pull requests. x86 Linux only: Docker is there for the container tests (the agent's
+# .deb on Debian 13 under systemd, the -all.jar on Java 17), and they must run, not skip (CI=true).
+# The .deb built here is x86's; an ARM one is built on ARM.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
