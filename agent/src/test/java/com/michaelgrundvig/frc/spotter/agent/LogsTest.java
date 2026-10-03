@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -273,5 +274,16 @@ class LogsTest {
     assertThat(Logs.slice(all, paging("level", "error")).getEntries())
         .extracting(Spotter.LogEntry::getCursor)
         .containsExactly("5");
+  }
+
+  @Test
+  void aCommandsOutputIsCutToTheLinesAPageNeedsBeforeAnyIsRead() throws Exception {
+    byte[] output = "1\n\n  \n2\n3\n4\npartial".getBytes(StandardCharsets.UTF_8);
+    // The last line was cut short by the most kept: left out. Blank lines aren't entries.
+    assertThat(Logs.needed(output, true, paging("limit", "2"))).containsExactly("3", "4");
+    assertThat(Logs.needed(output, false, paging("limit", "2"))).containsExactly("4", "partial");
+    assertThat(Logs.needed(output, true, paging("from", "after", "cursor", "0", "limit", "2")))
+        .containsExactly("1", "2");
+    assertThat(Logs.needed(new byte[0], false, paging())).isEmpty();
   }
 }

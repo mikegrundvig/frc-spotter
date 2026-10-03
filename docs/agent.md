@@ -193,7 +193,7 @@ number's text, as journalctl writes them) in the unit the map declares (`ns`, `u
 without a unit, a number is no time. A level is `error`, `warning`, `info`, `debug`, or syslog's 0
 to 7 read as those (0-3 error, 4 warning, 5-6 info, 7 debug). A line that isn't JSON is a message
 on its own, at `info`. A log's command runs within 10 s, two logs are paged at once, and it reads
-at most 4 MiB.
+at most 4 MiB, of which only the lines a page needs are read as entries.
 
 A log is a `run` command only: there's no way for the paging to reach an HTTP request as data.
 
@@ -209,7 +209,8 @@ An action runs on request, optionally with input, and returns a response (its fi
 - **Its log** is a `run` command's standard error, each line an entry as it's read: a JSON line
   keeps its level, a plain line is `info`, each timed when it was read. Each is sent on the stream
   as it comes, and paged with `GET /v2/runs/<run>/log` (its cursors are the lines' places, from 1;
-  the agent filters by level itself).
+  the agent filters by level itself). A page is read from the log as a stream, a page's worth held,
+  and two runs' logs are read at once (`503` past that).
 - **A `file` field** (an action's whole output, declared `type: file`) is a URL,
   `/v2/runs/<run>/files/<field>`, which downloads as the name its pack gives (`name:`).
 - **How a run is judged:** an outcome other than `completed` means it failed; once completed, the

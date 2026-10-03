@@ -367,4 +367,19 @@ class RunsTest {
     assertThat(JsonText.tooDeep("{\"a\": \"" + "[".repeat(100) + "\\\"[\"}")).isFalse();
     assertThat(JsonText.asObject("{\"a\": " + "[".repeat(65) + "]".repeat(65) + "}")).isEmpty();
   }
+
+  @Test
+  void aRunsLogIsReadByAtMostTwoAtOnce() throws Exception {
+    String run = runs.start("team.ok", input("Ada")).getRun();
+    finished(run);
+    runs.logReads.acquire(Runs.LOGS_AT_ONCE);
+    try {
+      Runs.Refused busy =
+          catchThrowableOfType(Runs.Refused.class, () -> runs.log(run, Logs.Paging.of(Map.of())));
+      assertThat(busy.status).isEqualTo(503);
+    } finally {
+      runs.logReads.release(Runs.LOGS_AT_ONCE);
+    }
+    assertThat(runs.log(run, Logs.Paging.of(Map.of())).getEntries().length()).isEqualTo(2);
+  }
 }

@@ -48,11 +48,11 @@ import org.jspecify.annotations.Nullable;
  * Runs a pack's commands: the only place the agent starts a process, asks a URL, or reads a pack's
  * file. Each is bounded: by its timeout (a process's whole group is stopped, a request is cut off,
  * a read is interrupted), and by the most of its output kept. A process runs in a group of its own
- * (setsid), its output and standard error read on threads of their own, and is waited on, never
- * the end of its pipes: what it left running that holds them is stopped once it has exited. Nothing here comes from a
- * request: every program, URL and path is its pack's, fixed when the agent started. What a request
- * brings (an action's input, a log's paging) is data: on standard input, in a request's body, or in
- * the environment, never on a command line.
+ * (setsid), its output and standard error read on threads of their own, and is waited on, never the
+ * end of its pipes: what it left running that holds them is stopped once it has exited. Nothing
+ * here comes from a request: every program, URL and path is its pack's, fixed when the agent
+ * started. What a request brings (an action's input, a log's paging) is data: on standard input, in
+ * a request's body, or in the environment, never on a command line.
  */
 final class Commands implements Runner, AutoCloseable {
   /** The most of a command's standard error kept to say why it failed: its first line. */

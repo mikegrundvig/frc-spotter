@@ -1,7 +1,9 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -147,11 +149,7 @@ final class Logs {
           "log " + id + "'s command: " + result.message());
     }
     List<Spotter.LogEntry> entries = new ArrayList<>();
-    List<String> lines = new ArrayList<>(result.text().lines().toList());
-    if (result.truncated() && !lines.isEmpty()) {
-      lines.remove(lines.size() - 1); // cut short as it was read
-    }
-    for (String line : lines) {
+    for (String line : needed(result.output(), result.truncated(), paging)) {
       LogLines.entry(line, source.log().map(), 0).ifPresent(entries::add);
     }
     if (entries.isEmpty() && result.code() != 0) {
@@ -170,6 +168,51 @@ final class Logs {
               : entries.subList(entries.size() - paging.limit(), entries.size());
     }
     return page(entries, paging);
+  }
+
+  /**
+   * The lines of a log command's output a page needs, before any is read as an entry: the last
+   * {@code limit} that aren't blank, or for {@code after} the first; a last line cut short by the
+   * most kept is left out. So a command that prints far more than asked for costs its output's
+   * bytes, and no more.
+   */
+  static List<String> needed(byte[] output, boolean truncated, Paging paging) {
+    boolean after = paging.from().equals("after");
+    ArrayDeque<int[]> kept = new ArrayDeque<>();
+    int start = 0;
+    for (int i = 0; i <= output.length; i++) {
+      boolean last = i == output.length;
+      if (!last && output[i] != '\n') {
+        continue;
+      }
+      if (last && truncated) {
+        break;
+      }
+      if (!blank(output, start, i)) {
+        if (after && kept.size() == paging.limit()) {
+          break;
+        }
+        kept.addLast(new int[] {start, i});
+        if (kept.size() > paging.limit()) {
+          kept.removeFirst();
+        }
+      }
+      start = i + 1;
+    }
+    List<String> lines = new ArrayList<>();
+    for (int[] line : kept) {
+      lines.add(new String(output, line[0], line[1] - line[0], StandardCharsets.UTF_8));
+    }
+    return lines;
+  }
+
+  private static boolean blank(byte[] bytes, int from, int to) {
+    for (int i = from; i < to; i++) {
+      if (bytes[i] != ' ' && bytes[i] != '\t' && bytes[i] != '\r') {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -195,32 +238,64 @@ final class Logs {
    * 1, and the agent pages and filters them itself.
    */
   static Spotter.LogPage slice(List<Spotter.LogEntry> all, Paging paging) {
-    List<Spotter.LogEntry> wanted = new ArrayList<>();
-    long cursor = 0;
-    if (!paging.cursor().isEmpty()) {
-      try {
-        cursor = Long.parseLong(paging.cursor());
-      } catch (NumberFormatException e) {
-        cursor = paging.from().equals("before") ? 0 : Long.MAX_VALUE;
-      }
-    }
+    Slice slice = new Slice(paging);
     for (Spotter.LogEntry entry : all) {
-      long place = Long.parseLong(entry.getCursor());
-      boolean inRange =
-          paging.from().equals("before")
-              ? place < cursor
-              : !paging.from().equals("after") || place > cursor;
-      if (inRange && important(entry.getLevel(), paging.level())) {
-        wanted.add(entry);
+      if (!slice.take(entry)) {
+        break;
       }
     }
-    if (wanted.size() > paging.limit()) {
-      wanted =
-          paging.from().equals("after")
-              ? wanted.subList(0, paging.limit())
-              : wanted.subList(wanted.size() - paging.limit(), wanted.size());
+    return slice.page();
+  }
+
+  /**
+   * A page of a run's log, its entries taken one at a time as they're read, at most the limit held:
+   * the newest wanted, or for {@code after} the first, so a long log costs no more than a page.
+   */
+  static final class Slice {
+    private final Paging paging;
+    private final long cursor;
+    private final ArrayDeque<Spotter.LogEntry> wanted = new ArrayDeque<>();
+
+    Slice(Paging paging) {
+      this.paging = paging;
+      long from = 0;
+      if (!paging.cursor().isEmpty()) {
+        try {
+          from = Long.parseLong(paging.cursor());
+        } catch (NumberFormatException e) {
+          from = paging.from().equals("before") ? 0 : Long.MAX_VALUE;
+        }
+      }
+      this.cursor = from;
     }
-    return page(wanted, paging);
+
+    /** Takes an entry, in the log's order: whether any more are wanted. */
+    boolean take(Spotter.LogEntry entry) {
+      long place;
+      try {
+        place = Long.parseLong(entry.getCursor());
+      } catch (NumberFormatException e) {
+        return true;
+      }
+      boolean before = paging.from().equals("before");
+      boolean after = paging.from().equals("after");
+      if (before && place >= cursor) {
+        return false;
+      }
+      if ((after && place <= cursor) || !important(entry.getLevel(), paging.level())) {
+        return true;
+      }
+      wanted.addLast(entry);
+      if (wanted.size() > paging.limit()) {
+        wanted.removeFirst();
+      }
+      return !(after && wanted.size() == paging.limit());
+    }
+
+    /** The page of what was taken. */
+    Spotter.LogPage page() {
+      return Logs.page(new ArrayList<>(wanted), paging);
+    }
   }
 
   /** Whether an entry's level is as important as the least wanted, or has none. */

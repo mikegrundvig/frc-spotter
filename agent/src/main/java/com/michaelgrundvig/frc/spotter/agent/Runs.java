@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -60,6 +61,9 @@ final class Runs implements AutoCloseable {
 
   /** How long a cancelled run has, once asked to stop, before it's killed. */
   static final Duration GRACE = Duration.ofSeconds(5);
+
+  /** How many runs' logs are read at once; another asked meanwhile is refused as busy. */
+  static final int LOGS_AT_ONCE = 2;
 
   /** What a run's id is: its start on the monotonic clock, and some randomness. */
   static final Pattern ID = Pattern.compile("[0-9a-f]{16}");
@@ -102,6 +106,8 @@ final class Runs implements AutoCloseable {
   private final Map<String, Declared> actions = new LinkedHashMap<>();
   private final LinkedHashMap<String, Kept> kept = new LinkedHashMap<>();
   private final SecureRandom random = new SecureRandom();
+  // Package-private, for a test to hold.
+  final Semaphore logReads = new Semaphore(LOGS_AT_ONCE);
   private final ExecutorService threads =
       Executors.newCachedThreadPool(
           work -> {
@@ -200,8 +206,9 @@ final class Runs implements AutoCloseable {
           write(path.resolve("state"), state);
           Files.deleteIfExists(path.resolve("input"));
         }
+        // Its log isn't read: a run taken up never logs again (one that was going is lost), so
+        // its count of lines is never needed.
         Kept restored = new Kept(run, state.getAction(), state);
-        restored.lines = read(path.resolve("log")).size();
         synchronized (this) {
           kept.put(run, restored);
         }
@@ -479,28 +486,36 @@ final class Runs implements AutoCloseable {
     throw new Refused(404, "run " + run + " has no file " + field);
   }
 
-  /** A page of a kept run's log. */
+  /**
+   * A page of a kept run's log: read as a stream, a page's worth held, at most {@link
+   * #LOGS_AT_ONCE} at once ({@code 503} past that).
+   */
   Spotter.LogPage log(String run, Logs.Paging paging) throws Refused, IOException {
     if (state(run).isEmpty()) {
       throw new Refused(404, "no run " + run + " is kept");
     }
-    return Logs.slice(read(folder().resolve(run).resolve("log")), paging);
-  }
-
-  private static List<Spotter.LogEntry> read(Path log) throws IOException {
-    List<Spotter.LogEntry> entries = new ArrayList<>();
-    if (!Files.exists(log)) {
-      return entries;
+    if (!logReads.tryAcquire()) {
+      throw new Refused(503, "as many runs' logs are being read as may; ask again shortly");
     }
-    try (InputStream in = new BufferedInputStream(Files.newInputStream(log))) {
-      ProtoSource source = ProtoSource.newInstance(in);
-      while (!source.isAtEnd()) {
-        entries.add(Spotter.LogEntry.newInstance().mergeDelimitedFrom(source));
+    try {
+      Logs.Slice slice = new Logs.Slice(paging);
+      Path log = folder().resolve(run).resolve("log");
+      if (Files.exists(log)) {
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(log))) {
+          ProtoSource source = ProtoSource.newInstance(in);
+          while (!source.isAtEnd()) {
+            if (!slice.take(Spotter.LogEntry.newInstance().mergeDelimitedFrom(source))) {
+              break;
+            }
+          }
+        } catch (IOException e) {
+          // The last entry was cut short as the agent stopped: the rest stand.
+        }
       }
-    } catch (IOException e) {
-      // The last entry was cut short as the agent stopped: the rest stand.
+      return slice.page();
+    } finally {
+      logReads.release();
     }
-    return entries;
   }
 
   /** Drops the oldest finished runs while the kept ones take more than the most kept. */
