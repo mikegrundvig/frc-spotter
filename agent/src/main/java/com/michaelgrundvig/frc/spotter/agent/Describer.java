@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.util.List;
 import java.util.zip.CRC32;
@@ -91,12 +92,43 @@ final class Describer {
         description.addActions(declaration(pack.name(), action));
       }
     }
-    for (String problem : configuration.problems()) {
-      description.addProblems(problem);
+    List<String> problems = configuration.problems();
+    for (int i = 0; i < problems.size() && i < Protocol.MAX_PROBLEMS; i++) {
+      description.addProblems(
+          i == Protocol.MAX_PROBLEMS - 1 && problems.size() > Protocol.MAX_PROBLEMS
+              ? (problems.size() - i) + " more problems: the agent's journal lists them all"
+              : cut(problems.get(i)));
     }
     CRC32 crc = new CRC32();
     crc.update(description.toByteArray());
     return description.setRevision((int) crc.getValue());
+  }
+
+  /** The longest a problem is in the description: the agent's journal has it whole. */
+  static final int MAX_PROBLEM = 1024;
+
+  private static String cut(String problem) {
+    return problem.length() <= MAX_PROBLEM ? problem : problem.substring(0, MAX_PROBLEM) + "...";
+  }
+
+  /** How many bytes a pack's declarations take in a description: its entry, values, logs, actions. */
+  static long declared(Pack pack) {
+    Spotter.Description part = Spotter.Description.newInstance().addPacks(pack.description());
+    for (Collectors.Slot slot : Collectors.slots(List.of(pack))) {
+      for (Field field : slot.collector().fields()) {
+        part.addValues(field.declaration(slot.id(field)));
+      }
+    }
+    for (Pack.Log log : pack.logs()) {
+      part.addLogs(
+          Spotter.LogDeclaration.newInstance()
+              .setId(pack.name() + "." + log.id())
+              .setLabel(log.label()));
+    }
+    for (Pack.Action action : pack.actions()) {
+      part.addActions(declaration(pack.name(), action));
+    }
+    return part.getSerializedSize();
   }
 
   private static Spotter.ActionDeclaration declaration(String pack, Pack.Action action) {

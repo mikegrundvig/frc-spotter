@@ -140,6 +140,19 @@ class PushTest {
   }
 
   @Test
+  void aBundleThatSaysMoreThanItHoldsIsRefusedBeforeItsParsed() throws Exception {
+    Path lying = push.bundle();
+    // PackBundle { files: PackFile { content: 2 GiB, and nothing after it } }.
+    Files.write(
+        lying,
+        new byte[] {0x0a, 0x06, 0x1a, (byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff, 0x07});
+    assertThat(catchThrowableOfType(Push.Rejected.class, () -> push.apply(lying)))
+        .hasMessage(
+            "the bundle isn't a PackBundle that can be read safely: spotter.v2.PackFile's field 3"
+                + " says 2147483647 bytes, and 0 are left");
+  }
+
+  @Test
   void aBundleOverItsLimitsIsRefused() throws Exception {
     Spotter.PackBundle many = Spotter.PackBundle.newInstance();
     for (int i = 0; i <= Push.MAX_FILES; i++) {

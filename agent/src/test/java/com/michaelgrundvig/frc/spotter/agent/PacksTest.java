@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.protocol.PackHash;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -205,5 +206,90 @@ class PacksTest {
     assertThat(loaded.packs()).isEmpty();
     assertThat(loaded.problems()).hasSize(1);
     assertThat(loaded.pushedHash()).isEqualTo(PackHash.of(fixture.path(Packs.PUSHED)));
+  }
+
+  /** A pack of {@code collectors} collectors, {@code fields} values each, and some actions. */
+  private void pack(String name, int collectors, int fields, int actions) {
+    StringBuilder yaml = new StringBuilder("pack: " + name + "\ncollectors:\n");
+    for (int c = 0; c < collectors; c++) {
+      yaml.append("  - id: c").append(c).append("\n    file: /proc/uptime\n    every: 1s\n");
+      yaml.append("    fields:\n");
+      for (int f = 0; f < fields; f++) {
+        yaml.append("      f").append(f).append(": {type: number}\n");
+      }
+    }
+    if (actions > 0) {
+      yaml.append("actions:\n");
+      for (int a = 0; a < actions; a++) {
+        yaml.append("  - {id: a").append(a).append(", run: [true]}\n");
+      }
+    }
+    fixture.pack(name, yaml.toString());
+  }
+
+  @Test
+  void aBoardsPacksAreBoundedAndOneThatWouldPassABoundIsIgnoredWhole() {
+    // 33 collectors of 64 values: 2,112, past the 2,048 a board may have.
+    pack("big", 33, 64, 0);
+    pack("small", 1, 1, 0);
+    Packs.Loaded loaded = Packs.load(fixture.host, true);
+    assertThat(loaded.packs()).extracting(Pack::name).containsExactly("small");
+    assertThat(loaded.problems())
+        .containsExactly(
+            Packs.INSTALLED
+                + "/big: ignored, as its 2112 values would pass the 2048 a board may have (0 so"
+                + " far)");
+  }
+
+  @Test
+  void aBoardsActionsAndPacksAreBoundedToo() {
+    for (int i = 0; i < 4; i++) {
+      pack("a" + i, 0, 0, 32);
+    }
+    Packs.Loaded actions = Packs.load(fixture.host, true);
+    assertThat(actions.packs()).extracting(Pack::name).containsExactly("a0", "a1", "a2");
+    assertThat(actions.problems())
+        .containsExactly(
+            Packs.INSTALLED
+                + "/a3: ignored, as its 32 actions would pass the 128 a board may have (98 so"
+                + " far)");
+  }
+
+  @Test
+  void aBoardHasAtMostItsMostPacks(@org.junit.jupiter.api.io.TempDir Path other)
+      throws Exception {
+    Fixture board = new Fixture(other);
+    for (int i = 0; i <= Packs.MAX_PACKS; i++) {
+      board.pack(String.format("p%02d", i), String.format("pack: p%02d\n", i));
+    }
+    Packs.Loaded loaded = Packs.load(board.host, true);
+    assertThat(loaded.packs()).hasSize(Packs.MAX_PACKS);
+    assertThat(loaded.problems())
+        .containsExactly(Packs.INSTALLED + "/p32: ignored, as a board has at most 32 packs");
+  }
+
+  @Test
+  void whateverReadingOnePackMeetsTheOthersLoad() {
+    fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
+    fixture.pack("odd", "pack: odd\n");
+    Host failing =
+        new Host(
+            fixture.root,
+            path -> {
+              if (path.contains("/odd/")) {
+                throw new IllegalStateException("a filesystem in a strange state");
+              }
+              return Host.Owner.root(0644);
+            },
+            List::of,
+            fixture.nanos::get,
+            fixture.log::add);
+    Packs.Loaded loaded = Packs.load(failing, true);
+    assertThat(loaded.packs()).extracting(Pack::name).containsExactly("vision");
+    assertThat(loaded.problems())
+        .containsExactly(
+            Packs.INSTALLED
+                + "/odd/pack.yaml: couldn't be read (java.lang.IllegalStateException: a filesystem"
+                + " in a strange state), ignored");
   }
 }

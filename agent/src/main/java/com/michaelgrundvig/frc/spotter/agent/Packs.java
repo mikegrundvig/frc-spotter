@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
 import com.michaelgrundvig.frc.spotter.protocol.PackHash;
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +22,11 @@ import java.util.TreeMap;
  * file ({@code [python3, ./check.py]}). Otherwise "root owns the YAML" would protect nothing. A
  * pushed pack is trusted because only the robot controller may push. Everything ignored is in the
  * description's problems, with why.
+ *
+ * <p>Bounded, so a board's description always fits a stream's event: at most {@link #MAX_PACKS}
+ * packs, {@link Protocol#MAX_VALUES} values and {@link Protocol#MAX_ACTIONS} actions in all (the
+ * built-in two included), and {@link #MAX_DECLARED} bytes of declarations. Packs are taken in the
+ * order of their names, and one that would pass a bound is ignored whole, saying so.
  */
 final class Packs {
   /** Where the packs installed with the board are, each a folder. */
@@ -28,6 +34,15 @@ final class Packs {
 
   /** Where the packs the robot pushed are, each a folder. */
   static final String PUSHED = "/var/lib/frc-spotter/packs";
+
+  /** The most packs a board may have. */
+  static final int MAX_PACKS = 32;
+
+  /**
+   * The most bytes a board's packs may declare (their values', logs' and actions' declarations, as
+   * its description carries them): half a stream's event, the rest for its identity and problems.
+   */
+  static final int MAX_DECLARED = Protocol.MAX_EVENT / 2;
 
   private Packs() {}
 
@@ -87,7 +102,57 @@ final class Packs {
           all.remove(name);
           pack.ifPresent(loaded -> all.put(name, loaded));
         });
-    return new Loaded(new ArrayList<>(all.values()), problems, hash);
+    return new Loaded(bounded(all.values(), problems), problems, hash);
+  }
+
+  /** The packs, in order, as many as a board may have: one that would pass a bound is ignored. */
+  private static List<Pack> bounded(Iterable<Pack> packs, List<String> problems) {
+    List<Pack> kept = new ArrayList<>();
+    int values = 0;
+    int actions = Describer.BUILT_IN.size();
+    long declared = 0;
+    for (Pack pack : packs) {
+      int its = Collectors.values(List.of(pack));
+      long size = Describer.declared(pack);
+      String past = "";
+      if (kept.size() == MAX_PACKS) {
+        past = "a board has at most " + MAX_PACKS + " packs";
+      } else if (values + its > Protocol.MAX_VALUES) {
+        past =
+            "its "
+                + its
+                + " values would pass the "
+                + Protocol.MAX_VALUES
+                + " a board may have ("
+                + values
+                + " so far)";
+      } else if (actions + pack.actions().size() > Protocol.MAX_ACTIONS) {
+        past =
+            "its "
+                + pack.actions().size()
+                + " actions would pass the "
+                + Protocol.MAX_ACTIONS
+                + " a board may have ("
+                + actions
+                + " so far)";
+      } else if (declared + size > MAX_DECLARED) {
+        past =
+            "its declarations ("
+                + size / 1024
+                + " KiB) would pass the "
+                + MAX_DECLARED / 1024
+                + " KiB a board's description may hold";
+      }
+      if (!past.isEmpty()) {
+        problems.add(pack.folder() + ": ignored, as " + past);
+        continue;
+      }
+      kept.add(pack);
+      values += its;
+      actions += pack.actions().size();
+      declared += size;
+    }
+    return kept;
   }
 
   /**
@@ -143,6 +208,10 @@ final class Packs {
       }
     } catch (IOException e) {
       problems.add(file + ": can't be read: " + e.getMessage() + ", ignored");
+    } catch (Throwable e) {
+      // Whatever reading one pack meets, a stack overflow included, the others load, and the agent
+      // serves: a pushed pack can't keep a board from taking the next push.
+      problems.add(file + ": couldn't be read (" + e + "), ignored");
     }
     return Optional.empty();
   }

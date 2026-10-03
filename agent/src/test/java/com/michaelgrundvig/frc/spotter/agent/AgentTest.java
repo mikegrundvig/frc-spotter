@@ -193,6 +193,25 @@ class AgentTest {
   }
 
   @Test
+  void aDescriptionListsAtMostItsMostProblemsEachCut() {
+    java.util.List<String> many = new java.util.ArrayList<>();
+    for (int i = 0; i < 200; i++) {
+      many.add("problem " + i);
+    }
+    many.set(0, "x".repeat(2000));
+    Configuration configuration =
+        new Configuration(AgentConfig.DEFAULT, Packs.Loaded.NONE, many, "");
+    com.michaelgrundvig.frc.spotter.protocol.Spotter.Description description =
+        new Describer("0.4.0", configuration)
+            .describe(com.michaelgrundvig.frc.spotter.protocol.Spotter.Identity.newInstance());
+    assertThat(description.getProblems().length())
+        .isEqualTo(com.michaelgrundvig.frc.spotter.protocol.Protocol.MAX_PROBLEMS);
+    assertThat(description.getProblems().get(0)).hasSize(Describer.MAX_PROBLEM + 3);
+    assertThat(description.getProblems().get(127))
+        .isEqualTo("73 more problems: the agent's journal lists them all");
+  }
+
+  @Test
   void anIdentityThatCantBeReadIsLoggedAndTheLastOneKept() {
     Fixture broken = fixture;
     try (Agent agent = broken.agent()) {
