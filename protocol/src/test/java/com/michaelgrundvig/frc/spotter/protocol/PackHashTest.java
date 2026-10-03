@@ -51,7 +51,7 @@ class PackHashTest {
     String bytes = PackHash.of(packs);
     assertThat(bytes).isNotEqualTo(before);
     Files.setPosixFilePermissions(
-        packs.resolve("debian/cpu"), PosixFilePermissions.fromString("rw-r--r--"));
+        packs.resolve("vision/pack.yaml"), PosixFilePermissions.fromString("rwxr-xr-x"));
     String executable = PackHash.of(packs);
     assertThat(executable).isNotEqualTo(bytes);
     Files.move(packs.resolve("vision"), packs.resolve("vision2"));
@@ -116,6 +116,25 @@ class PackHashTest {
     // A change to a file's executable flag changes it.
     reversed.getMutableFiles().get(0).setExecutable(!reversed.getFiles().get(0).getExecutable());
     assertThat(PackHash.of(reversed)).isNotEqualTo(PackHash.of(folder));
+  }
+
+  @Test
+  void aScriptThatNamesItsInterpreterIsExecutableWithoutItsBit() throws IOException {
+    // As the robot's deploy may copy it: its bytes, and no execute bit.
+    write(dir.resolve("deployed/debian/cpu"), "#!/bin/sh\necho 1\n", "rw-r--r--");
+    write(dir.resolve("deployed/debian/pack.yaml"), "pack: debian\n", "rw-r--r--");
+    write(dir.resolve("deployed/debian/data"), "#", "rw-r--r--");
+    Spotter.PackBundle bundle = PackHash.bundle(dir.resolve("deployed"));
+    assertThat(bundle.getFiles())
+        .extracting(Spotter.PackFile::getPath, Spotter.PackFile::getExecutable)
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple("debian/cpu", true),
+            org.assertj.core.groups.Tuple.tuple("debian/data", false),
+            org.assertj.core.groups.Tuple.tuple("debian/pack.yaml", false));
+    assertThat(PackHash.permissions(dir.resolve("deployed/debian/cpu")))
+        .isEqualTo(PackHash.EXECUTABLE);
+    // So the folder, the bundle, and the agent's copy of it (written 755) hash alike.
+    assertThat(PackHash.of(bundle)).isEqualTo(PackHash.of(dir.resolve("deployed")));
   }
 
   @Test

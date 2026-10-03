@@ -24,9 +24,10 @@ import us.hebi.quickbuf.RepeatedByte;
  * paths, through SHA-256, as lowercase hex. Copying the packs gives the same hash, file times can't
  * change it, and a half-written or altered folder doesn't match.
  *
- * <p>Permissions are one of two, {@value #EXECUTABLE} (any execute bit set) or {@value #PLAIN}, as
- * the agent writes a pushed pack's files: so a umask on either side can't make two copies of the
- * same packs differ. Folders count only by the files in them; a folder with no files at all hashes
+ * <p>Permissions are one of two, {@value #EXECUTABLE} or {@value #PLAIN}, as the agent writes a
+ * pushed pack's files: so a umask on either side can't make two copies of the same packs differ. A
+ * file is executable when any execute bit is set, or when it starts with {@code #!}: a deploy that
+ * copies files without their modes (as the robot's may) still pushes a script that runs. Folders count only by the files in them; a folder with no files at all hashes
  * to the empty text, as no packs do.
  *
  * <p>A pushed bundle ({@code PackBundle}) hashes the same way from its files, without touching a
@@ -92,8 +93,8 @@ public final class PackHash {
 
   /**
    * A folder of packs as a bundle, as the robot pushes it: each file by its path in the folder
-   * (with {@code /}), executable if it may be run ({@link Files#isExecutable}), and its bytes, in
-   * the order of their paths. Empty when the folder has no files, or isn't there.
+   * (with {@code /}), whether it's executable ({@link #executable}), and its bytes, in the order of
+   * their paths. Empty when the folder has no files, or isn't there.
    *
    * @throws IOException when a file can't be read
    */
@@ -106,11 +107,12 @@ public final class PackHash {
     Path real = folder.toRealPath();
     for (String path : paths) {
       Path file = real.resolve(path);
+      byte[] content = Files.readAllBytes(file);
       bundle.addFiles(
           Spotter.PackFile.newInstance()
               .setPath(path)
-              .setExecutable(Files.isExecutable(file))
-              .setContent(Files.readAllBytes(file)));
+              .setExecutable(anyExecuteBit(file) || script(content))
+              .setContent(content));
     }
     return bundle;
   }
@@ -143,20 +145,42 @@ public final class PackHash {
   }
 
   /**
-   * A file's permissions as the hash counts them: {@value #EXECUTABLE} when any execute bit is set,
-   * else {@value #PLAIN}; {@value #PLAIN} on a filesystem without POSIX permissions.
+   * A file's permissions as the hash counts them: {@value #EXECUTABLE} when it's {@link
+   * #executable}, else {@value #PLAIN}.
    */
   public static String permissions(Path file) throws IOException {
+    return executable(file) ? EXECUTABLE : PLAIN;
+  }
+
+  /**
+   * Whether a pack's file is executable, as a push carries it: any execute bit is set, or it starts
+   * with {@code #!} (a script that names its interpreter), so a script whose execute bit a copy
+   * dropped still runs once pushed. On a filesystem without POSIX permissions (Windows), only the
+   * {@code #!} counts.
+   */
+  public static boolean executable(Path file) throws IOException {
+    if (anyExecuteBit(file)) {
+      return true;
+    }
+    try (InputStream in = Files.newInputStream(file)) {
+      return script(in.readNBytes(2));
+    }
+  }
+
+  private static boolean anyExecuteBit(Path file) throws IOException {
     PosixFileAttributeView posix = Files.getFileAttributeView(file, PosixFileAttributeView.class);
     if (posix == null) {
-      return PLAIN;
+      return false;
     }
     Set<PosixFilePermission> permissions = posix.readAttributes().permissions();
     return permissions.contains(PosixFilePermission.OWNER_EXECUTE)
-            || permissions.contains(PosixFilePermission.GROUP_EXECUTE)
-            || permissions.contains(PosixFilePermission.OTHERS_EXECUTE)
-        ? EXECUTABLE
-        : PLAIN;
+        || permissions.contains(PosixFilePermission.GROUP_EXECUTE)
+        || permissions.contains(PosixFilePermission.OTHERS_EXECUTE);
+  }
+
+  /** Whether a file's bytes start with {@code #!}. */
+  private static boolean script(byte[] content) {
+    return content.length >= 2 && content[0] == '#' && content[1] == '!';
   }
 
   private static MessageDigest sha256() {

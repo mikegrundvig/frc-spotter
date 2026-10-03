@@ -234,7 +234,8 @@ final class Commands implements Runner, AutoCloseable {
       builder.environment().putAll(options.environment());
       process = builder.start();
     } catch (IOException e) {
-      return Result.failed(Kind.RUN, Spotter.Outcome.OUTCOME_COULD_NOT_START, why(e, program));
+      return Result.failed(
+          Kind.RUN, Spotter.Outcome.OUTCOME_COULD_NOT_START, why(e, program, run.program()));
     }
     Future<String> errors = errors(process, options);
     AtomicReference<Spotter.Outcome> stopped = new AtomicReference<>();
@@ -301,16 +302,24 @@ final class Commands implements Runner, AutoCloseable {
 
   /**
    * Why a program couldn't start, as a person would say it: from its errno, which Java 17 writes
-   * {@code error=2,} and later Javas {@code error: 2}.
+   * {@code error=2,} and later Javas {@code error: 2}. Not allowed (EACCES) is nearly always a
+   * script without its execute bit, as a copy that drops modes leaves it: the fix is said.
+   *
+   * @param program where it is
+   * @param written how its pack writes it: {@code ./health}
    */
-  private static String why(IOException e, String program) {
+  private static String why(IOException e, String program, String written) {
     Matcher errno = ERRNO.matcher(String.valueOf(e.getMessage()));
     if (errno.find()) {
       if (errno.group(1).equals("2")) {
         return "no such file: " + program;
       }
       if (errno.group(1).equals("13")) {
-        return "not allowed: " + program;
+        return "not executable ("
+            + program
+            + "): chmod +x, or name its interpreter: run: [sh, "
+            + written
+            + "]";
       }
     }
     return String.valueOf(e.getMessage());

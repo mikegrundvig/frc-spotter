@@ -252,7 +252,8 @@ board has them.
    opens the stream without the hash (a push is signed over a stream's challenge, and a `409`
    carries none), and sends the bundle over it with `POST /v2/packs`: a `PackBundle`
    (`spotter.proto`), in protobuf, carrying exactly what the hash covers, each file's path
-   (relative, with `/`), whether it's executable, and its bytes. The agent writes the files into a
+   (relative, with `/`), whether it's executable (any execute bit, or a `#!` first line, as the
+   robot's deploy may drop modes), and its bytes. The agent writes the files into a
    folder of their own beside the others (`/var/lib/frc-spotter/pushed/<id>/`), each `755` if the
    bundle says it's executable, `644` otherwise; then renames a new link over
    `/var/lib/frc-spotter/packs`, pointing at it, which is atomic. It answers `202`, and exits;

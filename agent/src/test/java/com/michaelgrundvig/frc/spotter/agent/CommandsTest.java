@@ -75,7 +75,11 @@ class CommandsTest {
     fixture.write(folder + "/plain", "echo not executable\n");
     Commands.Result denied = run("./plain");
     assertThat(denied.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COULD_NOT_START);
-    assertThat(denied.message()).isEqualTo("not allowed: " + folder + "/plain");
+    assertThat(denied.message())
+        .isEqualTo(
+            "not executable ("
+                + folder
+                + "/plain): chmod +x, or name its interpreter: run: [sh, ./plain]");
   }
 
   @Test

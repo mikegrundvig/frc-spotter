@@ -186,8 +186,12 @@ directory so they live in Git with the robot code), the manager makes sure every
 a spare board just works.
 
 1. It reads them as it's made into the bundle it pushes: a `PackBundle` (`spotter.proto`), each
-   file's path in the folder, whether it's executable (`Files.isExecutable`), and its bytes,
-   exactly what the pack hash covers. It connects with the bundle's hash (`PackHash`, as the agent
+   file's path in the folder, whether it's executable, and its bytes, exactly what the pack hash
+   covers. A file is executable when any execute bit is set, or when it starts with `#!`: the
+   robot's deploy may copy files without their execute bits (unconfirmed on Systemcore: open
+   question Q51), and a script that names its interpreter still runs once pushed. A program
+   without `#!` (a binary, or a script that relies on a default shell) needs its bit, or its
+   interpreter named in the pack: `run: [sh, ./health]`. It connects with the bundle's hash (`PackHash`, as the agent
    hashes what it writes).
 2. A board whose packs match starts its stream as usual: nothing is pushed, and nothing restarts.
 3. A board whose packs differ answers `409`. A push is signed over a stream's challenge, so the
