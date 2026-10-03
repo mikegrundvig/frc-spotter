@@ -18,7 +18,10 @@ import java.util.Objects;
  *   <li>{@link #agent}: Debian 13 under systemd with no Java, the agent installed from its .deb,
  *       the stand-in pack and three it mustn't trust, a stand-in for the software it watches, and
  *       its image labeled in os-release;
- *   <li>{@link #agentOnJava17}: a stock Java 17 with the agent installed from its -all.jar.
+ *   <li>{@link #agentOnJava17}: a stock Java 17 with the agent installed from its -all.jar;
+ *   <li>{@link #catalog}: the agent with the catalog's packs (the repository's packs/) installed as
+ *       an installer puts them, the debian pack's root timer enabled, a stand-in for PhotonVision,
+ *       and stand-ins for programs the packs' scripts read, off the PATH.
  * </ul>
  */
 final class TestImages {
@@ -69,6 +72,77 @@ final class TestImages {
         """
             .formatted(Images.base(), installAgent, installPacks, labels),
         context);
+  }
+
+  /** The catalog's packs, from the build. */
+  static final Path CATALOG = Images.property("spotter.catalog");
+
+  /**
+   * The agent with the catalog's packs, as a board's installer puts them: each pack's folder in
+   * /etc/frc-spotter/packs, root's; the debian pack's root timer copied to /etc/systemd/system and
+   * enabled, as its README has an installer do; PhotonVision's service as a stand-in answering on
+   * 5800 as PhotonVision does, with a settings file; and stand-ins for nvme-cli, chronyc,
+   * timedatectl and journalctl in /opt/stand-ins, off the PATH, for the scripts' parsing.
+   */
+  static String catalog() {
+    Map<String, Object> context = new LinkedHashMap<>();
+    String installAgent = Images.installAgent(context);
+    Map<String, Path> packs = new LinkedHashMap<>();
+    for (String name : new String[] {"debian", "photonvision", "raspberry-pi"}) {
+      packs.put(name, catalogPack(name));
+    }
+    String installPacks = Images.installPacks(context, packs);
+    context.put("stand-ins", folder("catalog"));
+    return Images.build(
+        "catalog",
+        """
+        FROM %s
+        %s
+        # The catalog's packs, put in place as an installer puts packs; their READMEs and units
+        # aren't programs.
+        %s
+        RUN find /etc/frc-spotter/packs \\( -name '*.md' -o -name '*.service' -o -name '*.timer' \\) \\
+              -exec chmod 0644 {} +
+        # The debian pack's root timer, as its README has an installer add it.
+        RUN cp /etc/frc-spotter/packs/debian/frc-spotter-debian-drive.service \\
+              /etc/frc-spotter/packs/debian/frc-spotter-debian-drive.timer /etc/systemd/system/ \\
+         && systemctl enable frc-spotter-debian-drive.timer
+        # A stand-in for PhotonVision, by its service's name, answering on 5800, with its settings.
+        COPY stand-ins /opt/stand-ins
+        RUN mv /opt/stand-ins/photonvision.service /etc/systemd/system/ \\
+         && chmod 0644 /etc/systemd/system/photonvision.service && chmod 0755 /opt/stand-ins/* \\
+         && systemctl enable photonvision.service \\
+         && mkdir -p /opt/photonvision/photonvision_config \\
+         && printf 'its settings' > /opt/photonvision/photonvision_config/photon.sqlite \\
+         && chmod 0644 /opt/photonvision/photonvision_config/photon.sqlite
+        RUN mkdir -p /data/frc-spotter
+        VOLUME /data
+        """
+            .formatted(Images.base(), installAgent, installPacks),
+        context);
+  }
+
+  /** A catalog pack's own files (not a build's output), in a folder of their own. */
+  static Path catalogPack(String name) {
+    try {
+      Path from = CATALOG.resolve(name);
+      Path to = java.nio.file.Files.createTempDirectory("spotter-catalog-").resolve(name);
+      try (java.util.stream.Stream<Path> files = java.nio.file.Files.walk(from)) {
+        for (Path file : files.filter(java.nio.file.Files::isRegularFile).toList()) {
+          Path relative = from.relativize(file);
+          if (relative.startsWith("build")) {
+            continue;
+          }
+          Path target = to.resolve(relative);
+          java.nio.file.Files.createDirectories(target.getParent());
+          java.nio.file.Files.copy(file, target);
+          target.toFile().setExecutable(java.nio.file.Files.isExecutable(file), false);
+        }
+      }
+      return to;
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   /** The agent alone: the base, the agent installed from its .deb, and no packs. */

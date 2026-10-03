@@ -199,8 +199,9 @@ An action runs on request, optionally with input, and returns a response (its fi
 `run` command, a log.
 
 - **Its input** (`none`, `text` or `file`) is the request's body: a `run` command's standard input,
-  or an `http` request's body (or, with `form`, a multipart form's one file field of that name). An
-  action that takes none refuses a body. At most 64 MiB.
+  or an `http` request's body (or, with `form`, a multipart form's one file field: of that name, its
+  file named as the pack says, else after the field). An action that takes none refuses a body. At
+  most 64 MiB.
 - **Its log** is a `run` command's standard error, each line an entry as it's read: a JSON line
   keeps its level, a plain line is `info`, each timed when it was read. Each is sent on the stream
   as it comes, and paged with `GET /v2/runs/<run>/log` (its cursors are the lines' places, from 1;
@@ -369,12 +370,20 @@ actions:
     input: none               # none, text or file
     response:
       status: {type: number, fail: {notEquals: 200}}
+  - id: layout
+    label: Send a field layout
+    http: {post: "http://localhost:5800/api/settings/fieldLayout", form: {field: data, filename: layout.json}}
+    input: file
 ```
 
 - **Commands**, the same for all three: `run` is a fixed command line (a list), run as the agent's
   user from the pack's folder with no shell unless it names one, `./name` being the pack's own; `http`
   is a request to the board itself (`http://localhost`, `127.0.0.1` or `[::1]` only), `get` or
-  `post` (an action's may add `form`); `file` reads a file, absolute, for collectors only.
+  `post`; `file` reads a file, absolute, for collectors only.
+- **A form upload:** an `http` action's `post` may send its input as a multipart form's one file
+  field, `form: data`, the file named after its field (`data`); or `form: {field: data, filename:
+  layout.json}`, the file named as it says, for a server that judges an upload by its file name's
+  extension. Each is letters, digits, `.`, `_` and `-`.
 - **Fields:** `type` (`number`, `text`, `boolean`, `status`; an action's response may also have
   `json`, and its whole output `file`), and optionally `label`, `unit`, `warn`, `fail`, and for a
   `file` field `name`, the name it downloads as. Value ids are `pack.collector.field`.
@@ -389,9 +398,11 @@ actions:
 - **Mistakes:** a key nobody reads is a problem, so a misspelling can't pass silently; a pack with
   any problem is ignored, each problem with its file and line.
 
-`agent/src/test/resources/packs/` has the design's example packs, copied as it writes them (`debian`, `photonvision`,
-`raspberry-pi`, `detector`), which the unit tests read. The catalog of packs to copy is being
-rewritten for this format (milestone 3).
+`agent/src/test/resources/packs/` has the design's example packs, copied as it writes them
+(`debian`, `photonvision`, `raspberry-pi`, `detector`), which the unit tests read. The catalog of
+packs to copy is the repository's `packs/` (`packs/README.md`): `debian` (the design's example,
+with its scripts and its drive-health root timer), `photonvision` and `raspberry-pi`, each with a
+README saying what it measures and how it was checked. None is installed by default.
 
 ## `agent.json`: the board's own settings
 

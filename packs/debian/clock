@@ -1,0 +1,51 @@
+#!/bin/sh
+# Whether the clock is synchronized, and how far it is from its time source in seconds, positive
+# when it's behind: {"synced": true, "offset": 0.000412}.
+#
+# Synchronized is the kernel's view, as timedatectl reads it (NTPSynchronized), which chrony and
+# systemd-timesyncd both set. The offset is the daemon's: chrony's (chronyc's tracking report,
+# its system time, positive when slow), else systemd-timesyncd's (timedatectl timesync-status's
+# Offset, from its last NTP message). With neither, it says nothing of the offset.
+set -u
+case $(timedatectl show --property=NTPSynchronized --value 2>/dev/null) in
+  yes) synced=true ;;
+  no) synced=false ;;
+  *) synced= ;;
+esac
+
+offset=
+if tracking=$(chronyc -c tracking 2>/dev/null); then
+  offset=$(printf '%s\n' "$tracking" | awk -F, 'NR == 1 && $5 ~ /^-?[0-9.]+$/ { print $5 + 0 }')
+fi
+if [ -z "$offset" ] && status=$(timedatectl timesync-status --no-pager 2>/dev/null); then
+  # A time span as timedatectl writes one: +1.234ms, -2min 3.5s, +850us.
+  offset=$(printf '%s\n' "$status" | awk '
+    $1 == "Offset:" {
+      span = $0
+      sub(/^[ \t]*Offset:[ \t]*/, "", span)
+      sign = 1
+      if (span ~ /^-/) sign = -1
+      sub(/^[+-]/, "", span)
+      seconds = 0
+      while (match(span, /^[0-9.]+(us|ms|min|s|h|d)/)) {
+        part = substr(span, 1, RLENGTH)
+        span = substr(span, RLENGTH + 1)
+        sub(/^[ \t]+/, "", span)
+        number = part; sub(/[a-z]+$/, "", number)
+        unit = part; sub(/^[0-9.]+/, "", unit)
+        scale = unit == "us" ? 0.000001 : unit == "ms" ? 0.001 : unit == "s" ? 1 : \
+            unit == "min" ? 60 : unit == "h" ? 3600 : 86400
+        seconds += number * scale
+        found = 1
+      }
+      if (found && span == "") printf "%.9g\n", sign * seconds
+    }')
+fi
+
+out=
+[ -n "$synced" ] && out="\"synced\": $synced"
+if [ -n "$offset" ]; then
+  [ -n "$out" ] && out="$out, "
+  out="$out\"offset\": $offset"
+fi
+echo "{$out}"

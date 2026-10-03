@@ -1,0 +1,13 @@
+#!/bin/sh
+# A stand-in for timedatectl, for the debian pack's clock: synchronized, and systemd-timesyncd's
+# status with the offset /run/stand-in-offset says (else -2min 3.5s).
+case "$1" in
+  show) echo yes ;;
+  timesync-status)
+    echo "       Server: 10.26.11.1 (10.26.11.1)"
+    echo "Poll interval: 34min 8s (min: 32s; max 34min 8s)"
+    echo "       Offset: $(cat /run/stand-in-offset 2>/dev/null || echo '-2min 3.5s')"
+    echo "        Delay: 1.162ms"
+    ;;
+  *) exit 1 ;;
+esac

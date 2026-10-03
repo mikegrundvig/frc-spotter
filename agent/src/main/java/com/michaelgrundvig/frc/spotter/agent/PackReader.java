@@ -529,12 +529,52 @@ final class PackReader {
           "http asks the board itself only: http://localhost..., not " + url);
       return null;
     }
-    String form = optional(keys, "form").flatMap(n -> text(n, "form")).orElse("");
-    if (get && !form.isEmpty()) {
-      problem(keys.get("form"), "a GET sends no form");
+    String form = "";
+    String filename = "";
+    NodeTuple formKey = keys.get("form");
+    if (formKey != null) {
+      Node node = formKey.getValueNode();
+      if (node instanceof MappingNode) {
+        Map<String, NodeTuple> parts =
+            mapping((MappingNode) node, Set.of("field", "filename"), "form");
+        NodeTuple field = parts.get("field");
+        if (field == null) {
+          problem(formKey, "a form names its field: {field: data, filename: layout.json}");
+        } else {
+          form = formName(field.getValueNode(), "field");
+        }
+        NodeTuple file = parts.get("filename");
+        if (file != null) {
+          filename = formName(file.getValueNode(), "filename");
+        }
+      } else {
+        form = formName(node, "field");
+      }
+      if (get) {
+        problem(formKey, "a GET sends no form");
+      }
     }
-    return new Command.Http(get ? "GET" : "POST", url, form);
+    return new Command.Http(get ? "GET" : "POST", url, form, filename);
   }
+
+  /** A form's field or file name: a plain name, as it goes into a header as it is. */
+  private String formName(Node node, String what) {
+    String name = text(node, "a form's " + what).orElse("");
+    if (!FORM_NAME.matcher(name).matches()) {
+      problem(
+          node,
+          "a form's "
+              + what
+              + " is letters, digits, \".\", \"_\" and \"-\", such as data or layout.json, not \""
+              + name
+              + "\"");
+      return "";
+    }
+    return name;
+  }
+
+  /** A form's field or file name. */
+  static final Pattern FORM_NAME = Pattern.compile("[A-Za-z0-9._-]+");
 
   /** Whether a URL is the board's own: {@code http} to localhost. */
   static boolean local(String url) {

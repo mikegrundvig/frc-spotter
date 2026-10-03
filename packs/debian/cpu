@@ -1,0 +1,50 @@
+#!/bin/sh
+# The busiest core over half a second, and whether the fastest cores are held below their top
+# frequency, for heat or power: {"busiest": 87.5, "capped": false}.
+#
+# Busy is per core from /proc/stat (user, nice, system, irq, softirq and steal time; idle and
+# iowait aren't), as vision software often runs on the big cores alone: four at 100% hide inside a
+# 50% total. Capped is cpufreq's view: a policy of the fastest cores whose scaling_max_freq is below
+# its cpuinfo_max_freq. A thermal or power limit lowers it so; so does anyone who sets it lower on
+# purpose. Without cpufreq (a virtual machine) it says nothing of capped.
+set -u
+first=$(grep '^cpu[0-9]' /proc/stat) || exit 1
+sleep 0.5
+second=$(grep '^cpu[0-9]' /proc/stat) || exit 1
+
+busiest=$(printf '%s\n%s\n' "$first" "$second" | awk '
+  {
+    total = 0
+    for (i = 2; i <= 9 && i <= NF; i++) total += $i
+    idle = $5 + $6
+    if ($1 in totals) {
+      spent = total - totals[$1]
+      if (spent > 0) {
+        busy = 100 * (spent - (idle - idles[$1])) / spent
+        if (busy > most) most = busy
+      }
+    } else {
+      totals[$1] = total
+      idles[$1] = idle
+    }
+  }
+  END { printf "%.1f", most }')
+
+capped=$(for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+  most=$(cat "$policy/cpuinfo_max_freq" 2>/dev/null) || continue
+  limit=$(cat "$policy/scaling_max_freq" 2>/dev/null) || continue
+  echo "$most $limit"
+done | awk '
+  { most[NR] = $1; limit[NR] = $2; if ($1 > top) top = $1 }
+  END {
+    if (NR == 0) exit
+    capped = "false"
+    for (i = 1; i <= NR; i++) if (most[i] == top && limit[i] < most[i]) capped = "true"
+    print capped
+  }')
+
+if [ -n "$capped" ]; then
+  printf '{"busiest": %s, "capped": %s}\n' "$busiest" "$capped"
+else
+  printf '{"busiest": %s}\n' "$busiest"
+fi

@@ -117,6 +117,61 @@ class PackReaderTest {
   }
 
   @Test
+  void aFormNamesItsFieldAndMayNameTheFileItSends() {
+    String yaml =
+        """
+        pack: p
+        actions:
+          - id: plain
+            http: {post: "http://localhost:5800/api/a", form: data}
+            input: file
+          - id: named
+            http: {post: "http://localhost:5800/api/b", form: {field: data, filename: layout.json}}
+            input: file
+          - id: field-only
+            http: {post: "http://localhost:5800/api/c", form: {field: upload}}
+            input: file
+        """;
+    Pack pack = read("p", yaml);
+    Command.Http plain = (Command.Http) pack.actions().get(0).command();
+    assertThat(plain)
+        .isEqualTo(new Command.Http("POST", "http://localhost:5800/api/a", "data", ""));
+    assertThat(plain.file()).isEqualTo("data");
+    Command.Http named = (Command.Http) pack.actions().get(1).command();
+    assertThat(named.form()).isEqualTo("data");
+    assertThat(named.filename()).isEqualTo("layout.json");
+    assertThat(named.file()).isEqualTo("layout.json");
+    assertThat(((Command.Http) pack.actions().get(2).command()).file()).isEqualTo("upload");
+
+    String bad =
+        """
+        pack: p
+        actions:
+          - id: a
+            http: {post: "http://localhost/", form: {filename: layout.json}}
+            input: file
+          - id: b
+            http: {post: "http://localhost/", form: {field: data, name: x}}
+            input: file
+          - id: c
+            http: {post: "http://localhost/", form: {field: data, filename: "a\\"b.json"}}
+            input: file
+          - id: d
+            http: {post: "http://localhost/", form: "da ta"}
+            input: file
+        """;
+    assertThat(problems("p", bad))
+        .anyMatch(p -> p.endsWith("a form names its field: {field: data, filename: layout.json}"))
+        .anyMatch(p -> p.endsWith("unknown key \"name\" in form; known: field, filename"))
+        .anyMatch(
+            p ->
+                p.endsWith(
+                    "a form's filename is letters, digits, \".\", \"_\" and \"-\", such as data"
+                        + " or layout.json, not \"a\"b.json\""))
+        .anyMatch(p -> p.endsWith("not \"da ta\""));
+  }
+
+  @Test
   void aTeamsOwnPackHasRunActionsWithJsonResponses() throws IOException {
     Pack detector = read("detector", example("detector"));
     assertThat(detector.collectors().get(0).fields())

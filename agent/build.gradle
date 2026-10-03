@@ -50,6 +50,11 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
+    // The catalog's packs (packs/), which CatalogTest installs as a board's installer would.
+    def catalog = rootProject.file("packs")
+    inputs.files(fileTree(catalog) { exclude "**/build/**" })
+    .withPropertyName("catalog").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty "spotter.catalog", catalog.absolutePath
 }
 
 // frc-spotter.jar: the agent with everything it needs (the shared code), run with

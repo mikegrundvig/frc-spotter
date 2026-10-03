@@ -1,0 +1,35 @@
+#!/bin/sh
+# A page of the journal, as journalctl -o json writes it, by what the agent asks in SPOTTER_*:
+# SPOTTER_FROM latest (the newest SPOTTER_LIMIT entries), before or after SPOTTER_CURSOR (an
+# entry's __CURSOR), oldest first, at SPOTTER_LEVEL or more severe. Its arguments go to journalctl
+# as they are: --unit=photonvision.service, for one service's log. Reading the system journal takes
+# the systemd-journal group, which the agent's package gives it.
+set -u
+limit=${SPOTTER_LIMIT:-100}
+level=${SPOTTER_LEVEL:-debug}
+case $level in
+  error) level=err ;;
+  warning | info | debug) ;;
+  *) level=debug ;;
+esac
+cursor=${SPOTTER_CURSOR:-}
+set -- -o json --output-fields=MESSAGE,PRIORITY,SYSLOG_IDENTIFIER --no-pager -q \
+  --priority="$level" "$@"
+
+case ${SPOTTER_FROM:-latest} in
+  latest)
+    exec journalctl "$@" --lines="$limit"
+    ;;
+  before)
+    # Back from the cursor's entry, newest first: that entry left out, then oldest first.
+    journalctl "$@" --cursor="$cursor" --reverse --lines=$((limit + 1)) |
+      grep -v -F -e "$cursor" | tac
+    ;;
+  after)
+    journalctl "$@" --after-cursor="$cursor" | head -n "$limit"
+    ;;
+  *)
+    echo "SPOTTER_FROM is latest, before or after, not $SPOTTER_FROM" >&2
+    exit 2
+    ;;
+esac

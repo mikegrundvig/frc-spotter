@@ -439,7 +439,7 @@ final class Commands implements Runner, AutoCloseable {
     try {
       connection.setRequestMethod(http.method());
       if (http.method().equals("POST")) {
-        send(connection, http.form(), options.input());
+        send(connection, http.form(), http.file(), options.input());
       }
       int status = connection.getResponseCode();
       ByteArrayOutputStream kept = new ByteArrayOutputStream();
@@ -495,9 +495,10 @@ final class Commands implements Runner, AutoCloseable {
 
   /**
    * Sends a POST's body: its input as it is, or as a form's one file field ({@code form}, as
-   * multipart/form-data); nothing when it has none.
+   * multipart/form-data, saying it sends a file named {@code filename}); nothing when it has none.
    */
-  private static void send(HttpURLConnection connection, String form, @Nullable Path input)
+  private static void send(
+      HttpURLConnection connection, String form, String filename, @Nullable Path input)
       throws IOException {
     connection.setDoOutput(true);
     if (input == null) {
@@ -520,7 +521,7 @@ final class Commands implements Runner, AutoCloseable {
                 + "\r\nContent-Disposition: form-data; name=\""
                 + form
                 + "\"; filename=\""
-                + form
+                + filename
                 + "\"\r\nContent-Type: application/octet-stream\r\n\r\n")
             .getBytes(StandardCharsets.UTF_8);
     byte[] tail = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);

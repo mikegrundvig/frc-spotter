@@ -1,0 +1,6 @@
+#!/bin/sh
+# The root filesystem's free space, as a share of its size, counting only what anyone may use (what
+# df calls available, without root's reserve): {"root-free": 63.2}.
+set -u
+df -Pk / | awk 'NR == 2 && $2 > 0 { printf "{\"root-free\": %.1f}\n", 100 * $4 / $2; done = 1 }
+  END { if (!done) print "{}" }'

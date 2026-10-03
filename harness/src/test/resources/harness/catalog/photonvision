@@ -1,0 +1,62 @@
+#!/bin/sh
+# A stand-in for PhotonVision's web server, for the photonvision pack: one request, on its standard
+# input and output (busybox nc -e), answered as PhotonVision's source at 71416112 answers it.
+#   GET  /                                        200, its web UI
+#   POST /api/utils/restartProgram                204
+#   GET  /api/settings/photonvision_config.zip    200, a zip
+#   POST /api/settings/fieldLayout                a form's file field "data", its file name's
+#                                                 extension json: 200; else 400, as it says why
+# A field layout it takes is kept in /run/stand-in-layout, the whole form, for the test to read.
+read -r method target version || exit 0
+target=${target%%\?*}
+length=0
+while read -r line; do
+  line=$(printf '%s' "$line" | tr -d '\r')
+  [ -z "$line" ] && break
+  case $line in
+    [Cc]ontent-[Ll]ength:*) length=$(printf '%s' "${line#*:}" | tr -d ' ') ;;
+  esac
+done
+body=$(head -c "$length")
+
+answer() {
+  printf 'HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
+    "$1" "$2" "${#3}" "$3"
+}
+
+case "$method $target" in
+  "GET /")
+    answer "200 OK" text/html "<html>PhotonVision</html>"
+    ;;
+  "POST /api/utils/restartProgram")
+    printf 'HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n'
+    ;;
+  "GET /api/settings/photonvision_config.zip")
+    answer "200 OK" application/zip "PK its settings"
+    ;;
+  "POST /api/settings/fieldLayout")
+    disposition=$(printf '%s\n' "$body" | tr -d '\r' | grep -i '^Content-Disposition: form-data' | head -n 1)
+    name=$(printf '%s' "$disposition" | sed -n 's/.*[; ]name="\([^"]*\)".*/\1/p')
+    filename=$(printf '%s' "$disposition" | sed -n 's/.*filename="\([^"]*\)".*/\1/p')
+    extension=
+    case $filename in
+      *.*) extension=${filename##*.} ;;
+    esac
+    if [ "$name" != data ]; then
+      answer "400 Bad Request" text/plain "No File was sent with the request. Make sure that the field layout json is sent at the key 'data'"
+    else
+      case $extension in
+        *json*)
+          printf '%s' "$body" > /run/stand-in-layout
+          answer "200 OK" text/plain "Successfully saved the uploaded FieldLayout, rebooting..."
+          ;;
+        *)
+          answer "400 Bad Request" text/plain "The uploaded file was not of type 'json'. The uploaded file should be a .json file."
+          ;;
+      esac
+    fi
+    ;;
+  *)
+    answer "404 Not Found" text/plain "Not found"
+    ;;
+esac

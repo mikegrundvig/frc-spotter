@@ -169,6 +169,44 @@ class CommandsTest {
   }
 
   @Test
+  void anActionsInputGoesAsAFormsFileFieldNamedAsThePackSays() throws Exception {
+    List<String> got = new java.util.concurrent.CopyOnWriteArrayList<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/upload",
+        exchange -> {
+          got.add(exchange.getRequestHeaders().getFirst("Content-Type"));
+          got.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+          exchange.sendResponseHeaders(200, -1);
+          exchange.close();
+        });
+    server.start();
+    try {
+      String at = "http://localhost:" + server.getAddress().getPort() + "/upload";
+      Path input = dir.resolve("input");
+      java.nio.file.Files.writeString(input, "{\"tags\": []}");
+      Commands.Options options =
+          new Commands.Options(input, java.util.Map.of(), 1024, 0, line -> {}, Duration.ZERO);
+      for (Command.Http http :
+          List.of(
+              new Command.Http("POST", at, "data", "layout.json"),
+              new Command.Http("POST", at, "data"))) {
+        got.clear();
+        Commands.Result result =
+            commands.run(folder, http, SECOND, options, new Commands.Cancellation());
+        assertThat(result.code()).isEqualTo(200);
+        assertThat(got.get(0)).startsWith("multipart/form-data; boundary=spotter-");
+        assertThat(got.get(1))
+            .contains(
+                "Content-Disposition: form-data; name=\"data\"; filename=\"" + http.file() + "\"")
+            .contains("\r\n\r\n{\"tags\": []}\r\n--spotter-");
+      }
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void aPageNobodyServesIsUnreachable() throws Exception {
     int port;
     try (ServerSocket free = new ServerSocket(0)) {

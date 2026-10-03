@@ -1,0 +1,6 @@
+#!/bin/sh
+# A stand-in for chronyc, for the debian pack's clock: its tracking report as CSV (-c), the system
+# time 0.000412 s slow; or, while /run/stand-in-no-chrony is there, no chronyd to ask.
+[ -e /run/stand-in-no-chrony ] && exit 1
+[ "$1 $2" = "-c tracking" ] || exit 1
+echo 'A9FEA9FE,169.254.169.254,3,1696000000.123456789,0.000412000,-0.000021000,0.000100000,-12.345,0.001,0.010,0.001234,0.000567,64.2,Normal'

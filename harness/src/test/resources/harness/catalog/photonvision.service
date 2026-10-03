@@ -1,0 +1,11 @@
+# A stand-in for PhotonVision, for the photonvision pack: its service, by its name, answering on
+# 5800 as PhotonVision does (./photonvision, one request at a time).
+[Unit]
+Description=PhotonVision stand-in
+
+[Service]
+ExecStart=/bin/busybox nc -ll -p 5800 -e /opt/stand-ins/photonvision
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
