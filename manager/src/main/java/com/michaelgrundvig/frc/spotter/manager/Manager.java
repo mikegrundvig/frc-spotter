@@ -46,6 +46,8 @@ public final class Manager implements AutoCloseable {
   private final @Nullable Signer signer;
   private final String keyProblem;
   private final String packsProblem;
+  private final @Nullable TeamPacks teamPacks;
+  private final List<String> tooLarge = new ArrayList<>();
   private long started;
   private boolean running;
   private boolean settled;
@@ -95,6 +97,7 @@ public final class Manager implements AutoCloseable {
       }
     }
     packsProblem = problem;
+    teamPacks = packs;
     // Each request's deadline: one thread for all of them, a cancelled one gone at once.
     deadlines =
         new ScheduledThreadPoolExecutor(
@@ -114,7 +117,18 @@ public final class Manager implements AutoCloseable {
         throw new IllegalArgumentException("an agent's address is given twice: " + address);
       }
       boards[i] = new Board(address, settings);
-      links[i] = new Link(boards[i], robot, settings, recorder, packs, signer, deadlines);
+      // Its packs: those every board has, and those named for it.
+      TeamPacks its = packs == null ? null : packs.select(pack -> settings.packFor(address, pack));
+      if (its != null && !its.tooLarge().isEmpty()) {
+        tooLarge.add(
+            "the team's Spotter packs for "
+                + address
+                + " are "
+                + its.tooLarge()
+                + ": nothing is pushed to it");
+        its = null;
+      }
+      links[i] = new Link(boards[i], robot, settings, recorder, its, signer, deadlines);
     }
     boardList = List.of(boards);
     seen = new Spotter.Description[boards.length];
@@ -192,6 +206,36 @@ public final class Manager implements AutoCloseable {
               Level.WARNING,
               "",
               "the team's Spotter packs can't be read (" + packsProblem + "): nothing is pushed"));
+    }
+    for (String each : tooLarge) {
+      found.add(new Alert(Level.WARNING, "", each));
+    }
+    for (String address : new TreeSet<>(settings.boardPacks().keySet())) {
+      if (boardList.stream().noneMatch(board -> board.address().equals(address))) {
+        found.add(
+            new Alert(
+                Level.WARNING,
+                "",
+                "Spotter's packs for "
+                    + address
+                    + " name a board the manager wasn't given: none of its addresses is "
+                    + address));
+        continue;
+      }
+      for (String pack : new TreeSet<>(settings.boardPacks().get(address))) {
+        if (teamPacks == null || !teamPacks.names().contains(pack)) {
+          found.add(
+              new Alert(
+                  Level.WARNING,
+                  "",
+                  "Spotter's packs for "
+                      + address
+                      + " name "
+                      + pack
+                      + ", which isn't among the team's packs"
+                      + settings.packs().map(folder -> " (" + folder + ")").orElse("")));
+        }
+      }
     }
     boolean signatures = false;
     for (Spotter.Description description : seen) {

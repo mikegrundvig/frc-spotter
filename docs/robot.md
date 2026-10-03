@@ -53,6 +53,7 @@ Each has a default (`Settings.DEFAULTS`); robot code changes those it needs with
 | `refuseWhileEnabled` | on | Refuse an action while the robot is enabled or the field is attached, unless the action says `whileEnabled: true` |
 | `pushAutomatically` | on | Push the team's packs to a board whose packs differ, while the robot is disabled and off the field |
 | `packs` | none | The team's packs: a folder of pack folders |
+| `boardPacks` | none | Which of them go to some boards alone, by board address (*Each board's packs*) |
 | `key` | `/home/systemcore/spotter.key` | The private key that signs writes, for boards that require signatures (*Signing*) |
 | `publicKey` | `spotter.pub` beside the key | Its public key, whose id each signature names |
 
@@ -141,6 +142,8 @@ until one changes. Robot code maps them onto its own, WPILib's `Alert` say: `FAI
 | More than 32 values at warning or failing on one board | the worst of the rest | the failing ones first, then `vision-front: 9 more values at warning or failing` |
 | Packs that differ and won't be pushed now | warning | `vision-front's packs differ from the robot's: they'll be pushed off the field` |
 | A board that reports problems | warning | `vision-front reports 2 problems, the first: /var/lib/frc-spotter/packs/detector/pack.yaml:8: unknown key "evry" in a collector; ...` |
+| Packs named for a board the manager wasn't given, or a pack that isn't in the folder | warning | `Spotter's packs for 10.26.11.12 name detector, which isn't among the team's packs (/home/systemcore/deploy/spotter-packs)` |
+| A board's packs past what a push may carry | warning | `the team's Spotter packs for 10.26.11.11 are 5000 files, more than the 4096 a push may carry: nothing is pushed to it` |
 | No key pair, while a board requires signatures | warning | `no Spotter key pair on this controller (/home/systemcore/spotter.key, /home/systemcore/spotter.pub): boards that require signatures will refuse its actions and pushes` |
 | A limit override that matches nothing | warning | `Spotter's limits for vision.health.fsp match no value or response field on any board` |
 
@@ -210,6 +213,22 @@ manager fetches the run's log again. A run that was going when the agent stopped
 Given the team's packs (`Settings.withPacks(folder)`: a folder of pack folders, in the deploy
 directory so they live in Git with the robot code), the manager makes sure every board has them, so
 a spare board just works.
+
+**Each board's packs.** A robot's boards aren't all alike: a PhotonVision board and a detector
+board want different packs. Robot code says which board gets which, in code, from the one folder:
+
+```java
+Settings.DEFAULTS
+    .withPacks(deploy.resolve("spotter-packs"))      // debian, photonvision, detector
+    .withBoardPacks("10.26.11.11", "photonvision")   // and debian, which every board has
+    .withBoardPacks("10.26.11.12", "detector")
+```
+
+A pack named for a board (by its address, as the manager is given it) goes to the boards that name
+it, and no other; a pack named for none goes to every board. Each board gets its own bundle and its
+own hash, so each is pushed only when its own set changes. A name that isn't a pack in the folder,
+or an address that isn't one of the manager's, is a warning, and so is a board's set past what a
+push may carry (4,096 files, 16 MiB): nothing is pushed to that board.
 
 1. It reads them as it's made into the bundle it pushes: a `PackBundle` (`spotter.proto`), each
    file's path in the folder, whether it's executable, and its bytes, exactly what the pack hash

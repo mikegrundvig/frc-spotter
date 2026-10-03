@@ -80,5 +80,14 @@ public final class Protocol {
   /** The most problems a board may list: past them, the last says how many more there were. */
   public static final int MAX_PROBLEMS = 128;
 
+  /**
+   * The most a pushed bundle's files may hold, in bytes: packs are scripts and settings, and a
+   * bundle is read whole into the agent's 64 MiB heap.
+   */
+  public static final long MAX_BUNDLE = 16L * 1024 * 1024;
+
+  /** The most files a pushed bundle may hold. */
+  public static final int MAX_FILES = 4096;
+
   private Protocol() {}
 }

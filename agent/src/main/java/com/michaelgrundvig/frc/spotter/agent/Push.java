@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
 import com.michaelgrundvig.frc.spotter.protocol.PackHash;
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import com.michaelgrundvig.frc.spotter.protocol.WireCheck;
 import java.io.BufferedInputStream;
@@ -40,14 +41,11 @@ final class Push {
   /** Where pushed bundles are unpacked, each in a folder of its own. */
   static final String BUNDLES = "/var/lib/frc-spotter/pushed";
 
-  /**
-   * The largest bundle taken, and the most its files may hold: packs are scripts and settings, and
-   * a bundle is read whole into the agent's 64 MiB heap.
-   */
-  static final long MAX_BUNDLE = 16L * 1024 * 1024;
+  /** The largest bundle taken, and the most its files may hold ({@link Protocol#MAX_BUNDLE}). */
+  static final long MAX_BUNDLE = Protocol.MAX_BUNDLE;
 
-  /** The most files a bundle may hold. */
-  static final int MAX_FILES = 4096;
+  /** The most files a bundle may hold ({@link Protocol#MAX_FILES}). */
+  static final int MAX_FILES = Protocol.MAX_FILES;
 
   /** A bundle that can't be taken: why. */
   static final class Rejected extends Exception {
