@@ -67,7 +67,7 @@ A refusal or a failure answers its status with a `Problem` saying why:
 | `421` | A request not addressed to the board (its `Host` isn't a 10.x, 169.254.x or loopback address, `localhost`, or its own name), so a web page elsewhere can't reach it through a name that resolves to it |
 | `500` | The agent failed; its journal says why |
 | `502`, `504` | A log's command failed, or timed out |
-| `503` | Every write while `agent.json` can't be read; two actions running; four streams open (with `Retry-After`) |
+| `503` | Every write while `agent.json` can't be read; two actions running; two streams open to others than the robot controller; eight requests under way from one address; two logs being paged, or two runs' logs read (with `Retry-After`) |
 
 Each request has a thread of its own, so a client that's slow, or never finishes sending, holds up
 nobody else; a request must arrive within 4 seconds, and 32 connections are open at most. What the
@@ -77,7 +77,16 @@ what it quotes can't forge a line; a failure (`500`) is written at most once in 
 ### The stream
 
 One stream per manager: a long-lived response carrying `Event`s as they happen, each preceded by
-its length as a varint (protobuf's delimited form). At most four are open at once.
+its length as a varint (protobuf's delimited form).
+
+- **The robot controller's streams are its own:** its address may have two open (its manager's,
+  and one it's replacing); one more closes its oldest. Everyone else together may have two; one
+  more is refused (`503`). So readers holding streams they no longer read (a laptop unplugged
+  mid-stream holds its connection until TCP gives up, some 15 minutes) never keep the robot's
+  manager out.
+- **A stream whose reader stops reading is closed** once a write to it has stalled 10 s.
+- **One address may have eight requests under way at once**, its streams included; one more is
+  refused (`503`).
 
 | Event | When |
 |---|---|
