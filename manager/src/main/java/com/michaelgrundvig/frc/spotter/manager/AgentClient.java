@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.spotter.manager;
 
 import com.michaelgrundvig.frc.spotter.protocol.Protocol;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -19,7 +20,8 @@ import org.jspecify.annotations.Nullable;
  * fetched, packs pushed. Each runs on one of the board's request threads, never the loop's, with
  * the JDK's HTTP client; each answer's protocol version is checked before its body is read. Each is
  * bounded: a connection's own timeouts, and an overall {@link #DEADLINE_MILLIS}, past which its
- * connection is dropped, so an agent that answers a byte at a time can't hold a thread. Writes are
+ * connection is dropped and its answer refused within one more read, so an agent that answers a
+ * byte at a time can't hold a thread. Writes are
  * signed when the manager has a key, over the board's current stream connection's challenge, one at
  * a time so their counters arrive in order.
  */
@@ -181,13 +183,23 @@ final class AgentClient {
       if (code / 100 != 2) {
         throw new Refused(code, Link.refusal(c, code));
       }
+      // Read a chunk at a time, the deadline checked between them: dropping the connection
+      // doesn't stop a read of the JDK's that's under way, but each read ends within its timeout.
       try (InputStream in = c.getInputStream()) {
-        byte[] answer = in.readNBytes(MAX_ANSWER + 1);
-        if (answer.length > MAX_ANSWER) {
-          throw new Refused(
-              code, "its answer is past the " + (MAX_ANSWER >> 20) + " MiB the manager takes");
+        ByteArrayOutputStream answer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int read;
+        while ((read = in.read(chunk)) != -1) {
+          if (late.get()) {
+            throw new IOException("past its deadline");
+          }
+          answer.write(chunk, 0, read);
+          if (answer.size() > MAX_ANSWER) {
+            throw new Refused(
+                code, "its answer is past the " + (MAX_ANSWER >> 20) + " MiB the manager takes");
+          }
         }
-        return answer;
+        return answer.toByteArray();
       }
     } catch (Refused e) {
       throw e;
