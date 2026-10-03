@@ -45,10 +45,13 @@ public final class PackHash {
     if (!Files.isDirectory(folder)) {
       return "";
     }
+    // The folder itself may be a link (the agent swaps its pushed packs in by one): what it's a
+    // link to is walked.
+    Path real = folder.toRealPath();
     List<String> paths = new ArrayList<>();
-    try (Stream<Path> walk = Files.walk(folder)) {
+    try (Stream<Path> walk = Files.walk(real)) {
       walk.filter(Files::isRegularFile)
-          .forEach(file -> paths.add(folder.relativize(file).toString().replace('\\', '/')));
+          .forEach(file -> paths.add(real.relativize(file).toString().replace('\\', '/')));
     }
     if (paths.isEmpty()) {
       return "";
@@ -57,7 +60,7 @@ public final class PackHash {
     MessageDigest digest = sha256();
     byte[] chunk = new byte[64 * 1024];
     for (String path : paths) {
-      Path file = folder.resolve(path);
+      Path file = real.resolve(path);
       digest.update(path.getBytes(StandardCharsets.UTF_8));
       digest.update((byte) 0);
       digest.update(permissions(file).getBytes(StandardCharsets.UTF_8));

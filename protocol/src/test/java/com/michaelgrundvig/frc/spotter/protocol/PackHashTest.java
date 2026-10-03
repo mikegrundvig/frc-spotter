@@ -68,6 +68,14 @@ class PackHashTest {
   }
 
   @Test
+  void aLinkToTheFolderHashesAsTheFolder() throws IOException {
+    Path packs = packs("bundle");
+    Path link = dir.resolve("packs");
+    Files.createSymbolicLink(link, dir.relativize(packs));
+    assertThat(PackHash.of(link)).isEqualTo(PackHash.of(packs)).isNotEmpty();
+  }
+
+  @Test
   void noFilesHashToNothing() throws IOException {
     assertThat(PackHash.of(dir.resolve("missing"))).isEmpty();
     Files.createDirectories(dir.resolve("empty/debian"));
