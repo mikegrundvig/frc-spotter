@@ -1,5 +1,6 @@
-// Spotter: a coprocessor's agent, the protocol the robot speaks with it, and its container harness. The supporting
-// build rules live in gradle/ (quality.gradle: formatting, static analysis, coverage, the ci task).
+// Spotter: a coprocessor's agent, the robot's manager, the protocol they speak, and the agent's
+// container harness. The supporting build rules live in gradle/ (quality.gradle: formatting, static
+// analysis, coverage, the ci task).
 //
 //   ./gradlew ci        every check CI runs; run it before pushing
 

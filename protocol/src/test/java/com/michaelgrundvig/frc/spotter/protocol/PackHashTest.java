@@ -10,6 +10,7 @@ import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermissions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import us.hebi.quickbuf.ProtoMessage;
 
 /** The pack hash: of what the packs contain, whatever their copies' times and umasks. */
 class PackHashTest {
@@ -88,5 +89,38 @@ class PackHashTest {
     write(dir.resolve("plain"), "", "rw-rw-rw-");
     assertThat(PackHash.permissions(dir.resolve("group"))).isEqualTo(PackHash.EXECUTABLE);
     assertThat(PackHash.permissions(dir.resolve("plain"))).isEqualTo(PackHash.PLAIN);
+  }
+
+  @Test
+  void aBundleOfAFolderHashesAsTheFolderDoes() throws Exception {
+    Path folder = packs("robot");
+    Spotter.PackBundle bundle = PackHash.bundle(folder);
+    assertThat(bundle.getFiles())
+        .extracting(Spotter.PackFile::getPath)
+        .containsExactly("debian/cpu", "debian/pack.yaml", "vision/pack.yaml");
+    assertThat(bundle.getFiles().get(0).getExecutable()).isTrue();
+    assertThat(bundle.getFiles().get(1).getExecutable()).isFalse();
+    assertThat(new String(bundle.getFiles().get(1).getContent().toArray(), StandardCharsets.UTF_8))
+        .isEqualTo("pack: debian\n");
+    assertThat(PackHash.of(bundle)).isEqualTo(PackHash.of(folder)).hasSize(64);
+    // Over the wire and back, as the agent gets it: the same hash.
+    Spotter.PackBundle sent =
+        ProtoMessage.mergeFrom(Spotter.PackBundle.newInstance(), bundle.toByteArray());
+    assertThat(PackHash.of(sent)).isEqualTo(PackHash.of(folder));
+    // In any order: the hash sorts by path.
+    Spotter.PackBundle reversed = Spotter.PackBundle.newInstance();
+    for (int i = bundle.getFiles().length() - 1; i >= 0; i--) {
+      reversed.addFiles(bundle.getFiles().get(i));
+    }
+    assertThat(PackHash.of(reversed)).isEqualTo(PackHash.of(folder));
+    // A change to a file's executable flag changes it.
+    reversed.getMutableFiles().get(0).setExecutable(!reversed.getFiles().get(0).getExecutable());
+    assertThat(PackHash.of(reversed)).isNotEqualTo(PackHash.of(folder));
+  }
+
+  @Test
+  void aBundleWithNoFilesHashesToNothing() throws IOException {
+    assertThat(PackHash.of(Spotter.PackBundle.newInstance())).isEmpty();
+    assertThat(PackHash.bundle(dir.resolve("missing")).getFiles()).isEmpty();
   }
 }

@@ -15,8 +15,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -187,7 +185,7 @@ class WritesTest {
         .isEqualTo("only the robot controller (10.12.34.2) may run an action");
     assertThat(send(HttpRequest.newBuilder(at("/v2/runs/0123456789abcdef")).DELETE()).statusCode())
         .isEqualTo(403);
-    assertThat(post("/v2/packs", "zip").statusCode()).isEqualTo(403);
+    assertThat(post("/v2/packs", "bundle").statusCode()).isEqualTo(403);
     assertThat(fixture.log())
         .contains("Refused a write (run an action) from 127.0.0.1: not the robot controller");
     // Reading is open to anyone.
@@ -213,7 +211,7 @@ class WritesTest {
         .startsWith("every write is refused while /etc/frc-spotter/agent.json can't be read: ");
     assertThat(send(HttpRequest.newBuilder(at("/v2/runs/0123456789abcdef")).DELETE()).statusCode())
         .isEqualTo(503);
-    assertThat(post("/v2/packs", "zip").statusCode()).isEqualTo(503);
+    assertThat(post("/v2/packs", "bundle").statusCode()).isEqualTo(503);
     Spotter.Description description =
         ProtoMessage.mergeFrom(
             Spotter.Description.newInstance(),
@@ -312,7 +310,7 @@ class WritesTest {
     Opened opened = stream("?packs=abc");
     assertThat(opened.response().statusCode()).isEqualTo(200);
     opened.response().body().close();
-    HttpResponse<byte[]> refused = post("/v2/packs", "zip");
+    HttpResponse<byte[]> refused = post("/v2/packs", "bundle");
     assertThat(refused.statusCode()).isEqualTo(403);
     assertThat(problem(refused))
         .isEqualTo("this board refuses pushes: its agent.json says acceptPushes: false");
@@ -321,16 +319,16 @@ class WritesTest {
   @Test
   void aPushPutsThePacksInPlaceAndEndsTheAgent() throws Exception {
     serve("127.0.0.1");
-    Path zip = dir.resolve("bundle.zip");
-    try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(zip))) {
-      out.putNextEntry(new ZipEntry("vision/pack.yaml"));
-      out.write("pack: vision\n".getBytes(StandardCharsets.UTF_8));
-      out.closeEntry();
-    }
+    Spotter.PackBundle bundle = Spotter.PackBundle.newInstance();
+    bundle.addFiles(
+        Spotter.PackFile.newInstance()
+            .setPath("vision/pack.yaml")
+            .setContent("pack: vision\n".getBytes(StandardCharsets.UTF_8)));
     HttpResponse<byte[]> pushed =
         send(
             HttpRequest.newBuilder(at(Protocol.PACKS))
-                .POST(HttpRequest.BodyPublishers.ofFile(zip)));
+                .header("Content-Type", Protocol.PROTOBUF)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(bundle.toByteArray())));
     assertThat(pushed.statusCode()).isEqualTo(202);
     for (int i = 0; i < 50 && fixture.exits.get() == 0; i++) {
       Thread.sleep(50);
@@ -338,8 +336,8 @@ class WritesTest {
     assertThat(fixture.exits.get()).isEqualTo(1);
     assertThat(Files.readString(fixture.path(Packs.PUSHED + "/vision/pack.yaml")))
         .isEqualTo("pack: vision\n");
-    HttpResponse<byte[]> notZip = post("/v2/packs", "not a zip");
-    assertThat(notZip.statusCode()).isEqualTo(400);
+    HttpResponse<byte[]> notABundle = post("/v2/packs", "not a bundle");
+    assertThat(notABundle.statusCode()).isEqualTo(400);
     assertThat(
             PosixFilePermissions.toString(
                 Files.getPosixFilePermissions(fixture.path(Packs.PUSHED + "/vision/pack.yaml"))))

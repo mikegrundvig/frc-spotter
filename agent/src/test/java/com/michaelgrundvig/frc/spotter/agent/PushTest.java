@@ -4,23 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.michaelgrundvig.frc.spotter.protocol.PackHash;
-import java.io.OutputStream;
-import java.net.URI;
+import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.util.Map;
 import java.util.stream.Stream;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Pushed packs: a zip of pack folders, unpacked with scripts executable, swapped in at once. */
+/**
+ * Pushed packs: a bundle of pack folders ({@code PackBundle}), written with scripts executable,
+ * swapped in at once; and every bundle that isn't one the agent takes refused, nothing changed.
+ */
 class PushTest {
   @TempDir Path dir;
   Fixture fixture;
@@ -44,30 +41,33 @@ class PushTest {
     return folder;
   }
 
-  /** A bundle of a folder of packs, as the manager zips one: with each file's permissions. */
-  private Path zip(Path packs) throws Exception {
-    Path zip = push.bundle();
-    Files.delete(zip);
-    try (FileSystem bundle =
-        FileSystems.newFileSystem(
-            URI.create("jar:" + zip.toUri()),
-            Map.of("create", "true", "enablePosixFileAttributes", "true"))) {
-      try (Stream<Path> files = Files.walk(packs)) {
-        for (Path file : files.filter(Files::isRegularFile).toList()) {
-          Path entry = bundle.getPath("/" + packs.relativize(file));
-          Files.createDirectories(entry.getParent());
-          Files.copy(file, entry);
-          Files.setPosixFilePermissions(entry, Files.getPosixFilePermissions(file));
-        }
-      }
+  /** A folder's bundle, as the manager makes and sends it, in the file the request is read to. */
+  private Path sent(Path packs) throws Exception {
+    return sent(PackHash.bundle(packs));
+  }
+
+  private Path sent(Spotter.PackBundle bundle) throws Exception {
+    Path body = push.bundle();
+    Files.write(body, bundle.toByteArray());
+    return body;
+  }
+
+  /** A bundle made by hand: a path and its text each, all plain files. */
+  private static Spotter.PackBundle files(String... pathsAndTexts) {
+    Spotter.PackBundle bundle = Spotter.PackBundle.newInstance();
+    for (int i = 0; i < pathsAndTexts.length; i += 2) {
+      bundle.addFiles(
+          Spotter.PackFile.newInstance()
+              .setPath(pathsAndTexts[i])
+              .setContent(pathsAndTexts[i + 1].getBytes(StandardCharsets.UTF_8)));
     }
-    return zip;
+    return bundle;
   }
 
   @Test
   void aBundleIsPutInPlaceAsItsPacksWithTheirHash() throws Exception {
     Path robot = packs("robot", "1.0.0");
-    push.apply(zip(robot));
+    push.apply(sent(robot));
     Path pushed = fixture.path(Packs.PUSHED);
     assertThat(Files.isSymbolicLink(pushed)).isTrue();
     assertThat(Files.readString(pushed.resolve("vision/pack.yaml"))).contains("1.0.0");
@@ -80,14 +80,16 @@ class PushTest {
             PosixFilePermissions.toString(
                 Files.getPosixFilePermissions(pushed.resolve("vision/pack.yaml"))))
         .isEqualTo("rw-r--r--");
-    // The robot's hash of its folder is the board's of what was put in place.
-    assertThat(PackHash.of(pushed)).isEqualTo(PackHash.of(robot));
+    // The robot's hash of its folder, and of its bundle, is the board's of what was put in place.
+    assertThat(PackHash.of(pushed))
+        .isEqualTo(PackHash.of(robot))
+        .isEqualTo(PackHash.of(PackHash.bundle(robot)));
     assertThat(Packs.load(fixture.host, true).pushedHash()).isEqualTo(PackHash.of(robot));
     assertThat(fixture.log()).contains("Packs pushed (" + PackHash.of(robot) + ")");
 
     // Pushed again: swapped in one step, the old bundle tidied away.
     Path next = packs("next", "2.0.0");
-    push.apply(zip(next));
+    push.apply(sent(next));
     assertThat(Files.readString(pushed.resolve("vision/pack.yaml"))).contains("2.0.0");
     try (Stream<Path> bundles = Files.list(fixture.path(Push.BUNDLES))) {
       assertThat(bundles).hasSize(1);
@@ -97,38 +99,66 @@ class PushTest {
   @Test
   void packsPutThereByHandAreKeptAsideByTheFirstPush() throws Exception {
     fixture.pushed("old", "pack: old\n");
-    push.apply(zip(packs("robot", "1.0.0")));
+    push.apply(sent(packs("robot", "1.0.0")));
     assertThat(Files.exists(fixture.path(Packs.PUSHED + "/old"))).isFalse();
     assertThat(Files.exists(fixture.path(Packs.PUSHED + "/vision/pack.yaml"))).isTrue();
   }
 
+  /** Applies a bundle that must be refused: why. */
+  private String refused(Spotter.PackBundle bundle) throws Exception {
+    Path body = sent(bundle);
+    Push.Rejected rejected = catchThrowableOfType(Push.Rejected.class, () -> push.apply(body));
+    assertThat(rejected).as("refused").isNotNull();
+    assertThat(Files.exists(body)).isFalse();
+    return String.valueOf(rejected.getMessage());
+  }
+
   @Test
-  void aBundleThatIsntAZipOrLeavesItsFolderIsRefusedAndNothingChanges() throws Exception {
-    push.apply(zip(packs("robot", "1.0.0")));
+  void aBundleTheAgentDoesntTakeIsRefusedAndNothingChanges() throws Exception {
+    push.apply(sent(packs("robot", "1.0.0")));
     String before = PackHash.of(fixture.path(Packs.PUSHED));
-    Path notZip = push.bundle();
-    Files.writeString(notZip, "not a zip");
-    assertThat(catchThrowableOfType(Push.Rejected.class, () -> push.apply(notZip)))
-        .hasMessageStartingWith("the bundle isn't a zip");
-    Path escaping = push.bundle();
-    try (OutputStream out = Files.newOutputStream(escaping);
-        ZipOutputStream zip = new ZipOutputStream(out)) {
-      zip.putNextEntry(new ZipEntry("../../../etc/evil"));
-      zip.write("x".getBytes(StandardCharsets.UTF_8));
-      zip.closeEntry();
+
+    Path notABundle = push.bundle();
+    // Field 1, said to be 127 bytes long, and then nothing.
+    Files.write(notABundle, new byte[] {0x0a, 0x7f});
+    assertThat(catchThrowableOfType(Push.Rejected.class, () -> push.apply(notABundle)))
+        .hasMessageStartingWith("the bundle isn't a PackBundle");
+
+    for (String outside :
+        new String[] {
+          "../../../etc/evil", "/etc/evil", "vision/../../evil", "", "vision//check", "./x", "a\\b"
+        }) {
+      assertThat(refused(files(outside, "x")))
+          .isEqualTo("the bundle names a path outside its folder: " + outside);
     }
-    Push.Rejected rejected = catchThrowableOfType(Push.Rejected.class, () -> push.apply(escaping));
-    assertThat(rejected).isNotNull();
     assertThat(Files.exists(fixture.path("/etc/evil"))).isFalse();
+    assertThat(refused(files("vision/pack.yaml", "a", "vision/pack.yaml", "b")))
+        .isEqualTo("the bundle names a file twice: vision/pack.yaml");
+    assertThat(refused(files("vision", "a", "vision/pack.yaml", "b")))
+        .isEqualTo("the bundle names a file twice: vision/pack.yaml");
     assertThat(PackHash.of(fixture.path(Packs.PUSHED))).isEqualTo(before);
-    assertThat(Files.exists(notZip)).isFalse();
+  }
+
+  @Test
+  void aBundleOverItsLimitsIsRefused() throws Exception {
+    Spotter.PackBundle many = Spotter.PackBundle.newInstance();
+    for (int i = 0; i <= Push.MAX_FILES; i++) {
+      many.addFiles(Spotter.PackFile.newInstance().setPath("vision/" + i));
+    }
+    assertThat(refused(many)).isEqualTo("the bundle holds 4097 files, more than 4096");
+    byte[] half = new byte[(int) (Push.MAX_BUNDLE / 2)];
+    Spotter.PackBundle big = Spotter.PackBundle.newInstance();
+    for (String name : new String[] {"a", "b", "c"}) {
+      big.addFiles(Spotter.PackFile.newInstance().setPath("vision/" + name).setContent(half));
+    }
+    assertThat(refused(big)).isEqualTo("the bundle holds more than 16 MiB");
   }
 
   @Test
   void tidyingRemovesWhatTheLinkDoesntPointAt() throws Exception {
-    push.apply(zip(packs("robot", "1.0.0")));
+    push.apply(sent(packs("robot", "1.0.0")));
     Files.createDirectories(fixture.path(Push.BUNDLES + "/half-unpacked"));
-    Files.writeString(fixture.path(Push.BUNDLES + "/.bundle-1.zip"), "left");
+    Files.writeString(fixture.path(Push.BUNDLES + "/.bundle-1.pb"), "left");
     push.tidy();
     try (Stream<Path> bundles = Files.list(fixture.path(Push.BUNDLES))) {
       assertThat(bundles).hasSize(1);

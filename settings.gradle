@@ -17,7 +17,8 @@ rootProject.name = "frc-spotter"
 include "protocol"
 // The agent each coprocessor runs.
 include "agent"
+// The robot program's manager: each agent's stream, judged, as robot code reads it.
+include "manager"
 // The container tests: the agent installed from its package in a Java-less Debian 13 container, with
-// a minimal test client playing the robot. (The robot's manager, which replaces 0.3's client, is
-// coming.)
+// a minimal test client playing the robot.
 include "harness"
