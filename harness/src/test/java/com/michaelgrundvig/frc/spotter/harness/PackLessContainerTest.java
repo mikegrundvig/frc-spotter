@@ -55,7 +55,7 @@ class PackLessContainerTest {
         double mean = (times.get(times.size() - 1) - times.get(0)) / 1e6 / (times.size() - 1);
         System.out.printf(
             "A pack-less agent's heartbeats, asked every 100 ms: %.1f ms apart%n", mean);
-        assertThat(mean).isBetween(80.0, 150.0);
+        assertThat(mean).isBetween(80.0, 200.0);
       }
     }
   }

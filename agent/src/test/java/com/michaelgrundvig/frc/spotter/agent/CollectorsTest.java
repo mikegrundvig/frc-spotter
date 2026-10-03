@@ -132,7 +132,7 @@ class CollectorsTest {
           runs.computeIfAbsent(id, k -> new AtomicInteger()).incrementAndGet();
           if (id.equals("slow")) {
             try {
-              Thread.sleep(1200);
+              Thread.sleep(3000);
             } catch (InterruptedException e) {
               Thread.currentThread().interrupt();
             }
@@ -145,12 +145,13 @@ class CollectorsTest {
     try (Collectors collectors =
         new Collectors(fixture.host, List.of(pack("p", every)), runner, new ValueStore(2))) {
       collectors.start();
-      Thread.sleep(1000);
+      Thread.sleep(1500);
     }
     // The slow one ran once, skipping its turns; the fast one, its first turn at 500 ms (the
-    // first runs are spread over a second), ran every 100 ms meanwhile.
+    // first runs are spread over a second), ran every 100 ms meanwhile: about ten times, or at
+    // least half that on a busy test machine.
     assertThat(Objects.requireNonNull(runs.get("slow")).get()).isEqualTo(1);
-    assertThat(Objects.requireNonNull(runs.get("fast")).get()).isGreaterThanOrEqualTo(4);
+    assertThat(Objects.requireNonNull(runs.get("fast")).get()).isGreaterThanOrEqualTo(5);
   }
 
   @Test

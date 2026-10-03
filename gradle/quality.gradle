@@ -63,6 +63,20 @@ tasks.named("test") {
     }
 }
 
+// In GitHub Actions, each failed test is also an annotation on the run (a workflow command), so
+// which test failed, and why, shows on the run's page without opening its log.
+if (System.getenv("GITHUB_ACTIONS") != null) {
+    tasks.withType(Test).configureEach {
+        afterTest { descriptor, result ->
+            if (result.resultType == TestResult.ResultType.FAILURE) {
+                def why = (result.exception?.toString() ?: "failed").take(2000)
+                        .replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                println "::error title=${descriptor.className}.${descriptor.name}::${why}"
+            }
+        }
+    }
+}
+
 // --tests names tests by class or pattern, wherever they are: `./gradlew test --tests '*Probe*'`
 // runs them in whichever project has them. A project with none of them passes, rather than failing
 // the build as Gradle would; but if no project ran a test at all, the build fails, so a misspelled
