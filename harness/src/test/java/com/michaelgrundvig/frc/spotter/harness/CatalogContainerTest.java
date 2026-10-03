@@ -172,28 +172,34 @@ class CatalogContainerTest {
     coprocessor.run("systemctl", "start", "frc-spotter-debian-drive.service");
     assertThat(exists("/run/frc-spotter-debian/drive.json")).isFalse();
 
-    // As root, with nvme-cli's stand-in and a file for a drive: its report, as the agent reads it.
-    driveHealth("3");
-    assertThat(coprocessor.run("cat", "/run/frc-spotter-debian/drive.json").strip())
-        .isEqualTo("{\"wear\": 3, \"unsafe-shutdowns\": 23}");
-    Board board = connected();
-    assertThat(value(board, "debian.drive.wear").number()).isEqualTo(3);
-    assertThat(value(board, "debian.drive.wear").level()).isEqualTo(Level.OK);
-    assertThat(value(board, "debian.drive.unsafe-shutdowns").number()).isEqualTo(23);
-
+    // Stopped while the test writes the file in its place, or a run of it, finding no drive, would
+    // take the file away.
+    coprocessor.run(
+        "systemctl", "stop", "frc-spotter-debian-drive.timer", "frc-spotter-debian-drive.service");
     try {
+      // As root, with nvme-cli's stand-in and a file for a drive: its report, as the agent reads
+      // it once it's started again (the drive's collector runs each minute, and an agent that
+      // starts runs every collector at once).
+      driveHealth("3");
+      assertThat(coprocessor.run("cat", "/run/frc-spotter-debian/drive.json").strip())
+          .isEqualTo("{\"wear\": 3, \"unsafe-shutdowns\": 23}");
+      Board board = restarted();
+      assertThat(value(board, "debian.drive.wear").number()).isEqualTo(3);
+      assertThat(value(board, "debian.drive.wear").level()).isEqualTo(Level.OK);
+      assertThat(value(board, "debian.drive.unsafe-shutdowns").number()).isEqualTo(23);
+
       for (String[] wear :
           new String[][] {{"85", "WARNING", "above 80 %"}, {"97", "FAILING", "above 95 %"}}) {
         driveHealth(wear[0]);
-        Board again = restarted();
-        Value drive = value(again, "debian.drive.wear");
+        Value drive = value(restarted(), "debian.drive.wear");
         assertThat(drive.number()).isEqualTo(Double.parseDouble(wear[0]));
         assertThat(drive.level()).isEqualTo(Level.valueOf(wear[1]));
         assertThat(drive.reason()).isEqualTo(wear[2]);
       }
     } finally {
-      // As it was: no drive, and the agent's value of that.
+      // As it was: no drive, the agent's value of that, and the timer.
       coprocessor.run("rm", "-f", "/run/frc-spotter-debian/drive.json", "/run/stand-in-wear");
+      coprocessor.run("systemctl", "start", "frc-spotter-debian-drive.timer");
       restarted();
       closeTheManager();
     }
@@ -255,41 +261,57 @@ class CatalogContainerTest {
           "entry " + i);
     }
     Board board = connected();
+    // The journal has others' lines among the test's (the agent's, systemd's): each page is read
+    // for the test's own, by their source.
     await(
         "the logged entries",
         () -> {
           try {
-            return page(board, LogQuery.latest(1))
-                .getEntries()
-                .get(0)
-                .getMessage()
-                .equals("entry 6");
+            return mine(page(board, LogQuery.latest(50))).contains("entry 6");
           } catch (Exception e) {
             return false;
           }
         });
-    Spotter.LogPage latest = page(board, LogQuery.latest(3));
-    assertThat(latest.getEntries())
-        .extracting(Spotter.LogEntry::getMessage)
-        .containsExactly("entry 4", "entry 5", "entry 6");
-    Spotter.LogEntry five = latest.getEntries().get(1);
-    assertThat(five.getSource()).isEqualTo("catalog-test");
-    assertThat(five.getLevel()).isEqualTo(Spotter.LogLevel.LOG_LEVEL_INFO);
-    assertThat(latest.getEntries().get(2).getLevel()).isEqualTo(Spotter.LogLevel.LOG_LEVEL_WARNING);
-    assertThat(five.getTimeMicros()).isPositive();
+    Spotter.LogPage latest = page(board, LogQuery.latest(50));
+    assertThat(mine(latest))
+        .containsExactly("entry 1", "entry 2", "entry 3", "entry 4", "entry 5", "entry 6");
+    Spotter.LogEntry four = entry(latest, "entry 4");
+    assertThat(four.getSource()).isEqualTo("catalog-test");
+    assertThat(four.getLevel()).isEqualTo(Spotter.LogLevel.LOG_LEVEL_WARNING);
+    assertThat(entry(latest, "entry 5").getLevel()).isEqualTo(Spotter.LogLevel.LOG_LEVEL_INFO);
+    assertThat(four.getTimeMicros()).isPositive();
 
-    Spotter.LogPage before = page(board, LogQuery.before(latest.getBefore(), 2));
-    assertThat(before.getEntries())
-        .extracting(Spotter.LogEntry::getMessage)
-        .containsExactly("entry 2", "entry 3");
-    Spotter.LogPage after = page(board, LogQuery.after(before.getEntries().get(0).getCursor(), 2));
-    assertThat(after.getEntries())
-        .extracting(Spotter.LogEntry::getMessage)
-        .containsExactly("entry 3", "entry 4");
-    Spotter.LogPage warnings = page(board, LogQuery.latest(3).atLeast("warning"));
-    assertThat(warnings.getEntries())
-        .extracting(Spotter.LogEntry::getMessage)
+    // Back from entry 4, and on from entry 2: the page leaves out the entry it's paged from.
+    assertThat(mine(page(board, LogQuery.before(four.getCursor(), 50))))
+        .endsWith("entry 1", "entry 2", "entry 3")
+        .doesNotContain("entry 4");
+    Spotter.LogEntry two = entry(latest, "entry 2");
+    assertThat(mine(page(board, LogQuery.after(two.getCursor(), 50))))
+        .startsWith("entry 3", "entry 4", "entry 5", "entry 6")
+        .doesNotContain("entry 2");
+    // Warnings and worse only.
+    assertThat(mine(page(board, LogQuery.latest(50).atLeast("warning"))))
         .containsExactly("entry 2", "entry 4", "entry 6");
+  }
+
+  /** A page's entries the test logged, by message, in order. */
+  private static List<String> mine(Spotter.LogPage page) {
+    List<String> messages = new java.util.ArrayList<>();
+    for (Spotter.LogEntry entry : page.getEntries()) {
+      if (entry.getSource().equals("catalog-test")) {
+        messages.add(entry.getMessage());
+      }
+    }
+    return messages;
+  }
+
+  private static Spotter.LogEntry entry(Spotter.LogPage page, String message) {
+    for (Spotter.LogEntry entry : page.getEntries()) {
+      if (entry.getMessage().equals(message)) {
+        return entry;
+      }
+    }
+    throw new AssertionError("no " + message + " in " + page);
   }
 
   private static Spotter.LogPage page(Board board, LogQuery query) throws Exception {
