@@ -48,3 +48,39 @@ collectors:
     every: 1s
     fields:
       front-camera: {type: text, fail: {missing: true}}
+  - id: ticker
+    run: [date, +%s]
+    every: 250ms
+    fields:
+      second: {label: The board's clock, type: number, unit: s}
+logs:
+  - id: log
+    label: Stand-in's log
+    run: [./pager]
+actions:
+  - id: hello
+    label: Say hello
+    run: [./hello]
+    input: text
+    response:
+      exit: {type: number, fail: {notEquals: 0}}
+      greeting: {type: text}
+  - id: fail
+    run: [sh, -c, "echo failing >&2; exit 3"]
+    response:
+      exit: {type: number, fail: {notEquals: 0}}
+  - id: wait
+    label: Wait, until stopped
+    run: [./wait]
+    timeout: 10m
+  - id: hurry
+    label: Wait, but not long
+    run: [./wait]
+    timeout: 2s
+  - id: big
+    run: [head, -c, "3000000", /dev/zero]
+  - id: page
+    http: {get: "http://localhost:5800/api/status.json"}
+    response:
+      status: {type: number, fail: {notEquals: 200}}
+      state: {type: text}

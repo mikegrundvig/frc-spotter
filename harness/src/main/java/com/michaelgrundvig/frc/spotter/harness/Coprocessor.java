@@ -34,7 +34,9 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
    * What's written while it runs, in RAM, as on a board's image (its fstab's tmpfs, and systemd's
    * /run). Where a board lets programs run from them, so does this: a Java program's native library
    * (sqlite-jdbc's, say) is unpacked into /tmp or a unit's runtime directory and loaded from there,
-   * and Docker's tmpfs is noexec unless told otherwise.
+   * and Docker's tmpfs is noexec unless told otherwise. {@code /var/lib/frc-spotter} is where the
+   * agent unpacks pushed packs, which a board with a read-only root makes writable; the agent's
+   * tmpfiles.d entry gives it to the agent's account at boot.
    */
   public static final Map<String, String> TMPFS =
       Map.of(
@@ -43,7 +45,8 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
           "/tmp", "rw,exec,mode=1777",
           "/var/tmp", "rw,exec,mode=1777",
           "/var/log", "rw,mode=755",
-          "/var/lib/systemd", "rw,mode=755");
+          "/var/lib/systemd", "rw,mode=755",
+          "/var/lib/frc-spotter", "rw,exec,mode=755");
 
   /**
    * A coprocessor named {@code coprocessor-<last>}.

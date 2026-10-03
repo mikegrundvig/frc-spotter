@@ -125,10 +125,22 @@ class AgentContainerTest {
             "standin.mood",
             "standin.user",
             "standin.slow",
-            "standin.front-camera");
+            "standin.front-camera",
+            "standin.second");
+    assertThat(description.getLogs())
+        .extracting(Spotter.LogDeclaration::getId)
+        .containsExactly("standin.log");
     assertThat(description.getActions())
         .extracting(Spotter.ActionDeclaration::getId)
-        .containsExactly("core.power-off", "core.reboot");
+        .containsExactly(
+            "core.power-off",
+            "core.reboot",
+            "standin.hello",
+            "standin.fail",
+            "standin.wait",
+            "standin.hurry",
+            "standin.big",
+            "standin.page");
     assertThat(description.getPushedPacks()).isEmpty();
     System.out.printf("A description: %d bytes%n", description.getSerializedSize());
   }

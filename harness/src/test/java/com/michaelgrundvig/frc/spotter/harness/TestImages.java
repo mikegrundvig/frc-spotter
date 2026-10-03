@@ -71,6 +71,40 @@ final class TestImages {
         context);
   }
 
+  /** The agent alone: the base, the agent installed from its .deb, and no packs. */
+  static String packLess() {
+    Map<String, Object> context = new LinkedHashMap<>();
+    String installAgent = Images.installAgent(context);
+    return Images.build(
+        "packless",
+        """
+        FROM %s
+        %s
+        RUN mkdir -p /data/frc-spotter
+        VOLUME /data
+        """
+            .formatted(Images.base(), installAgent),
+        context);
+  }
+
+  /**
+   * The agent's image with its settings, {@code /etc/frc-spotter/agent.json}, as the board's
+   * installer writes them: root's, readable by the agent.
+   */
+  static String agentWith(String agentJson) {
+    Map<String, Object> context = new LinkedHashMap<>();
+    context.put("agent.json", agentJson);
+    return Images.build(
+        "agent-config",
+        """
+        FROM %s
+        COPY agent.json /etc/frc-spotter/agent.json
+        RUN chmod 0644 /etc/frc-spotter/agent.json
+        """
+            .formatted(agent()),
+        context);
+  }
+
   /**
    * The -all.jar's image: a stock Java 17 (Temurin's, on Ubuntu 24.04) under systemd, its java on
    * the path as a system Java's is, and nothing else of Java; the agent installed from the -all.jar
