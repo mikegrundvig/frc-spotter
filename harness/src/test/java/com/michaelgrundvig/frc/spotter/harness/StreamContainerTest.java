@@ -94,11 +94,14 @@ class StreamContainerTest {
           "In 11 s: %d deltas (%d of the ticking second), %d heartbeats, every value again at %.1f"
               + " s, never silent past %.0f ms%n",
           deltas, tickerChanges, heartbeats, complete, longest);
-      // Bounds a busy CI machine keeps to: about 11 changes, 10 s, and 100 ms at most, measured.
-      assertThat(tickerChanges).isBetween(5, 14);
+      // The ticking second changes once a second: about 11 times. Every value comes again at 10 s,
+      // give or take a busy machine's second. And the stream is never silent for half the
+      // manager's missing threshold (1 s by default), whatever the machine: heartbeats are asked
+      // every 100 ms.
+      assertThat(tickerChanges).isBetween(8, 13);
       assertThat(heartbeats).isPositive();
-      assertThat(complete).isBetween(9.5, 12.0);
-      assertThat(longest).isLessThan(1000);
+      assertThat(complete).isBetween(9.5, 11.0);
+      assertThat(longest).isLessThan(500);
     }
   }
 
