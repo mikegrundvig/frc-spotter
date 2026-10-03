@@ -103,9 +103,13 @@ final class TestImages {
         %s
         RUN find /etc/frc-spotter/packs \\( -name '*.md' -o -name '*.service' -o -name '*.timer' \\) \\
               -exec chmod 0644 {} +
-        # The debian pack's root timer, as its README has an installer add it.
-        RUN cp /etc/frc-spotter/packs/debian/frc-spotter-debian-drive.service \\
-              /etc/frc-spotter/packs/debian/frc-spotter-debian-drive.timer /etc/systemd/system/ \\
+        # The debian pack's root timer, as its README has an installer add it: root runs a copy
+        # of its own, outside both pack folders.
+        RUN cd /etc/frc-spotter/packs \\
+         && install -D -o root -g root -m 0755 debian/drive-health \\
+              /usr/local/lib/frc-spotter-debian/drive-health \\
+         && install -o root -g root -m 0644 debian/frc-spotter-debian-drive.service \\
+              debian/frc-spotter-debian-drive.timer /etc/systemd/system/ \\
          && systemctl enable frc-spotter-debian-drive.timer
         # A stand-in for PhotonVision, by its service's name, answering on 5800, with its settings.
         COPY stand-ins /opt/stand-ins

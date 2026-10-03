@@ -1,15 +1,16 @@
 # The NVMe drive's health, for the debian pack (README.md): run by its timer, as root, which reading
 # the drive's SMART log takes, it writes /run/frc-spotter-debian/drive.json for the agent to read.
-# Spotter doesn't install it: the board's installer copies it and its timer to /etc/systemd/system
-# and enables the timer. It runs the pack's drive-health where the pack is installed; a pack in
-# another folder changes ExecStart to match.
+# Spotter doesn't install it: the board's installer copies it and its timer to /etc/systemd/system,
+# copies drive-health to /usr/local/lib/frc-spotter-debian/ (root's own copy, outside both pack
+# folders: a pushed pack's is the agent's, and root must never run it), and enables the timer. A
+# drive by another name changes ExecStart and DeviceAllow.
 
 [Unit]
 Description=Spotter's debian pack: the NVMe drive's health
 
 [Service]
 Type=oneshot
-ExecStart=/etc/frc-spotter/packs/debian/drive-health /dev/nvme0
+ExecStart=/usr/local/lib/frc-spotter-debian/drive-health /dev/nvme0
 # /run/frc-spotter-debian: root's, readable by the agent, kept between runs (a oneshot's runtime
 # directory goes when it stops, unless preserved).
 RuntimeDirectory=frc-spotter-debian
@@ -18,7 +19,16 @@ RuntimeDirectoryPreserve=yes
 UMask=0022
 # Its own messages at warning and worse only, and none of systemd's each minute.
 LogLevelMax=notice
-# It reads the drive and writes its runtime directory, and nothing else.
+# It reads the drive and writes its runtime directory, and nothing else: of root's capabilities,
+# only the one the NVMe admin command (its SMART log) takes; of the devices, only the drive, read.
+CapabilityBoundingSet=CAP_SYS_ADMIN
+DevicePolicy=closed
+DeviceAllow=/dev/nvme0 r
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+SystemCallFilter=@system-service
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
