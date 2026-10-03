@@ -58,7 +58,12 @@ class WritesContainerTest {
       assertThat(write(controller, "POST", agent + "/v2/packs")).isEqualTo("403");
       Container.ExecResult why =
           controller.execInContainer(
-              "curl", "-s", "-H", "Accept: application/json", "-X", "POST",
+              "curl",
+              "-s",
+              "-H",
+              "Accept: application/json",
+              "-X",
+              "POST",
               agent + "/v2/actions/standin.fail");
       assertThat(why.getStdout())
           .contains(
@@ -79,7 +84,10 @@ class WritesContainerTest {
     try (Network network = TestNetwork.create();
         Coprocessor coprocessor =
             new Coprocessor(
-                TestImages.agentWith("{\"team\": " + Images.TEAM + "}"), network, 64, "vision-team");
+                TestImages.agentWith("{\"team\": " + Images.TEAM + "}"),
+                network,
+                64,
+                "vision-team");
         GenericContainer<?> controller = computer(network, 2);
         GenericContainer<?> stranger = computer(network, 50)) {
       coprocessor.start();
@@ -92,7 +100,14 @@ class WritesContainerTest {
       // A push is taken, and read: this one's body isn't a bundle.
       Container.ExecResult push =
           controller.execInContainer(
-              "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--data-binary", "zip",
+              "curl",
+              "-s",
+              "-o",
+              "/dev/null",
+              "-w",
+              "%{http_code}",
+              "--data-binary",
+              "zip",
               agent + "/v2/packs");
       assertThat(push.getStdout()).isEqualTo("400");
     }
