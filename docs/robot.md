@@ -169,6 +169,10 @@ date from the board's stream. Every call on it is safe from any thread and never
 - **`outcome()`, `why()`:** how it finished (completed, timed out, cancelled, lost...), in words.
 - **`response()`:** each response field its action declares, judged by its limits like a value (a
   `Value` with its level and reason), once it's finished. These are the run's own, never reused.
+- **`level()`, `reason()`:** its verdict, as the design judges a run: `FAILING` when it was refused
+  or didn't complete (timed out, cancelled, lost, couldn't start), whatever its pack says; once
+  completed, the worst level among its response's fields (`exit isn't 0`). `UNAVAILABLE` until it's
+  done. So `run.level() == Level.FAILING` is the whole check, a timeout and a refusal included.
 - **`cancel()`:** stops it, politely then firmly. Asked before the board has started it, it's sent
   as soon as it has.
 - **`file(name)`:** a `file` field of its response, as its bytes.

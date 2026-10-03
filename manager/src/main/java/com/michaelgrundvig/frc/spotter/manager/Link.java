@@ -622,7 +622,12 @@ final class Link implements Runnable, AgentClient.Challenges {
 
   /** What an alert about a value says: {@code "vision-front: CPU temperature above 80 °C"}. */
   static String text(String board, Value value) {
-    String label = board + ": " + value.label();
+    return board + ": " + text(value);
+  }
+
+  /** Why a value is at its level, its label first: {@code "CPU temperature above 80 °C"}. */
+  static String text(Value value) {
+    String label = value.label();
     if (value.kind == Value.Kind.STATUS && value.status != Level.UNAVAILABLE) {
       return label + ": " + value.reason;
     }
