@@ -1,0 +1,11 @@
+# A stand-in for PhotonVision, for the photonvision pack: its service, by its name, answering on
+# 5800 with a page.
+[Unit]
+Description=PhotonVision stand-in
+
+[Service]
+ExecStart=/bin/busybox httpd -f -p 5800 -h /srv/photonvision
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

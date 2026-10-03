@@ -1,0 +1,23 @@
+#!/bin/sh
+# A stand-in for nvme-cli, for the debian pack's drive-health: a drive's SMART log as nvme-cli 2
+# writes it, its 128-bit counters as strings. The wear it says is /run/stand-in-wear's, else 3.
+if [ "$1" != smart-log ]; then
+  echo "nvme: $1 isn't stood in for" >&2
+  exit 1
+fi
+wear=$(cat /run/stand-in-wear 2>/dev/null || echo 3)
+cat <<JSON
+{
+  "critical_warning":0,
+  "temperature":314,
+  "avail_spare":100,
+  "spare_thresh":10,
+  "percent_used":$wear,
+  "endurance_grp_critical_warning_summary":0,
+  "data_units_read":"1234567",
+  "power_cycles":"140",
+  "power_on_hours":"75",
+  "unsafe_shutdowns":"23",
+  "media_errors":"0"
+}
+JSON

@@ -66,6 +66,11 @@ tasks.named("test") {
     def agentPackage = configurations.agentPackage
     inputs.files(agentJar).withPropertyName("agentJar").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(agentPackage).withPropertyName("agentPackage").withPathSensitivity(PathSensitivity.RELATIVE)
+    // The catalog's packs (packs/), which CatalogContainerTest installs.
+    def catalog = rootProject.file("packs")
+    inputs.files(fileTree(catalog) { exclude "**/build/**" })
+    .withPropertyName("catalog").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty "spotter.catalog", catalog.absolutePath
     doFirst {
         systemProperty "spotter.agentJar", agentJar.singleFile.absolutePath
         systemProperty "spotter.agentPackage", agentPackage.singleFile.absolutePath

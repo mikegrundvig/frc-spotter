@@ -1,0 +1,10 @@
+#!/bin/sh
+# A stand-in for journalctl, for the raspberry-pi pack: a Pi's kernel log of this boot with two
+# under-voltage episodes, as -k -b -o short-monotonic writes it.
+cat <<'LOG'
+[    2.104200] vision-pi kernel: Booting Linux on physical CPU 0x0000000000 [0x414fd0b1]
+[  123.456789] vision-pi kernel: hwmon hwmon1: Undervoltage detected!
+[  125.501234] vision-pi kernel: hwmon hwmon1: Voltage normalised
+[ 1234.567890] vision-pi kernel: hwmon hwmon1: Undervoltage detected!
+[ 1236.600000] vision-pi kernel: hwmon hwmon1: Voltage normalised
+LOG
