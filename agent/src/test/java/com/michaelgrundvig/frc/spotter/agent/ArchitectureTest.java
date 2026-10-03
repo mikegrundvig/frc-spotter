@@ -6,9 +6,11 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import java.net.HttpURLConnection;
+import java.nio.channels.FileChannel;
 import org.junit.jupiter.api.Test;
 
-/** The agent's boundaries: what keeps it read-only, bounded, and small. */
+/** The agent's boundaries: what keeps it a bounded runner of its packs, and small. */
 class ArchitectureTest {
   private static final JavaClasses AGENT =
       new ClassFileImporter()
@@ -16,13 +18,19 @@ class ArchitectureTest {
           .importPackages("com.michaelgrundvig.frc.spotter.agent");
 
   @Test
-  void onlyProcessCommandsStartsAProcess() {
+  void onlyCommandsRunsWhatAPackNames() {
     noClasses()
         .that()
-        .doNotHaveSimpleName("ProcessCommands")
+        .doNotHaveSimpleName("Commands")
         .should()
         .dependOnClassesThat()
         .haveFullyQualifiedName(ProcessBuilder.class.getName())
+        .orShould()
+        .dependOnClassesThat()
+        .haveFullyQualifiedName(HttpURLConnection.class.getName())
+        .orShould()
+        .dependOnClassesThat()
+        .haveFullyQualifiedName(FileChannel.class.getName())
         .orShould()
         .callMethod(Runtime.class, "exec", String.class)
         .because("every command goes through one bounded runner, with a timeout and a size limit")
@@ -37,19 +45,17 @@ class ArchitectureTest {
         .should()
         .dependOnClassesThat()
         .resideInAPackage("com.sun.net.httpserver..")
-        .because("the API is one class; the rest only reads the computer")
+        .because("the protocol is one class; the rest runs packs")
         .check(AGENT);
   }
 
   @Test
-  void theAgentKnowsTheComputerNotTheSoftwareOnIt() {
+  void theAgentMeasuresNothingItself() {
     noClasses()
         .should()
         .dependOnClassesThat()
-        .resideInAnyPackage("java.sql..", "org.sqlite..")
-        .because(
-            "what the agent knows of a computer's software (its settings, its database) is a"
-                + " pack's, run as a probe: the agent itself serves any computer")
+        .resideInAnyPackage("java.sql..", "org.sqlite..", "java.lang.management..")
+        .because("what the agent knows of a board, its own health included, is its packs'")
         .check(AGENT);
   }
 

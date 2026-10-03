@@ -1,5 +1,5 @@
-# The coprocessor agent (docs/agent.md): the web service the robot polls for the computer's
-# health and its packs' probes (/etc/frc-spotter/packs/*.yaml), on 5808 unless
+# The coprocessor agent (docs/agent.md): the web service that speaks protocol 2 to the robot's
+# manager, running what its packs declare (folders in /etc/frc-spotter/packs/), on 5808 unless
 # /etc/frc-spotter/agent.json says otherwise. Installed by its package as
 # /usr/lib/systemd/system/frc-spotter.service.
 #
@@ -13,8 +13,9 @@ After=network.target
 
 [Service]
 Type=simple
-# Its own system user (its package makes it, with systemd-sysusers), in systemd-journal to read the
-# journal. Its one privilege, by its package's polkit rule, is powering off.
+# Its own system user (its package makes it, with systemd-sysusers), in systemd-journal so a pack can
+# read the journal. Its one privilege, by its package's polkit rule, is powering off. A pack's
+# commands run as this user, in this sandbox: whatever more they need is their installer's to grant.
 User=frc-spotter
 Group=frc-spotter
 SupplementaryGroups=systemd-journal
@@ -30,7 +31,7 @@ TasksMax=64
 UMask=0077
 # It writes nothing but its own /tmp, holds no capabilities, and talks only to the robot network,
 # link-local addresses, and itself. No MemoryDenyWriteExecute (Java compiles code as it
-# runs), and no ProcSubset=pid (it reads /proc/stat, /proc/uptime, /proc/meminfo, /proc/sys).
+# runs), and no ProcSubset=pid (packs read /proc/stat, /proc/uptime, /proc/meminfo, /proc/sys).
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes

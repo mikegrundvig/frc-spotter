@@ -3,7 +3,6 @@ package com.michaelgrundvig.frc.spotter.agent;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,43 +10,44 @@ import java.util.concurrent.CountDownLatch;
 
 /**
  * The coprocessor agent: {@code java -jar frc-spotter.jar [serve] [--port=N] [--bind=ADDRESS]
- * [--controller=ADDRESS] [--root=DIR]} serves the API (docs/agent.md) on 5808, with nothing to
- * configure. {@code /etc/frc-spotter/agent.json} may override the port, the controller's address,
- * and the address it listens on, and the command line overrides that: {@code --controller} names
- * the one address a shutdown is taken from (a test's, where the robot is a test process behind the
- * container runtime's port forwarding). {@code --root} reads the computer's files from a folder
- * rather than {@code /}: a fixture tree, for tests.
+ * [--controller=ADDRESS] [--root=DIR]} speaks protocol 2 (docs/agent.md) on 5808, with nothing to
+ * configure. {@code /etc/frc-spotter/agent.json} may set the port, the controller's address, and
+ * the address it listens on, and the command line overrides that: {@code --controller} names the
+ * one address a write is taken from (a test's, where the robot is a test process behind the
+ * container runtime's port forwarding). {@code --root} reads the board's files from a folder rather
+ * than {@code /}: a test's.
  */
 public final class AgentMain {
-  /** How long any one of the agent's own commands may take. */
-  static final Duration TIMEOUT = Duration.ofSeconds(2);
+  /** The agent's version when its jar doesn't say: run from a build's classes. */
+  static final String UNRELEASED = "unreleased";
 
   private AgentMain() {}
 
   /** Runs the agent; see the class. */
   public static void main(String[] args) throws Exception {
     // Bound every request and answer, before the web server reads its settings: 4 s to send a
-    // request, 60 to take an answer, 32 connections at once.
+    // request, 32 connections at once.
     System.setProperty("sun.net.httpserver.maxReqTime", "4");
-    System.setProperty("sun.net.httpserver.maxRspTime", "60");
     System.setProperty("sun.net.httpserver.maxIdleConnections", "8");
     System.setProperty("jdk.httpserver.maxConnections", "32");
-    ProcessCommands commands = new ProcessCommands();
     Map<String, String> options = options(List.of(args));
     Host host =
         Host.system(
-            Path.of(options.getOrDefault("root", "/")),
-            commands,
-            message -> System.err.println(message));
-    try (AgentServer server = serve(host, List.of(args), AgentMain::background)) {
-      System.err.println("Coprocessor agent serving on port " + server.port());
+            Path.of(options.getOrDefault("root", "/")), message -> System.err.println(message));
+    try (AgentServer server = serve(host, List.of(args), version())) {
+      System.err.println("Coprocessor agent serving protocol 2 on port " + server.port());
       new CountDownLatch(1).await();
     }
   }
 
-  /** Starts serving a host, with the command line's options, and starts its probes. */
-  static AgentServer serve(Host host, List<String> args, java.util.concurrent.Executor executor)
-      throws IOException {
+  /** The agent's version, from its jar. */
+  static String version() {
+    String version = AgentMain.class.getPackage().getImplementationVersion();
+    return version == null ? UNRELEASED : version;
+  }
+
+  /** Starts serving a board, with the command line's options, and starts its collectors. */
+  static AgentServer serve(Host host, List<String> args, String version) throws IOException {
     Map<String, String> options = options(args);
     String controller = options.get("controller");
     if (controller != null) {
@@ -61,17 +61,16 @@ public final class AgentMain {
     for (String problem : configuration.problems()) {
       host.log(problem);
     }
-    Agent agent = new Agent(host, configuration, TIMEOUT, executor, controller);
+    Agent agent = new Agent(host, configuration, version, controller);
     AgentServer server =
         new AgentServer(
             agent,
-            new InetSocketAddress(bind(options, configuration), port(options, configuration)),
-            new RateLimitedLog(host::log, host::monotonicMicros, AgentServer.REFUSAL_LOG_MICROS));
+            new InetSocketAddress(bind(options, configuration), port(options, configuration)));
     agent.start();
     return server;
   }
 
-  /** The port to serve on: {@code --port}'s, else the configuration's (5808 unless it says). */
+  /** The port to serve on: {@code --port}'s, else the settings' (5808 unless they say). */
   static int port(Map<String, String> options, Configuration configuration) {
     if (options.containsKey("port")) {
       return Integer.parseInt(options.getOrDefault("port", "0"));
@@ -79,7 +78,7 @@ public final class AgentMain {
     return configuration.config().port();
   }
 
-  /** The address to listen on: {@code --bind}'s, else the configuration's, else every one. */
+  /** The address to listen on: {@code --bind}'s, else the settings', else every one. */
   static String bind(Map<String, String> options, Configuration configuration) {
     String bind = options.getOrDefault("bind", configuration.config().bind());
     return bind.isEmpty() ? "0.0.0.0" : bind;
@@ -94,16 +93,6 @@ public final class AgentMain {
       throw new IllegalArgumentException(
           option + " must be an IPv4 address, such as 10.12.34.2: " + address);
     }
-  }
-
-  /**
-   * Runs work that outlasts a request (reading health afresh, a shutdown once its request is
-   * answered) on a thread of its own, which doesn't keep the agent from exiting.
-   */
-  static void background(Runnable work) {
-    Thread thread = new Thread(work, "spotter-work");
-    thread.setDaemon(true);
-    thread.start();
   }
 
   /** {@code --name=value} options, after an optional {@code serve}. */

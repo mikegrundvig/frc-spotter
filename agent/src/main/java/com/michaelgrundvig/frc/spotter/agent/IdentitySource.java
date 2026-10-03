@@ -1,6 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
-import com.michaelgrundvig.frc.spotter.api.Stamp;
+import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -9,14 +9,12 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * Which computer this is, read from the computer itself as the agent answers, with nothing
- * configured: its hostname, its addresses, the wired interface's MAC address, this boot, and {@code
- * /etc/os-release} as it is.
+ * Which computer this is, read from the computer itself, with nothing configured: its hostname, its
+ * addresses, the wired interface's MAC address, this boot, and {@code /etc/os-release} as it is.
  */
-final class StampSource {
+final class IdentitySource {
   static final String HOSTNAME = "/proc/sys/kernel/hostname";
   static final String BOOT_ID = "/proc/sys/kernel/random/boot_id";
-  static final String UPTIME = "/proc/uptime";
   static final String NETWORK = "/sys/class/net";
 
   /** Where os-release(5) is, and where to look when it isn't. */
@@ -34,16 +32,26 @@ final class StampSource {
 
   private final Host host;
 
-  StampSource(Host host) {
+  IdentitySource(Host host) {
     this.host = host;
   }
 
   /** Which computer this is, now. */
-  Stamp read() throws IOException {
-    return new Stamp(hostname(), host.addresses(), mac(), bootId(), uptime(), osRelease());
+  Spotter.Identity read() throws IOException {
+    Spotter.Identity identity =
+        Spotter.Identity.newInstance().setHostname(hostname()).setMac(mac()).setBootId(bootId());
+    for (String address : host.addresses()) {
+      identity.addAddresses(address);
+    }
+    osRelease()
+        .forEach(
+            (key, value) ->
+                identity.addOsRelease(
+                    Spotter.Identity.OsReleaseEntry.newInstance().setKey(key).setValue(value)));
+    return identity;
   }
 
-  /** Its hostname, which is the agent's name for it; empty when it can't be read. */
+  /** Its hostname, which is the manager's name for it; empty when it can't be read. */
   String hostname() throws IOException {
     return host.line(HOSTNAME).orElse("");
   }
@@ -51,13 +59,6 @@ final class StampSource {
   /** This boot's ID. */
   String bootId() throws IOException {
     return host.line(BOOT_ID).orElse("");
-  }
-
-  /** Seconds since the kernel started; NaN when unknown. */
-  double uptime() throws IOException {
-    return host.line(UPTIME)
-        .map(line -> Double.parseDouble(line.split("\\s+")[0]))
-        .orElse(Double.NaN);
   }
 
   /**
@@ -91,7 +92,7 @@ final class StampSource {
     if (text.isEmpty()) {
       text = host.read(OS_RELEASE_FALLBACK);
     }
-    return text.map(StampSource::parseOsRelease).orElse(Map.of());
+    return text.map(IdentitySource::parseOsRelease).orElse(Map.of());
   }
 
   /**
