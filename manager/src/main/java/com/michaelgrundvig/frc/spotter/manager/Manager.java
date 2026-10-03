@@ -11,10 +11,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -34,13 +31,10 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>{@link #update}, and everything it updates (each {@link Board}, its {@link Value}s, the
  * alerts), belong to one thread, the robot loop's. In steady state an update allocates nothing, nor
- * does a board's thread decoding its stream. Requests (a log page, a run, a push) go on the
- * manager's own threads.
+ * does a board's thread decoding its stream. Requests (a log page, a run, a push) go on each
+ * board's own request threads, a few at most, each request within a deadline.
  */
 public final class Manager implements AutoCloseable {
-  /** How long a request thread waits for another request before it ends. */
-  private static final long IDLE_SECONDS = 30;
-
   private final Robot robot;
   private final Settings settings;
   private final Board[] boards;
@@ -48,7 +42,7 @@ public final class Manager implements AutoCloseable {
   private final Link[] links;
   private final long missing;
   private final Spotter.Description[] seen;
-  private final ExecutorService requests;
+  private final ScheduledThreadPoolExecutor deadlines;
   private final @Nullable Signer signer;
   private final String keyProblem;
   private final String packsProblem;
@@ -101,18 +95,16 @@ public final class Manager implements AutoCloseable {
       }
     }
     packsProblem = problem;
-    requests =
-        new ThreadPoolExecutor(
-            0,
-            Integer.MAX_VALUE,
-            IDLE_SECONDS,
-            TimeUnit.SECONDS,
-            new SynchronousQueue<>(),
+    // Each request's deadline: one thread for all of them, a cancelled one gone at once.
+    deadlines =
+        new ScheduledThreadPoolExecutor(
+            1,
             work -> {
-              Thread thread = new Thread(work, "Spotter requests");
+              Thread thread = new Thread(work, "Spotter deadlines");
               thread.setDaemon(true);
               return thread;
             });
+    deadlines.setRemoveOnCancelPolicy(true);
     Set<String> given = new HashSet<>();
     boards = new Board[agents.size()];
     links = new Link[agents.size()];
@@ -122,7 +114,7 @@ public final class Manager implements AutoCloseable {
         throw new IllegalArgumentException("an agent's address is given twice: " + address);
       }
       boards[i] = new Board(address, settings);
-      links[i] = new Link(boards[i], robot, settings, recorder, packs, signer, requests);
+      links[i] = new Link(boards[i], robot, settings, recorder, packs, signer, deadlines);
     }
     boardList = List.of(boards);
     seen = new Spotter.Description[boards.length];
@@ -296,7 +288,7 @@ public final class Manager implements AutoCloseable {
     for (Link link : links) {
       link.close();
     }
-    requests.shutdownNow();
+    deadlines.shutdownNow();
     for (Link link : links) {
       try {
         link.join(1000);

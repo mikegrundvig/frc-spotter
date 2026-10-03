@@ -85,7 +85,9 @@ Each has a default (`Settings.DEFAULTS`); robot code changes those it needs with
 **Threads.** Each board's stream is read on a thread of the manager's, which publishes the board's
 state into one of three buffers it swaps with the loop's, with no lock: `update()` takes the newest,
 whole, so every read within a loop agrees. Requests (a log page, an action, a cancel, a push) go on
-the manager's request threads, never the loop's.
+each board's own request threads, never the loop's: three at once and eight waiting at most, one
+more refused at once ("too many requests to vision-front at once"), each finished within 30 s
+however slowly the board answers. Closing the manager finishes every request, refused or dropped.
 
 **Garbage.** Decoding the stream into the board's state, publishing it, and `update()` allocate
 nothing in steady state: one event, one source and the buffers are reused, and text is decoded only
@@ -150,8 +152,9 @@ What a recorder throws is ignored, so a logging fault never takes a board away.
 board.log("debian.journal", LogQuery.latest(100).atLeast("warning"))
 ```
 
-returns a `CompletableFuture<Spotter.LogPage>`, fetched on the manager's threads: check it in a
-later loop (`isDone()`), and never wait on it in the loop. Page back with
+returns a `CompletableFuture<Spotter.LogPage>`, fetched on the board's request threads: check it in
+a later loop (`isDone()`), and never wait on it in the loop. A board that isn't connected is asked
+nothing: the future fails at once, saying why. Page back with
 `LogQuery.before(page.getBefore(), n)` and on with `LogQuery.after(page.getAfter(), n)`.
 
 ## Actions

@@ -19,9 +19,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.jspecify.annotations.Nullable;
 import us.hebi.quickbuf.ProtoMessage;
@@ -42,7 +48,9 @@ import us.hebi.quickbuf.Utf8String;
  * JDK's HTTP client, which reads the stream's chunks, allocates a little of its own for each.
  *
  * <p>It also follows the board's runs (each run event goes to its {@link Run}), sends the board's
- * requests on the manager's request threads ({@link AgentClient}), and keeps the board's packs the
+ * requests on request threads of its own ({@link AgentClient}): at most {@link #REQUEST_THREADS}
+ * at once and {@link #REQUESTS_WAITING} waiting, any more refused at once, so robot code asking
+ * every loop can't pile threads up on the robot. And it keeps the board's packs the
  * robot's: it connects with their hash, and when the board's differ, pushes them while the robot is
  * disabled and off the field, once for each set of packs the board has, so a push that fails or
  * doesn't take is never repeated in a loop.
@@ -59,6 +67,15 @@ final class Link implements Runnable, AgentClient.Challenges {
 
   /** The most of a refusal's body read, in bytes. */
   private static final int MAX_PROBLEM = 64 << 10;
+
+  /** How many of a board's requests run at once. */
+  static final int REQUEST_THREADS = 3;
+
+  /** How many of a board's requests may wait for a thread; one more is refused at once. */
+  static final int REQUESTS_WAITING = 8;
+
+  /** How long a request thread waits for another request before it ends. */
+  private static final long IDLE_SECONDS = 30;
 
   /** Where the board's packs are, against the robot's. */
   enum Packs {
@@ -84,6 +101,7 @@ final class Link implements Runnable, AgentClient.Challenges {
   private final Recorder recorder;
   private final @Nullable TeamPacks packs;
   private final Executor requests;
+  private final @Nullable ExecutorService pool;
   private final Address address;
   private final URL url;
   private final URL urlWithPacks;
@@ -111,15 +129,20 @@ final class Link implements Runnable, AgentClient.Challenges {
   private volatile long events;
   private volatile @Nullable Thread thread;
 
-  /** A link without packs, a key, or anywhere to send requests: for tests of the stream alone. */
+  /**
+   * A link without packs, a key, deadlines, or threads for requests (they run on the caller's): for
+   * tests of the stream alone.
+   */
   Link(Board board, Robot robot, Settings settings, Recorder recorder) {
-    this(board, robot, settings, recorder, null, null, Runnable::run);
+    this(board, robot, settings, recorder, null, null, null, Runnable::run, null);
   }
 
   /**
-   * @param packs the team's packs, to push; null for none
+   * A board's link, as the manager makes it: its requests on threads of its own.
+   *
+   * @param packs the team's packs, to push to this board; null for none
    * @param signer the key that signs writes; null for none
-   * @param requests where requests are sent from: the manager's threads
+   * @param deadlines where each request's overall deadline is kept: the manager's
    */
   Link(
       Board board,
@@ -128,21 +151,68 @@ final class Link implements Runnable, AgentClient.Challenges {
       Recorder recorder,
       @Nullable TeamPacks packs,
       @Nullable Signer signer,
-      Executor requests) {
+      ScheduledExecutorService deadlines) {
+    this(board, robot, settings, recorder, packs, signer, deadlines, pool(board.address()));
+  }
+
+  private Link(
+      Board board,
+      Robot robot,
+      Settings settings,
+      Recorder recorder,
+      @Nullable TeamPacks packs,
+      @Nullable Signer signer,
+      ScheduledExecutorService deadlines,
+      ThreadPoolExecutor pool) {
+    this(board, robot, settings, recorder, packs, signer, deadlines, pool, pool);
+  }
+
+  private Link(
+      Board board,
+      Robot robot,
+      Settings settings,
+      Recorder recorder,
+      @Nullable TeamPacks packs,
+      @Nullable Signer signer,
+      @Nullable ScheduledExecutorService deadlines,
+      Executor requests,
+      @Nullable ExecutorService pool) {
     this.board = board;
     this.robot = robot;
     this.settings = settings;
     this.recorder = recorder;
     this.packs = packs;
     this.requests = requests;
+    this.pool = pool;
     this.exchange = board.exchange();
     this.address = address(board.address());
     String stream = Protocol.STREAM + "?heartbeat=" + settings.heartbeat().toMillis() + "ms";
     this.url = url(address, stream);
     this.urlWithPacks = packs == null ? url : url(address, stream + "&packs=" + packs.hash());
     int connect = (int) Math.min(Integer.MAX_VALUE, settings.missing().toMillis());
-    this.client = new AgentClient(address, connect, signer, this);
+    this.client = new AgentClient(address, connect, signer, this, deadlines);
     board.link(this);
+  }
+
+  /**
+   * A board's request threads: {@link #REQUEST_THREADS} at most, made as they're needed and ended
+   * when idle; {@link #REQUESTS_WAITING} requests may wait, and one more is refused at once.
+   */
+  private static ThreadPoolExecutor pool(String address) {
+    ThreadPoolExecutor pool =
+        new ThreadPoolExecutor(
+            REQUEST_THREADS,
+            REQUEST_THREADS,
+            IDLE_SECONDS,
+            TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(REQUESTS_WAITING),
+            work -> {
+              Thread thread = new Thread(work, "Spotter requests " + address);
+              thread.setDaemon(true);
+              return thread;
+            });
+    pool.allowCoreThreadTimeOut(true);
+    return pool;
   }
 
   /**
@@ -203,7 +273,7 @@ final class Link implements Runnable, AgentClient.Challenges {
     started.start();
   }
 
-  /** Stops its thread, dropping its connection. */
+  /** Stops its thread, dropping its connection, and its request threads. */
   void close() {
     closed = true;
     Thread running = thread;
@@ -214,6 +284,14 @@ final class Link implements Runnable, AgentClient.Challenges {
     if (open != null) {
       open.disconnect();
     }
+    if (pool != null) {
+      for (Runnable waiting : pool.shutdownNow()) {
+        if (waiting instanceof Request) {
+          ((Request) waiting).refuse("the manager is closed");
+        }
+      }
+    }
+    client.close();
   }
 
   /** How many events it's received: for tests, to measure what it allocates per event. */
@@ -761,31 +839,25 @@ final class Link implements Runnable, AgentClient.Challenges {
     pushes.incrementAndGet();
     triedFrom = theirs;
     CompletableFuture<Void> pushed = new CompletableFuture<>();
-    try {
-      requests.execute(
-          () -> {
-            try {
-              client.write("POST", Protocol.PACKS, team.bundle(), Protocol.PROTOBUF);
-              pushFailure = null;
-              restarting = true;
-              askWithPacks = true;
-              try {
-                recorder.pushed(board, team.hash(), forced);
-              } catch (RuntimeException e) {
-                // A logging fault never fails a push.
-              }
-              pushed.complete(null);
-            } catch (IOException e) {
-              pushFailure = why(e);
-              pushed.completeExceptionally(e);
-            } finally {
-              pushing = false;
-            }
-          });
-    } catch (RuntimeException e) {
-      pushing = false;
-      pushed.completeExceptionally(e);
-    }
+    execute(
+        why -> {
+          pushFailure = why;
+          pushing = false;
+          pushed.completeExceptionally(new IOException(why));
+        },
+        () -> {
+          client.write("POST", Protocol.PACKS, team.bundle(), Protocol.PROTOBUF);
+          pushFailure = null;
+          restarting = true;
+          askWithPacks = true;
+          pushing = false;
+          try {
+            recorder.pushed(board, team.hash(), forced);
+          } catch (RuntimeException e) {
+            // A logging fault never fails a push.
+          }
+          pushed.complete(null);
+        });
     return pushed;
   }
 
@@ -861,20 +933,54 @@ final class Link implements Runnable, AgentClient.Challenges {
     return answer;
   }
 
-  /** Runs a request on a request thread: what it throws goes to {@code failed}, as why. */
+  /**
+   * Runs a request on one of the board's request threads: what it throws goes to {@code failed},
+   * as why; when they're all busy and as many wait as may, it's refused at once.
+   */
   private void execute(java.util.function.Consumer<String> failed, Task task) {
     try {
-      requests.execute(
-          () -> {
-            try {
-              task.run();
-            } catch (IOException | RuntimeException e) {
-              failed.accept(why(e));
-            }
-          });
-    } catch (RuntimeException e) {
-      failed.accept("the manager is closed: " + why(e));
+      requests.execute(new Request(failed, task));
+    } catch (RejectedExecutionException e) {
+      failed.accept(busy(e));
     }
+  }
+
+  /** A request, waiting for a thread or under way: what it throws goes to its failure, as why. */
+  private static final class Request implements Runnable {
+    private final java.util.function.Consumer<String> failed;
+    private final Task task;
+
+    Request(java.util.function.Consumer<String> failed, Task task) {
+      this.failed = failed;
+      this.task = task;
+    }
+
+    @Override
+    public void run() {
+      try {
+        task.run();
+      } catch (IOException | RuntimeException e) {
+        failed.accept(why(e));
+      }
+    }
+
+    /** It never ran, and why. */
+    void refuse(String why) {
+      failed.accept(why);
+    }
+  }
+
+  /** Why a request was refused before it was sent: the manager closed, or too many at once. */
+  private String busy(RejectedExecutionException e) {
+    return closed || (pool != null && pool.isShutdown())
+        ? "the manager is closed"
+        : "too many requests to "
+            + board.name()
+            + " at once: "
+            + REQUEST_THREADS
+            + " under way and "
+            + REQUESTS_WAITING
+            + " waiting";
   }
 
   // ---- runs ----

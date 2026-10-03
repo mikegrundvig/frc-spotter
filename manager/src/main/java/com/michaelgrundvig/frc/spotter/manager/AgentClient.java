@@ -6,18 +6,32 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.jspecify.annotations.Nullable;
 
 /**
  * One board's requests besides its stream: a log page, an action started, a run cancelled or
- * fetched, packs pushed. Each runs on a thread of the manager's, never the loop's, with the JDK's
- * HTTP client; each answer's protocol version is checked before its body is read. Writes are signed
- * when the manager has a key, over the board's current stream connection's challenge, one at a time
- * so their counters arrive in order.
+ * fetched, packs pushed. Each runs on one of the board's request threads, never the loop's, with
+ * the JDK's HTTP client; each answer's protocol version is checked before its body is read. Each is
+ * bounded: a connection's own timeouts, and an overall {@link #DEADLINE_MILLIS}, past which its
+ * connection is dropped, so an agent that answers a byte at a time can't hold a thread. Writes are
+ * signed when the manager has a key, over the board's current stream connection's challenge, one at
+ * a time so their counters arrive in order.
  */
 final class AgentClient {
-  /** How long a request may take to answer, once connected. */
+  /** How long a request may wait for each read of its answer, once connected. */
   static final int TIMEOUT_MILLIS = 10_000;
+
+  /**
+   * The longest a request may take, from connecting to the end of its answer: a push or an action's
+   * input sends at most 64 MiB, a few seconds on the robot's wired network.
+   */
+  static final long DEADLINE_MILLIS = 30_000;
 
   /** The most of an answer read, in bytes: a run's file is the largest, at 1 MB. */
   static final int MAX_ANSWER = 16 << 20;
@@ -48,14 +62,40 @@ final class AgentClient {
   private final int connectTimeout;
   private final @Nullable Signer signer;
   private final Challenges challenges;
+  private final @Nullable ScheduledExecutorService deadlines;
+  private final long deadlineMillis;
   private final Object writes = new Object();
+  private final Set<HttpURLConnection> open = new HashSet<>();
+  private boolean closed;
 
+  /**
+   * @param deadlines where each request's deadline is kept; null for none (a test's)
+   */
   AgentClient(
-      Link.Address address, int connectTimeout, @Nullable Signer signer, Challenges challenges) {
+      Link.Address address,
+      int connectTimeout,
+      @Nullable Signer signer,
+      Challenges challenges,
+      @Nullable ScheduledExecutorService deadlines) {
+    this(address, connectTimeout, signer, challenges, deadlines, DEADLINE_MILLIS);
+  }
+
+  /**
+   * @param deadlineMillis the longest a request may take: {@link #DEADLINE_MILLIS}, or a test's
+   */
+  AgentClient(
+      Link.Address address,
+      int connectTimeout,
+      @Nullable Signer signer,
+      Challenges challenges,
+      @Nullable ScheduledExecutorService deadlines,
+      long deadlineMillis) {
     this.address = address;
     this.connectTimeout = connectTimeout;
     this.signer = signer;
     this.challenges = challenges;
+    this.deadlines = deadlines;
+    this.deadlineMillis = deadlineMillis;
   }
 
   /** A read: its answer's body, for a {@code 200}. */
@@ -90,6 +130,23 @@ final class AgentClient {
       throws IOException {
     HttpURLConnection c =
         (HttpURLConnection) Link.url(address, pathAndQuery).openConnection(Proxy.NO_PROXY);
+    synchronized (open) {
+      if (closed) {
+        throw new Refused(0, "the manager is closed");
+      }
+      open.add(c);
+    }
+    AtomicBoolean late = new AtomicBoolean();
+    ScheduledFuture<?> deadline =
+        deadlines == null
+            ? null
+            : deadlines.schedule(
+                () -> {
+                  late.set(true);
+                  c.disconnect();
+                },
+                deadlineMillis,
+                TimeUnit.MILLISECONDS);
     try {
       c.setConnectTimeout(connectTimeout);
       c.setReadTimeout(TIMEOUT_MILLIS);
@@ -127,9 +184,30 @@ final class AgentClient {
     } catch (Refused e) {
       throw e;
     } catch (IOException e) {
-      throw new Refused(0, Link.why(e));
+      throw new Refused(
+          0,
+          late.get()
+              ? "no complete answer within " + deadlineMillis + " ms"
+              : Link.why(e));
     } finally {
+      if (deadline != null) {
+        deadline.cancel(false);
+      }
+      synchronized (open) {
+        open.remove(c);
+      }
       c.disconnect();
+    }
+  }
+
+  /** Drops every request under way, and refuses any more: the manager is closing. */
+  void close() {
+    synchronized (open) {
+      closed = true;
+      for (HttpURLConnection c : open) {
+        c.disconnect();
+      }
+      open.clear();
     }
   }
 }

@@ -132,13 +132,16 @@ public final class Board {
 
   /**
    * A page of one of its logs ({@code pack.log}, as its description declares them), fetched on the
-   * manager's threads: completes with the page, or exceptionally, saying why there's none.
+   * board's request threads: completes with the page, or exceptionally, saying why there's none.
+   * Refused at once, without asking the board, when it isn't connected (it's missing, or on another
+   * protocol), so asking every loop while a board is away costs nothing.
    */
   public CompletableFuture<Spotter.LogPage> log(String id, LogQuery query) {
     Link through = link;
-    if (through == null || connection == Connection.OTHER_PROTOCOL) {
+    if (through == null || connection != Connection.CONNECTED) {
       return CompletableFuture.failedFuture(
-          new IllegalStateException(name + "'s logs can't be read: " + why));
+          new IllegalStateException(
+              name + "'s logs can't be read: it isn't connected" + (why.isEmpty() ? "" : ": " + why)));
     }
     return through.log(id, query);
   }
