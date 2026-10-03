@@ -1,0 +1,58 @@
+// The robot program's manager: the library that keeps each coprocessor agent's stream open on threads
+// of its own, judges each value against its limits, and gives robot code a snapshot to read each loop,
+// alerts as data, and a hook to log what it received. Plain Java 17 with nothing but :protocol
+// (QuickBuffers' runtime, which WPILib already ships): no WPILib or AdvantageKit, so robot code wires
+// in what's robot-specific (whether it's enabled, the field, its clock, its alerts and logs).
+
+plugins {
+    id "java-library"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// Java 17 bytecode and APIs, as the agent's: see agent/build.gradle.
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}
+
+base {
+    archivesName = "spotter-manager"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api project(":protocol")
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+    testImplementation libs.archunit
+    // The real agent, in the test's own process on a local port, with packs the test writes.
+    testImplementation testFixtures(project(":agent"))
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
+apply from: rootProject.file("gradle/quality.gradle")
+
+// Published as com.michaelgrundvig.frc:spotter-manager (gradle/publishing.gradle).
+ext.mavenArtifact = "spotter-manager"
+ext.mavenDescription = "Spotter's manager, for an FRC robot program: each coprocessor agent's stream kept open off the robot loop, its values judged against their limits, alerts as data, a snapshot to read each loop."
+apply from: rootProject.file("gradle/publishing.gradle")

@@ -1,0 +1,246 @@
+package com.michaelgrundvig.frc.spotter.manager;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.michaelgrundvig.frc.spotter.protocol.Spotter;
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Test;
+
+/** The manager's smaller parts: its clock map, its buffers, its settings and its addresses. */
+class PartsTest {
+  static final long SECOND = 1_000_000_000L;
+
+  @Test
+  void theAgentsClockIsMappedByTheLeastOffsetSeen() {
+    ClockMap clock = new ClockMap();
+    // Sent at 100 s on the agent's clock, heard at 5,000.020 s on the robot's: 20 ms on the way.
+    clock.heard(100 * SECOND, 5_000 * SECOND + 20_000_000);
+    assertThat(clock.robot(100 * SECOND)).isEqualTo(5_000 * SECOND + 20_000_000);
+    // A quicker trip: the offset is the least.
+    clock.heard(101 * SECOND, 5_001 * SECOND + 2_000_000);
+    assertThat(clock.robot(101 * SECOND)).isEqualTo(5_001 * SECOND + 2_000_000);
+    // A slower one changes nothing.
+    clock.heard(102 * SECOND, 5_002 * SECOND + 90_000_000);
+    assertThat(clock.robot(102 * SECOND)).isEqualTo(5_002 * SECOND + 2_000_000);
+  }
+
+  @Test
+  void theLeastOffsetFollowsDriftWindowByWindow() {
+    ClockMap clock = new ClockMap();
+    clock.heard(0, 1_000 * SECOND);
+    // Ten seconds on, the clocks have drifted 5 ms apart: the old window still counts...
+    clock.heard(10 * SECOND, 1_010 * SECOND + 5_000_000);
+    assertThat(clock.robot(10 * SECOND)).isEqualTo(1_010 * SECOND);
+    // ...until a window later, when only what was seen since does.
+    clock.heard(20 * SECOND, 1_020 * SECOND + 10_000_000);
+    assertThat(clock.robot(20 * SECOND)).isEqualTo(1_020 * SECOND + 5_000_000);
+    // A new connection starts afresh.
+    clock.reset();
+    clock.heard(0, 7 * SECOND);
+    assertThat(clock.robot(SECOND)).isEqualTo(8 * SECOND);
+  }
+
+  @Test
+  void theLoopTakesTheNewestPublishedBufferAndTheWriterNeverTouchesItsOwn() {
+    Exchange exchange = new Exchange();
+    Table first = exchange.front();
+    assertThat(exchange.take()).isFalse();
+    exchange.back().changes = 1;
+    exchange.publish();
+    exchange.back().changes = 2;
+    exchange.publish();
+    assertThat(exchange.take()).isTrue();
+    assertThat(exchange.front().changes).isEqualTo(2);
+    assertThat(exchange.front()).isNotSameAs(first);
+    assertThat(exchange.take()).isFalse();
+    assertThat(exchange.back()).isNotSameAs(exchange.front());
+    exchange.back().changes = 3;
+    exchange.publish();
+    assertThat(exchange.back()).isNotSameAs(exchange.front());
+    assertThat(exchange.take()).isTrue();
+    assertThat(exchange.front().changes).isEqualTo(3);
+  }
+
+  @Test
+  void aReaderNeverSeesABufferBeingWritten() throws Exception {
+    Exchange exchange = new Exchange();
+    AtomicBoolean done = new AtomicBoolean();
+    AtomicReference<String> torn = new AtomicReference<>("");
+    Thread writer =
+        new Thread(
+            () -> {
+              for (long i = 1; i <= 2_000_000; i++) {
+                Table back = exchange.back();
+                back.changes = i;
+                back.heardNanos = i;
+                exchange.publish();
+              }
+              done.set(true);
+            });
+    writer.start();
+    long last = 0;
+    while (!done.get() || exchange.take()) {
+      exchange.take();
+      Table front = exchange.front();
+      long changes = front.changes;
+      long heard = front.heardNanos;
+      if (changes != heard || changes < last) {
+        torn.set(changes + " beside " + heard + " after " + last);
+        break;
+      }
+      last = changes;
+    }
+    writer.join();
+    exchange.take();
+    assertThat(torn.get()).isEmpty();
+    assertThat(exchange.front().changes).isEqualTo(2_000_000);
+  }
+
+  @Test
+  void aTableCopiesEverythingAndRebuildsItsValuesOnlyForANewDescription() {
+    Spotter.Description description = ZeroAllocationTest.description();
+    Table writer = new Table();
+    writer.describe(description, Field.of(description, java.util.Map.of()));
+    writer.values[0].kind = Value.Kind.NUMBER;
+    writer.values[0].number = 12;
+    writer.changes = 4;
+    Table reader = new Table();
+    reader.copyFrom(writer);
+    assertThat(reader.description).isSameAs(description);
+    assertThat(reader.values).hasSize(6);
+    assertThat(reader.byId.get("vision.health.fps")).isSameAs(reader.values[0]);
+    assertThat(reader.list.get(0).number()).isEqualTo(12);
+    assertThat(reader.changes).isEqualTo(4);
+    Value kept = reader.values[0];
+    writer.values[0].number = 13;
+    reader.copyFrom(writer);
+    assertThat(reader.values[0]).isSameAs(kept);
+    assertThat(kept.number()).isEqualTo(13);
+  }
+
+  @Test
+  void settingsHaveTheDesignsDefaults() {
+    assertThat(Settings.DEFAULTS.heartbeat()).isEqualTo(Duration.ofMillis(250));
+    assertThat(Settings.DEFAULTS.missing()).isEqualTo(Duration.ofSeconds(1));
+    assertThat(Settings.DEFAULTS.backoff()).isEqualTo(Duration.ofSeconds(5));
+    assertThat(Settings.DEFAULTS.limits()).isEmpty();
+    Settings changed =
+        Settings.DEFAULTS
+            .withHeartbeat(Duration.ofMillis(100))
+            .withMissing(Duration.ofSeconds(2))
+            .withBackoff(Duration.ofSeconds(1))
+            .withLimits("a.b.c", Limits.NONE)
+            .withLimits("d.e.f", Limits.NONE);
+    assertThat(changed.heartbeat()).isEqualTo(Duration.ofMillis(100));
+    assertThat(changed.missing()).isEqualTo(Duration.ofSeconds(2));
+    assertThat(changed.backoff()).isEqualTo(Duration.ofSeconds(1));
+    assertThat(changed.limits()).containsOnlyKeys("a.b.c", "d.e.f");
+  }
+
+  @Test
+  void settingsThatCantWorkAreRefused() {
+    assertThatThrownBy(() -> Settings.DEFAULTS.withMissing(Duration.ofMillis(250)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("longer than its heartbeat");
+    assertThatThrownBy(() -> Settings.DEFAULTS.withHeartbeat(Duration.ZERO))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> Settings.DEFAULTS.withBackoff(Duration.ofMillis(-1)))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void limitsAreCopiedAsGivenAndAsRead() {
+    Spotter.Limit warn = Spotter.Limit.newInstance().setBelow(30);
+    Limits limits = new Limits(warn, Spotter.Limit.newInstance());
+    warn.setBelow(10);
+    assertThat(limits.warn().getBelow()).isEqualTo(30);
+    limits.warn().setBelow(5);
+    assertThat(limits.warn().getBelow()).isEqualTo(30);
+    assertThat(limits)
+        .isEqualTo(
+            new Limits(Spotter.Limit.newInstance().setBelow(30), Spotter.Limit.newInstance()));
+  }
+
+  @Test
+  void anAgentsAddressIsAHostAndMaybeAPort() {
+    assertThat(Link.address("10.12.34.11"))
+        .isEqualTo(new Link.Address("10.12.34.11", 5808, "10.12.34.11:5808"));
+    assertThat(Link.address("vision-front:5809"))
+        .isEqualTo(new Link.Address("vision-front", 5809, "vision-front:5809"));
+    assertThat(Link.address("fd00::11"))
+        .isEqualTo(new Link.Address("fd00::11", 5808, "[fd00::11]:5808"));
+    assertThat(Link.address("[fd00::11]:6000"))
+        .isEqualTo(new Link.Address("fd00::11", 6000, "[fd00::11]:6000"));
+    assertThat(Link.address("[fd00::11]"))
+        .isEqualTo(new Link.Address("fd00::11", 5808, "[fd00::11]:5808"));
+    for (String wrong : List.of("", "vision front", "a:b", "user@host", "host/path")) {
+      assertThatThrownBy(() -> Link.address(wrong))
+          .as(wrong)
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("an agent's address");
+    }
+  }
+
+  static HttpHead head(String text) throws java.io.IOException {
+    return HttpHead.read(
+        new java.io.ByteArrayInputStream(
+            text.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)));
+  }
+
+  @Test
+  void anAnswersHeadIsItsStatusAndHeadersInAnyCase() throws Exception {
+    java.io.ByteArrayInputStream in =
+        new java.io.ByteArrayInputStream(
+            "HTTP/1.1 200 OK\r\nSpotter-protocol: 2.0\r\nContent-type:application/x-protobuf\n\r\nbody"
+                .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+    HttpHead head = HttpHead.read(in);
+    assertThat(head.status()).isEqualTo(200);
+    assertThat(head.header("Spotter-Protocol")).isEqualTo("2.0");
+    assertThat(head.header("content-type")).isEqualTo("application/x-protobuf");
+    assertThat(head.header("Content-Length")).isNull();
+    // It leaves the stream at the body.
+    assertThat(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.ISO_8859_1))
+        .isEqualTo("body");
+    assertThat(
+            new String(
+                HttpHead.request(
+                    "/v2/stream?heartbeat=250ms", "10.12.34.11:5808", "application/x-protobuf"),
+                java.nio.charset.StandardCharsets.ISO_8859_1))
+        .isEqualTo(
+            "GET /v2/stream?heartbeat=250ms HTTP/1.0\r\nHost: 10.12.34.11:5808\r\n"
+                + "Accept: application/x-protobuf\r\nUser-Agent: spotter-manager\r\n\r\n");
+  }
+
+  @Test
+  void anAnswerThatIsntHttpOrIsChunkedIsRefused() {
+    assertThatThrownBy(() -> head("SSH-2.0-OpenSSH_9.6\r\n\r\n"))
+        .hasMessage("it doesn't answer in HTTP: \"SSH-2.0-OpenSSH_9.6\"");
+    assertThatThrownBy(() -> head("HTTP/1.1 OK\r\n\r\n"))
+        .hasMessage("it doesn't answer in HTTP: \"HTTP/1.1 OK\"");
+    assertThatThrownBy(() -> head("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"))
+        .hasMessage("it answers HTTP/1.0 with a transfer coding: chunked");
+    assertThatThrownBy(() -> head("")).hasMessage("it closed the connection without answering");
+    assertThatThrownBy(() -> head("HTTP/1.1 200 OK\r\nA: b\r\n"))
+        .hasMessage("its answer ended in its headers");
+    assertThatThrownBy(() -> head("HTTP/1.1 200 OK\r\nA: " + "b".repeat(HttpHead.MAX)))
+        .hasMessage("its answer's headers are over 65536 bytes");
+  }
+
+  @Test
+  void anAddressGivenTwiceIsRefused() {
+    assertThatThrownBy(() -> new Manager(Boards.robot(), List.of("10.12.34.11", " 10.12.34.11")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("an agent's address is given twice: 10.12.34.11");
+  }
+
+  @Test
+  void whyAFailureHappenedIsItsMessageOrItsKind() {
+    assertThat(Link.why(new java.io.IOException(" Connection refused ")))
+        .isEqualTo("Connection refused");
+    assertThat(Link.why(new java.io.EOFException())).isEqualTo("EOFException");
+  }
+}
