@@ -81,7 +81,8 @@ class AgentTest {
           .containsExactly("outcome", "outcomeMessage", "exit", "output");
       assertThat(description.getProblems()).isEmpty();
       assertThat(description.getPushedPacks()).isEmpty();
-      assertThat(description.getRefusesPushes()).isFalse();
+      // Nothing configured, so no controller named: it takes no pushes.
+      assertThat(description.getRefusesPushes()).isTrue();
       assertThat(description.getRequiresSignatures()).isFalse();
       Spotter.Values values = agent.values();
       assertThat(values.getComplete()).isTrue();
@@ -94,6 +95,7 @@ class AgentTest {
   void itDescribesItsPacksValuesLogsAndActionsByIdAndIndex() {
     fixture.pack("vision", VISION);
     fixture.pushed("detector", "pack: detector\nversion: 0.2.0\n");
+    fixture.config("{\"team\": 1234}");
     try (Agent agent = fixture.agent()) {
       Spotter.Description description = agent.description();
       assertThat(description.getPacks())
@@ -186,8 +188,8 @@ class AgentTest {
       assertThat(agent.description().getProblems())
           .containsExactly(
               "/etc/frc-spotter/agent.json: can't be read, so every write is refused: it may"
-                  + " set acceptPushes, bind, controller, port, trustedKeys only, not packs (packs"
-                  + " are folders in /etc/frc-spotter/packs/)",
+                  + " set acceptPushes, bind, controller, port, team, trustedKeys only, not packs"
+                  + " (packs are folders in /etc/frc-spotter/packs/)",
               Packs.INSTALLED + "/mine/pack.yaml: isn't root's (its owner is pi), ignored");
     }
   }
@@ -237,6 +239,16 @@ class AgentTest {
   void theControllerIs2OnItsOwnRobotNetworkUnlessNamed() throws Exception {
     try (Agent agent = fixture.agent()) {
       assertThat(agent.controller().address()).isEqualTo("10.12.34.2");
+      // Only worked out: it takes the built-in actions from it, and no pushes.
+      assertThat(agent.controller().named()).isFalse();
+      assertThat(AgentServer.may(agent.controller(), true)).isTrue();
+      assertThat(AgentServer.may(agent.controller(), false)).isFalse();
+      assertThat(agent.configuration().acceptsPushes()).isFalse();
+      assertThat(agent.configuration().pushesRefused())
+          .isEqualTo(
+              "its agent.json names no controller or team, and pushes are taken from a named one"
+                  + " only");
+      assertThat(agent.description().getRefusesPushes()).isTrue();
       fixture.addresses.add("10.99.71.11");
       assertThat(agent.controller().address()).isEmpty();
       assertThat(agent.controller().why())
@@ -248,6 +260,15 @@ class AgentTest {
     fixture.config("{\"controller\": \"10.12.34.3\"}");
     try (Agent agent = fixture.agent()) {
       assertThat(agent.controller().address()).isEqualTo("10.12.34.3");
+      assertThat(agent.controller().named()).isTrue();
+      assertThat(AgentServer.may(agent.controller(), false)).isTrue();
+      assertThat(agent.configuration().acceptsPushes()).isTrue();
+    }
+    fixture.config("{\"team\": 1234}");
+    try (Agent agent = fixture.agent()) {
+      assertThat(agent.controller().address()).isEqualTo("10.12.34.2");
+      assertThat(agent.controller().named()).isTrue();
+      assertThat(agent.description().getRefusesPushes()).isFalse();
     }
     try (Agent agent =
         new Agent(fixture.host, fixture.configuration(), "0.4.0", "127.0.0.1", () -> {})) {

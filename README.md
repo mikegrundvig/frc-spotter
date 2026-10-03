@@ -28,8 +28,16 @@ curl -H 'Accept: application/json' http://<board>:5808/v2/values
 
 Use `amd64` in the package's name on x86. A browser gets protobuf, so `curl` with that header is
 the way to read it by hand. Its name is the computer's hostname. It takes writes (actions, pushes)
-only from the robot controller, 10.TE.AM.2 on the network of its own 10.TE.AM.x address, and,
-when the board's `/etc/frc-spotter/agent.json` lists trusted keys, only when they're signed.
+only from the robot controller, and, when the board's `/etc/frc-spotter/agent.json` lists trusted
+keys, only when they're signed. Name the team there, so it knows its controller (10.TE.AM.2) for
+sure: with nothing named, it works the controller out from its own 10.x address and takes only
+power-off and reboot from it, no pushes and no pack's actions.
+
+```sh
+# 3. Name the robot's team: the board then takes pushes and the packs' actions from its controller.
+echo '{"team": 2611}' | sudo tee /etc/frc-spotter/agent.json
+sudo systemctl restart frc-spotter
+```
 
 **A pack is a folder**, `<name>/pack.yaml` beside the scripts it runs, in `/etc/frc-spotter/packs/`
 (installed, root's) or `/var/lib/frc-spotter/packs/` (pushed by the robot). The agent reads them as

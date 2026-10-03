@@ -117,7 +117,12 @@ final class Fixture {
 
   /** The agent on this board, taking writes from one address, its collectors not started. */
   Agent agent(@org.jspecify.annotations.Nullable String controller) {
-    return new Agent(host, configuration(), "0.4.0-test", controller, exits::incrementAndGet);
+    return new Agent(
+        host,
+        Configuration.read(host, controller != null),
+        "0.4.0-test",
+        controller,
+        exits::incrementAndGet);
   }
 
   /** What the agent logged, one line each. */

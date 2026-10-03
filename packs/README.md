@@ -21,8 +21,8 @@ was checked.
   beyond its folder, such as the debian pack's root timer, is the installer's job, and its README
   says so.
 - **Pushed by the robot:** put the folder in the robot program's packs folder, in its deploy
-  directory, and the manager pushes it to every board (`docs/robot.md`, *Pushing the team's
-  packs*). A push is for small packs, configuration and scripts; anything that needs root to put in
+  directory, and the manager pushes it to every board whose `agent.json` names the team
+  (`docs/robot.md`, *Pushing the team's packs*). A push is for small packs, configuration and scripts; anything that needs root to put in
   place, or large data such as a model file, belongs with the board's image instead.
 
 **Changing one:** a pack is yours once it's copied. Its limits are yours to tune (or the robot's to

@@ -123,13 +123,21 @@ its length as a varint (protobuf's delimited form).
 - **Reading** (the description, values, the stream, logs, runs) is open to anyone on the robot's
   network: none of it is secret.
 - **A write** (starting an action, cancelling a run, pushing packs) is taken only from the robot
-  controller's address: 10.TE.AM.2 on the network of the board's own 10.TE.AM.x address, worked
-  out each time from its addresses, with nothing configured (`controller` in `agent.json`, or
-  `--controller`, names another). A board with no 10.x address, or addresses on more than one 10.x
-  network, can't tell which robot it's on, and takes no writes. Refusals are logged at most once in
-  10 seconds. It keeps an accidental click elsewhere from switching a board off; it doesn't stop a
-  laptop given the controller's address. That's the trust the robot's network already gives the
-  Driver Station. Signatures (below) are the stronger check, for a board whose owner wants it.
+  controller's address. Refusals are logged at most once in 10 seconds. It keeps an accidental
+  click elsewhere from switching a board off; it doesn't stop a laptop given the controller's
+  address. That's the trust the robot's network already gives the Driver Station. Signatures
+  (below) are the stronger check, for a board whose owner wants it.
+- **Name the controller to take every write.** A board whose `agent.json` names its team
+  (`{"team": 2611}`, so its controller is 10.26.11.2) or its controller's address (`controller`),
+  or that's given `--controller`, takes every write from it: actions, cancels, and pushes. With
+  nothing named, the agent works the controller out from its own address (10.TE.AM.2 on the network
+  of its 10.TE.AM.x address), and takes **only its two built-in actions** (power-off and reboot)
+  from it: no pack's action, no cancel, and no push (`403`, saying so), and its description says it
+  refuses pushes. A 10.x network isn't only a robot's (a school's or a home's often is, off-season),
+  and on one of those, .2 could be anyone; pushed packs run as the agent's user on every board. A
+  board with no 10.x address, or addresses on more than one 10.x network, can't tell which robot
+  it's on, and takes no writes at all. So whatever installs the agent on a robot's board writes its
+  team into `agent.json`; a board with signatures on (*Signed writes*) still needs it named.
 - **Fail closed:** when `agent.json` is there but can't be read or parsed, every write is refused
   with `503` and why, pushed packs are ignored, and `problems` says so. Reading works as ever.
 
@@ -312,6 +320,10 @@ with large data, such as a model file, is installed with the board's image or by
 Spotter, never pushed from the robot. A bundle is refused (`400`, the packs unchanged) when a path
 is absolute, empty, has an empty, `.` or `..` part or a `\`, or names a file twice.
 
+**Pushes are taken only by a board whose controller is named** (its `team`, or `controller`, in
+`agent.json`; *Who may do what*). One that only works its controller out refuses them, as one
+whose owner refuses pushes does.
+
 **A board can refuse pushes:** `{"acceptPushes": false}` in its `agent.json`. It ignores pushed
 packs entirely, answers a push `403` and why, never answers `409`, and says `refusesPushes` in its
 description.
@@ -477,13 +489,15 @@ README saying what it measures and how it was checked. None is installed by defa
 Optional, at `/etc/frc-spotter/agent.json`, for whoever owns the board; a push can't change it.
 
 ```json
-{"port": 5809, "controller": "10.12.34.2", "bind": "10.12.34.11",
+{"team": 1234, "port": 5809, "bind": "10.12.34.11",
  "acceptPushes": false, "trustedKeys": ["MCowBQYDK2VwAyEA…"]}
 ```
 
-`port` is 1024 to 65535 (5808 unless it says); `controller` and `bind` are IPv4 addresses written
-out; `acceptPushes` is `true` unless it says; `trustedKeys` are Ed25519 public keys. A key it
-doesn't know is refused. A file that's there but can't be read refuses every write (*Who may do
+`team` is the robot's team number (1 to 25599), whose controller, 10.TE.AM.2, the board takes
+writes from; or `controller` names that address itself (not both). Either is what lets the robot
+push packs and run the packs' actions (*Who may do what*). `port` is 1024 to 65535 (5808 unless it
+says); `controller` and `bind` are IPv4 addresses written out; `acceptPushes` is `true` unless it
+says; `trustedKeys` are Ed25519 public keys. A key it doesn't know is refused. A file that's there but can't be read refuses every write (*Who may do
 what*). The agent reads it once, at start.
 
 `frc-spotter [serve] [--port=N] [--bind=ADDRESS] [--controller=ADDRESS] [--root=DIR]`: `--port`,

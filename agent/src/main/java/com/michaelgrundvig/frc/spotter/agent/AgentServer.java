@@ -444,9 +444,21 @@ final class AgentServer implements AutoCloseable {
 
   /**
    * Refuses a write unless the board's settings can be read and it comes from the robot
-   * controller's address.
+   * controller's address; and, but for a built-in action, unless the controller is named.
    */
   private void writer(Request request, String what) throws Refused, IOException {
+    writer(request, what, false);
+  }
+
+  /**
+   * Refuses a write unless the board's settings can be read and it comes from the robot
+   * controller's address; and, unless it's starting a built-in action, unless that controller is
+   * named (in agent.json, or on the command line), not only worked out from the board's own
+   * address, which on a school's or a home's 10.x network could be anyone's.
+   *
+   * @param builtIn whether it starts a built-in action (power-off, reboot)
+   */
+  private void writer(Request request, String what, boolean builtIn) throws Refused, IOException {
     String unreadable = agent.configuration().unreadable();
     if (!unreadable.isEmpty()) {
       throw new Refused(503, "every write is refused while " + unreadable);
@@ -462,6 +474,27 @@ final class AgentServer implements AutoCloseable {
       throw new Refused(
           403, "only the robot controller (" + controller.address() + ") may " + what);
     }
+    if (!may(controller, builtIn)) {
+      refusals.log(
+          "Refused a write (" + what + ") from " + from + ": a controller only worked out");
+      throw new Refused(
+          403,
+          "this board takes only its built-in actions from a robot controller it works out from"
+              + " its own address ("
+              + controller.address()
+              + "): name the controller, or the team, in "
+              + AgentConfig.PATH
+              + " to "
+              + what);
+    }
+  }
+
+  /**
+   * Whether the controller may make a write: one that's named, any; one only worked out from the
+   * board's own address, the start of a built-in action.
+   */
+  static boolean may(Agent.Controller controller, boolean builtIn) {
+    return builtIn || controller.named();
   }
 
   /** Checks a write's signature, when the board requires them. */
@@ -508,7 +541,7 @@ final class AgentServer implements AutoCloseable {
   }
 
   private void action(Request request, String id) throws Refused, IOException {
-    writer(request, "run an action");
+    writer(request, "run an action", id.startsWith(Describer.CORE + "."));
     Runs.Declared declared =
         agent
             .runs()
@@ -573,7 +606,7 @@ final class AgentServer implements AutoCloseable {
   private void push(Request request) throws Refused, IOException {
     writer(request, "push packs");
     if (!agent.configuration().acceptsPushes()) {
-      throw new Refused(403, "this board refuses pushes: its agent.json says acceptPushes: false");
+      throw new Refused(403, "this board refuses pushes: " + agent.configuration().pushesRefused());
     }
     if (!pushes.tryAcquire()) {
       throw new Refused(503, "a push is under way");

@@ -98,7 +98,8 @@ public final class LocalAgent implements AutoCloseable {
     if (server != null) {
       throw new IllegalStateException("the agent is already running");
     }
-    Agent started = new Agent(host, Configuration.read(host), VERSION, "127.0.0.1", this::exited);
+    Agent started =
+        new Agent(host, Configuration.read(host, true), VERSION, "127.0.0.1", this::exited);
     server = new AgentServer(started, new InetSocketAddress("127.0.0.1", port));
     port = server.port();
     agent = started;

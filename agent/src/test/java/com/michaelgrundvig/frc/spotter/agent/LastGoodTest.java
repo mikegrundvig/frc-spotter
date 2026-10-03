@@ -23,6 +23,8 @@ class LastGoodTest {
   @BeforeEach
   void aBoardWithPushedPacks() throws Exception {
     fixture = new Fixture(dir);
+    // Its controller named, by its team: only then does it take pushes, and load pushed packs.
+    fixture.config("{\"team\": 1234}");
     fixture.pushed("team", "pack: team\n");
   }
 

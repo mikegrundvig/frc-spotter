@@ -234,6 +234,12 @@ a spare board just works.
 **A forced push**, `spotter.push(board)`, pushes now, field or no field: it's robot code's call. It
 returns a `CompletableFuture` that completes once the board has taken the packs.
 
+**A board takes pushes only when its `agent.json` names its team** (`{"team": 2611}`) or its
+controller: one that only works its controller out from its own address refuses them (and runs no
+pack's action for the robot, only power-off and reboot), since on a school's or a home's 10.x
+network, .2 could be anyone. Its description says it refuses pushes, and a mismatch is a warning;
+the board's 403 says why.
+
 **A board can refuse pushes** (`{"acceptPushes": false}` in its `agent.json`): its description says
 so, and a mismatch is a warning. A forced push to it fails, with its reason.
 

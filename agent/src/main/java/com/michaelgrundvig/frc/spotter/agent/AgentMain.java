@@ -63,7 +63,7 @@ public final class AgentMain {
     if (bind != null) {
       checkAddress(bind, "--bind");
     }
-    Configuration configuration = Configuration.read(host);
+    Configuration configuration = Configuration.read(host, controller != null);
     for (String problem : configuration.problems()) {
       host.log(problem);
     }

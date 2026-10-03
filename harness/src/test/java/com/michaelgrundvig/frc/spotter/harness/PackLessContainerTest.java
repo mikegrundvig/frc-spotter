@@ -32,7 +32,8 @@ class PackLessContainerTest {
           .containsExactly("core.power-off", "core.reboot");
       assertThat(description.getProblems()).isEmpty();
       assertThat(description.getPushedPacks()).isEmpty();
-      assertThat(description.getRefusesPushes()).isFalse();
+      // Its controller isn't named (nothing is configured), so it takes no pushes.
+      assertThat(description.getRefusesPushes()).isTrue();
       assertThat(description.getRequiresSignatures()).isFalse();
       Spotter.Values values = client.values();
       assertThat(values.getComplete()).isTrue();
