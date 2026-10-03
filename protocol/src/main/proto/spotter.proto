@@ -219,3 +219,16 @@ message Problem {
   string message = 1;
   string pushed_packs = 2;            // on a 409 from /v2/stream: the agent's own hash
 }
+
+// ---- Pushed packs: POST /v2/packs, application/x-protobuf ----
+
+// The team's packs, as the robot pushes them: exactly what the pack hash covers, and nothing else.
+message PackBundle {
+  repeated PackFile files = 1;
+}
+
+message PackFile {
+  string path = 1;                    // relative to the packs folder, "/"-separated
+  bool executable = 2;                // written 755 if so, else 644, as the hash counts it
+  bytes content = 3;
+}

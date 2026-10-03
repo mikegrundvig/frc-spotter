@@ -51,19 +51,19 @@ protocol by hand.
 | `GET /v2/runs/<run>` | `RunState`, while it's kept |
 | `GET /v2/runs/<run>/files/<field>` | A `file` field of its response, as its bytes, to download as the pack names it |
 | `GET /v2/runs/<run>/log?from=…&cursor=…&limit=…&level=…` | `LogPage` of its log |
-| `POST /v2/packs` | Takes a bundle of pack folders (a zip), puts it in place, and restarts: `202` (*Pushed packs*) |
+| `POST /v2/packs` | Takes a bundle of pack folders (a `PackBundle`, protobuf), puts it in place, and restarts: `202` (*Pushed packs*) |
 
 A refusal or a failure answers its status with a `Problem` saying why:
 
 | Status | When |
 |---|---|
-| `400` | A bad query, input an action doesn't take, a bundle that isn't a zip |
+| `400` | A bad query, input an action doesn't take, a bundle that isn't a `PackBundle` or names a file outside its folder, or twice |
 | `401` | A write that isn't signed, or not as it must be, on a board that requires signatures |
 | `403` | A write from anyone but the robot controller; a push to a board that refuses pushes |
 | `404` | An unknown path, log, action or run |
 | `405` | The wrong method, with `Allow` |
 | `409` | A stream whose packs differ; an action already running; cancelling a finished run |
-| `413` | A body past what's taken (64 MiB) |
+| `413` | A body past what's taken: 64 MiB for an action's input, 16 MiB for a push |
 | `421` | A request not addressed to the board (its `Host` isn't a 10.x, 169.254.x or loopback address, `localhost`, or its own name), so a web page elsewhere can't reach it through a name that resolves to it |
 | `500` | The agent failed; its journal says why |
 | `502`, `504` | A log's command failed, or timed out |
@@ -249,22 +249,30 @@ board has them.
 2. If they match the board's pushed packs, the stream starts.
 3. If they differ, the agent answers `409`, with a `Problem` carrying its own hash. The manager
    opens the stream without the hash (a push is signed over a stream's challenge, and a `409`
-   carries none), and sends the bundle over it, a zip of the pack folders, with `POST /v2/packs`. The agent unpacks it into a
-   folder of its own beside the others (`/var/lib/frc-spotter/pushed/<id>/`), each file `755` if the
-   zip says any execute bit for it, `644` otherwise; then renames a new link over
+   carries none), and sends the bundle over it with `POST /v2/packs`: a `PackBundle`
+   (`spotter.proto`), in protobuf, carrying exactly what the hash covers, each file's path
+   (relative, with `/`), whether it's executable, and its bytes. The agent writes the files into a
+   folder of their own beside the others (`/var/lib/frc-spotter/pushed/<id>/`), each `755` if the
+   bundle says it's executable, `644` otherwise; then renames a new link over
    `/var/lib/frc-spotter/packs`, pointing at it, which is atomic. It answers `202`, and exits;
-   systemd starts it again a second later. A push that fails partway (a full disk, a bad zip) leaves
-   the packs as they were. In the container tests, the board was back and matching 1.7 s after the
-   push.
+   systemd starts it again a second later. A push that fails partway (a full disk, a bad bundle)
+   leaves the packs as they were. In the container tests, the board was back and matching 1.7 s
+   after the push.
 4. A manager given no packs sends no hash, and nothing is pushed.
 
-**The hash** (`PackHash`, in `:protocol`, the same code on both sides) is of what the packs contain,
-never of a zip: SHA-256 over each file's path (relative, with `/`), its permissions, its length and
-its bytes, in the order of their paths. Permissions count as one of two, `755` (any execute bit) or
+**The hash** (`PackHash`, in `:protocol`, the same code on both sides) is of what the packs contain:
+SHA-256 over each file's path (relative, with `/`), its permissions, its length and its bytes, in
+the order of their paths. A bundle hashes the same from its files as their folder does from disk. Permissions count as one of two, `755` (any execute bit) or
 `644`, as the agent writes them, so a umask on either side can't make two copies differ. Folders
 count only by their files; no files hash to the empty text. The agent hashes its pushed packs from
 disk as it starts, whether or not they load, so a pack that fails to load isn't pushed again until
 the robot's packs change.
+
+**Small packs only.** A push is for configuration and scripts: a bundle is at most 16 MiB and
+4,096 files, sent as it is (no compression), and read whole into the agent's 64 MiB heap. A pack
+with large data, such as a model file, is installed with the board's image or by whatever installs
+Spotter, never pushed from the robot. A bundle is refused (`400`, the packs unchanged) when a path
+is absolute, empty, has an empty, `.` or `..` part or a `\`, or names a file twice.
 
 **A board can refuse pushes:** `{"acceptPushes": false}` in its `agent.json`. It ignores pushed
 packs entirely, answers a push `403` and why, never answers `409`, and says `refusesPushes` in its
@@ -410,7 +418,7 @@ GitHub release, with their checksums:
 
 | Artifact | For |
 |---|---|
-| `frc-spotter_<version>_<arch>.deb` (arm64, amd64) | Debian, Ubuntu, Armbian: carries its own Java runtime (jlink, JDK 25: `java.base`, `jdk.httpserver`, `jdk.unsupported` for QuickBuffers, `jdk.zipfs` for pushed bundles) |
+| `frc-spotter_<version>_<arch>.deb` (arm64, amd64) | Debian, Ubuntu, Armbian: carries its own Java runtime (jlink, JDK 25: `java.base`, `jdk.httpserver`, `jdk.unsupported` for QuickBuffers) |
 | `frc-spotter-<version>-linux-<arch>.tar.gz` | Systems without dpkg: the same files, with `install.sh [--root DIR]` |
 | `frc-spotter-<version>-all.jar` | A board with its own Java 17 or newer |
 | `frc-spotter-<version>-all.tar.gz` | The same, with its unit, launcher, polkit rules, sysusers and tmpfiles files, and `install.sh` |

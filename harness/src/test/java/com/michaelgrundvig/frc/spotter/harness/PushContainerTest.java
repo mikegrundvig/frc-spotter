@@ -5,22 +5,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.michaelgrundvig.frc.spotter.protocol.PackHash;
 import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
-import java.net.URI;
 import java.net.http.HttpResponse;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
-import java.util.Map;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.containers.Network;
 
 /**
- * Packs the robot pushes, end to end, as its manager will: a stream asked for with the robot's hash
+ * Packs the robot pushes, end to end, as its manager does: a stream asked for with the robot's hash
  * is refused {@code 409} with the board's; the bundle is pushed; the agent restarts with it; and
  * the stream asked for again starts, the pushed pack running. A board whose owner refuses pushes
  * never answers {@code 409}, and refuses a push with {@code 403}.
@@ -45,23 +40,9 @@ class PushContainerTest {
     return packs;
   }
 
-  /** A bundle of the robot's packs: a zip keeping each file's permissions. */
-  private Path bundle(Path packs) throws Exception {
-    Path zip = dir.resolve("bundle.zip");
-    try (FileSystem bundle =
-        FileSystems.newFileSystem(
-            URI.create("jar:" + zip.toUri()),
-            Map.of("create", "true", "enablePosixFileAttributes", "true"))) {
-      try (Stream<Path> files = Files.walk(packs)) {
-        for (Path file : files.filter(Files::isRegularFile).toList()) {
-          Path entry = bundle.getPath("/" + packs.relativize(file));
-          Files.createDirectories(entry.getParent());
-          Files.copy(file, entry);
-          Files.setPosixFilePermissions(entry, Files.getPosixFilePermissions(file));
-        }
-      }
-    }
-    return zip;
+  /** A bundle of the robot's packs, as the manager sends it: a {@code PackBundle}. */
+  private static byte[] bundle(Path packs) throws Exception {
+    return PackHash.bundle(packs).toByteArray();
   }
 
   @Test
@@ -80,7 +61,7 @@ class PushContainerTest {
         assertThat(refused.problem().getMessage()).contains("it has none");
       }
       long pushed = System.nanoTime();
-      HttpResponse<byte[]> push = client.post(Protocol.PACKS, bundle(packs));
+      HttpResponse<byte[]> push = client.post(Protocol.PACKS, bundle(packs), null);
       assertThat(push.statusCode()).as("%s", push).isEqualTo(202);
       // The agent exits, systemd starts it again, and it reads the pushed pack.
       Spotter.Description description = null;
@@ -138,7 +119,7 @@ class PushContainerTest {
       try (TestClient.Stream stream = client.stream("?packs=" + PackHash.of(packs))) {
         assertThat(stream.status()).isEqualTo(200);
       }
-      HttpResponse<byte[]> refused = client.post(Protocol.PACKS, bundle(packs));
+      HttpResponse<byte[]> refused = client.post(Protocol.PACKS, bundle(packs), null);
       assertThat(refused.statusCode()).isEqualTo(403);
       assertThat(TestClient.problem(refused).getMessage())
           .isEqualTo("this board refuses pushes: its agent.json says acceptPushes: false");

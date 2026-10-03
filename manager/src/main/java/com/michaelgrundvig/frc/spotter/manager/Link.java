@@ -722,7 +722,7 @@ final class Link implements Runnable, AgentClient.Challenges {
       requests.execute(
           () -> {
             try {
-              client.write("POST", Protocol.PACKS, team.bundle(), "application/zip");
+              client.write("POST", Protocol.PACKS, team.bundle(), Protocol.PROTOBUF);
               pushFailure = null;
               restarting = true;
               askWithPacks = true;

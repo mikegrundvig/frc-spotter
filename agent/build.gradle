@@ -88,9 +88,8 @@ def agentVersion = (project.findProperty("agentVersion") ?: "0.1.0").toString()
 def debianArch = [amd64: "amd64", x86_64: "amd64", aarch64: "arm64", arm64: "arm64"]
 .get(System.getProperty("os.arch"), System.getProperty("os.arch"))
 // The runtime's modules: the agent's, and no more (jdeps --print-module-deps on its jar). QuickBuffers
-// reads and writes through sun.misc.Unsafe, which is jdk.unsupported's; a push's zip is read by
-// jdk.zipfs, which keeps each file's permissions.
-def runtimeModules = "java.base,jdk.httpserver,jdk.unsupported,jdk.zipfs"
+// reads and writes through sun.misc.Unsafe, which is jdk.unsupported's.
+def runtimeModules = "java.base,jdk.httpserver,jdk.unsupported"
 def packageRoot = layout.buildDirectory.dir("package/root")
 
 def agentRuntime = tasks.register("agentRuntime", Exec) {

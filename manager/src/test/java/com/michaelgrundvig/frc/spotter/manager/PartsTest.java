@@ -201,7 +201,7 @@ class PartsTest {
   }
 
   @Test
-  void theTeamsPacksAreZippedWithTheirPermissionsAsTheHashCountsThem(
+  void theTeamsPacksAreBundledAndTheirHashIsTheFolders(
       @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
     java.nio.file.Path packs = dir.resolve("packs");
     java.nio.file.Files.createDirectories(packs.resolve("team/scripts"));
@@ -212,24 +212,13 @@ class PartsTest {
         java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
     TeamPacks team = java.util.Objects.requireNonNull(TeamPacks.of(packs));
     assertThat(team.hash()).isEqualTo(com.michaelgrundvig.frc.spotter.protocol.PackHash.of(packs));
-    byte[] zip = team.bundle();
-    assertThat(team.bundle()).isSameAs(zip);
-    java.nio.file.Path file = dir.resolve("bundle.zip");
-    java.nio.file.Files.write(file, zip);
-    try (java.nio.file.FileSystem bundle =
-        java.nio.file.FileSystems.newFileSystem(
-            java.net.URI.create("jar:" + file.toUri()),
-            java.util.Map.of("enablePosixFileAttributes", "true"))) {
-      assertThat(
-              java.nio.file.attribute.PosixFilePermissions.toString(
-                  java.nio.file.Files.getPosixFilePermissions(
-                      bundle.getPath("/team/scripts/check"))))
-          .isEqualTo("rwxr-xr-x");
-      assertThat(
-              java.nio.file.attribute.PosixFilePermissions.toString(
-                  java.nio.file.Files.getPosixFilePermissions(bundle.getPath("/team/pack.yaml"))))
-          .isEqualTo("rw-r--r--");
-    }
+    Spotter.PackBundle sent =
+        us.hebi.quickbuf.ProtoMessage.mergeFrom(Spotter.PackBundle.newInstance(), team.bundle());
+    assertThat(sent.getFiles())
+        .extracting(Spotter.PackFile::getPath, Spotter.PackFile::getExecutable)
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple("team/pack.yaml", false),
+            org.assertj.core.groups.Tuple.tuple("team/scripts/check", true));
     assertThat(TeamPacks.of(dir.resolve("empty"))).isNull();
   }
 
