@@ -38,6 +38,11 @@ class ZeroAllocationTest {
   static void countingIsOn() {
     assertThat(THREADS.isThreadAllocatedMemorySupported()).isTrue();
     assertThat(THREADS.isThreadAllocatedMemoryEnabled()).isTrue();
+    // Whatever the count's own first calls make (loading, initialising) is made here, uncounted.
+    for (int i = 0; i < 1000; i++) {
+      THREADS.getCurrentThreadAllocatedBytes();
+      THREADS.getThreadAllocatedBytes(Thread.currentThread().getId());
+    }
   }
 
   /** A board with a value of each kind, and limits on the numbers. */
@@ -246,8 +251,12 @@ class ZeroAllocationTest {
               ? heartbeat(i)
               : Spotter.Event.newInstance().setValues(values(i, i == 1, false));
     }
-    for (int i = 0; i < 20_000; i++) {
+    // Warm up on the same paths as what's measured, the robot's clock moving 1 ms a loop: over
+    // 60 s of it, so the agent's clock map has switched windows (each 10 s) before the JIT settles,
+    // not first while measured.
+    for (int i = 0; i < 60_000; i++) {
       link.received(events[i < events.length ? i : 1 + i % (events.length - 1)]);
+      clock.addAndGet(1_000_000);
       manager.update();
     }
     long start = THREADS.getCurrentThreadAllocatedBytes();
