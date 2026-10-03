@@ -37,6 +37,8 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     testImplementation libs.assertj.core
+    // Reads spotter.proto's descriptor (QuickBuffers carries its bytes), to check WireCheck's table.
+    testImplementation libs.protobuf.java
 }
 
 // QuickBuffers in place of protobuf-java, as WPILib and PhotonVision generate theirs: protoc runs

@@ -34,7 +34,7 @@ public final class Protocol {
    */
   public static final String STREAM = "/v2/stream";
 
-  /** {@code POST}: a bundle of pack folders (a zip), for a board that accepts pushes. */
+  /** {@code POST}: a bundle of pack folders ({@code PackBundle}), for a board that takes pushes. */
   public static final String PACKS = "/v2/packs";
 
   /** {@code GET /v2/logs/<id>?from=&cursor=&limit=&level=}: a {@code LogPage}. */
@@ -57,6 +57,28 @@ public final class Protocol {
 
   /** The last number of the robot controller's address, 10.TE.AM.2: who may change a board. */
   public static final int CONTROLLER = 2;
+
+  /**
+   * The most one of a stream's events may be, in bytes. The manager refuses a longer one; the agent
+   * sends none: it describes no more than fits, splits a board's values across events, and keeps a
+   * run's response within {@link #MAX_RESPONSE}.
+   */
+  public static final int MAX_EVENT = 1 << 20;
+
+  /**
+   * The most a run's response may be, in bytes, as its events and its state carry it: a field of it
+   * past that is unavailable, saying so. A {@code file} field is a URL, and downloads whole.
+   */
+  public static final int MAX_RESPONSE = 256 << 10;
+
+  /** The most values a board may describe: the agent loads no more, the manager takes no more. */
+  public static final int MAX_VALUES = 2048;
+
+  /** The most actions a board may describe, its two built-in ones included. */
+  public static final int MAX_ACTIONS = 128;
+
+  /** The most problems a board may list: past them, the last says how many more there were. */
+  public static final int MAX_PROBLEMS = 128;
 
   private Protocol() {}
 }
