@@ -86,6 +86,17 @@ when Docker or Podman is there), and coverage. Java 25 is downloaded if it's mis
 compiled for Java 17, so the agent also runs on a board's own Java.
 `./gradlew :spotter-agent:agentRelease` builds the agent's packages for the computer it runs on.
 
+Every dependency, plugin and tool Gradle downloads is checked against its SHA-256 in
+`gradle/verification-metadata.xml`, so one that changes on a server fails the build. After changing
+a version in `gradle/libs.versions.toml`, write the file again from a build that resolves everything
+(`gradle/every-platform.gradle` adds protoc and QuickBuffers' generator for each platform), and read
+the diff:
+
+```sh
+./gradlew --write-verification-metadata sha256 --init-script gradle/every-platform.gradle \
+  ci :spotter-agent:agentRelease :spotter-tools:allJar :spotter-protocol:resolveEveryPlatform
+```
+
 ## License
 
 MIT: see `LICENSE`.

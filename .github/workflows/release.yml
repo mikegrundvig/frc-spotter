@@ -2,12 +2,17 @@ name: Release
 
 # A version tag (v0.1.0) builds the agent's packages and publishes them as that tag's GitHub
 # release, with their SHA-256 checksums: the .deb and the tarball for 64-bit ARM and x86 Linux, each
-# built on its own architecture (jlink links the runtime of the computer it runs on), and the
-# -all.jar, alone and with its files. Image builders pin a release by its version and checksums.
-# It also publishes the libraries a robot program uses, com.michaelgrundvig.frc:spotter-protocol and
-# spotter-manager, with their sources, javadoc, and checksums, into the static Maven repository on the gh-pages branch
-# (maven/), which GitHub Pages serves at https://mikegrundvig.github.io/frc-spotter/maven: the new
-# version added, the old ones kept.
+# built on its own architecture (jlink links the runtime of the computer it runs on), the -all.jar,
+# alone and with its files, and the tools' -all.jar. Image builders pin a release by its version and
+# checksums. It also publishes what a robot program uses, com.michaelgrundvig.frc:spotter-protocol,
+# spotter-manager and spotter-tools, with their sources, javadoc, and checksums, into the static
+# Maven repository on the gh-pages branch (maven/), which GitHub Pages serves at
+# https://mikegrundvig.github.io/frc-spotter/maven: the new version added, the old ones kept.
+#
+# No job that runs Gradle can write to the repository: every build runs with a read-only token and
+# no credentials on disk, so a compromised build dependency can't push a branch or a tag, or change
+# what robot programs download. The two jobs that write (the release, gh-pages) run no build: they
+# publish what the builds left as artifacts.
 on:
   push:
     tags: ["v*"]
@@ -35,13 +40,17 @@ jobs:
           persist-credentials: false
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - name: Build the packages
-        run: ./gradlew :spotter-agent:agentRelease "-PagentVersion=${GITHUB_REF_NAME#v}"
+        run: |
+          ./gradlew :spotter-agent:agentRelease :spotter-tools:allJar \
+            "-PagentVersion=${GITHUB_REF_NAME#v}"
       - name: Collect them
         run: |
           mkdir -p out
           cp agent/build/distributions/*.deb agent/build/distributions/*.tar.gz out/
           if [ "${{ matrix.arch }}" = amd64 ]; then
             cp agent/build/distributions/jar/*-all.jar out/
+            # The tools: one jar for every computer.
+            cp tools/build/libs/spotter-tools-all.jar "out/spotter-tools-${GITHUB_REF_NAME#v}-all.jar"
           else
             # The -all.jar and its tarball are the same on every architecture: amd64's are published.
             rm out/*-all.tar.gz
@@ -67,47 +76,82 @@ jobs:
           path: out
       - name: Checksums
         working-directory: out
-        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+        run: sha256sum -- * > SHA256SUMS && cat SHA256SUMS
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --verify-tag --title "Spotter $GITHUB_REF_NAME" \
-            --notes "The coprocessor agent $GITHUB_REF_NAME: its .deb and tarball for arm64 and amd64 Linux, and the -all.jar for a board with Java 17 or newer, alone and with its unit, polkit rules, and install script. SHA256SUMS has every file's checksum. The robot's libraries, com.michaelgrundvig.frc:spotter-manager and spotter-protocol ${GITHUB_REF_NAME#v}, are in the Maven repository at https://mikegrundvig.github.io/frc-spotter/maven."
+            --notes "The coprocessor agent $GITHUB_REF_NAME: its .deb and tarball for arm64 and amd64 Linux, and the -all.jar for a board with Java 17 or newer, alone and with its unit, polkit rules, and install script; and spotter-tools, to check packs and read a board (java -jar). SHA256SUMS has every file's checksum. The robot's libraries, com.michaelgrundvig.frc:spotter-manager and spotter-protocol ${GITHUB_REF_NAME#v}, and spotter-tools, are in the Maven repository at https://mikegrundvig.github.io/frc-spotter/maven."
 
   maven:
-    name: Maven
+    name: Maven (build)
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # One publish at a time: each adds its version to the same maven-metadata.xml.
-    concurrency:
-      group: maven-pages
-      cancel-in-progress: false
-    # Write access for this job, to push the gh-pages branch.
+    # Read-only: the build runs Gradle, its plugins and dependencies, with nothing to push with.
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      pages: ${{ steps.pages.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The Maven repository as published so far, with the job's token to push it.
+      # The Maven repository as published so far, read only: Gradle adds the new version to its
+      # maven-metadata.xml.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: gh-pages
           path: pages
+          persist-credentials: false
+      - name: The repository's commit, which the push builds on
+        id: pages
+        run: echo "commit=$(git -C pages rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-      - name: Publish into the repository
+      - name: Publish into the repository's folder
         run: |
-          ./gradlew :spotter-protocol:publishAllPublicationsToPagesRepository :spotter-manager:publishAllPublicationsToPagesRepository \
+          ./gradlew :spotter-protocol:publishAllPublicationsToPagesRepository \
+            :spotter-manager:publishAllPublicationsToPagesRepository \
+            :spotter-tools:publishAllPublicationsToPagesRepository \
             "-PagentVersion=${GITHUB_REF_NAME#v}" "-PpagesRepository=$GITHUB_WORKSPACE/pages/maven"
           find pages/maven -path "*/${GITHUB_REF_NAME#v}/*" -type f | sort
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: maven
+          path: pages/maven/
+          if-no-files-found: error
+
+  maven-push:
+    name: Maven (push gh-pages)
+    needs: maven
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # One push at a time: each adds its version to the same maven-metadata.xml.
+    concurrency:
+      group: maven-pages
+      cancel-in-progress: false
+    # Write access, and no build: it pushes the folder the build left, nothing else.
+    permissions:
+      contents: write
+    steps:
+      # gh-pages at the commit the build read, so its maven-metadata.xml is the one the build added
+      # to: if another release pushed since, this push isn't a fast-forward, and fails rather than
+      # dropping that release's version.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.maven.outputs.pages }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: maven
+          path: ${{ runner.temp }}/maven
       - name: Push gh-pages
-        working-directory: pages
         run: |
+          rm -rf maven
+          cp -R "$RUNNER_TEMP/maven" maven
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add maven
-          git commit -m "Publish spotter-protocol and spotter-manager ${GITHUB_REF_NAME#v}"
-          git push origin gh-pages
+          git add -A maven
+          git commit -m "Publish spotter-protocol, spotter-manager and spotter-tools ${GITHUB_REF_NAME#v}"
+          git push origin HEAD:refs/heads/gh-pages
