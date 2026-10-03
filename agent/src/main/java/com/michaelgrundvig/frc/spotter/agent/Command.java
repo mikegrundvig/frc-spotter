@@ -63,8 +63,19 @@ sealed interface Command permits Command.Run, Command.Http, Command.Read {
    * @param url the URL: {@code http://localhost...}
    * @param form the form field an action's input is sent as (multipart); empty to send it as the
    *     body
+   * @param filename the file name the form's field says it sends; empty for the field's own name
    */
-  record Http(String method, String url, String form) implements Command {}
+  record Http(String method, String url, String form, String filename) implements Command {
+    /** A request whose form, if any, names its file after its field. */
+    Http(String method, String url, String form) {
+      this(method, url, form, "");
+    }
+
+    /** The file name the form's field says it sends: its own, unless the pack names one. */
+    String file() {
+      return filename.isEmpty() ? form : filename;
+    }
+  }
 
   /**
    * Reading a file: a collector's only.
