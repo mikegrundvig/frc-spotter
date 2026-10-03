@@ -453,7 +453,43 @@ final class Link implements Runnable, AgentClient.Challenges {
     current.alerts = List.of();
     String hostname = copy.getIdentity().getHostname();
     board.named(hostname.isEmpty() ? board.address() : hostname);
+    problems(copy);
     return true;
+  }
+
+  /** The longest a problem is quoted in its alert; the board's problems have it whole. */
+  static final int QUOTED_PROBLEM = 200;
+
+  /**
+   * Takes a description's problems, and its alert: the count and the first, so a pack the board
+   * ignored (a typo, a key a newer agent knows) is never silent on the robot.
+   */
+  private void problems(Spotter.Description described) {
+    List<String> problems = new ArrayList<>();
+    for (int i = 0; i < described.getProblems().length(); i++) {
+      problems.add(described.getProblems().get(i));
+    }
+    current.problems = List.copyOf(problems);
+    current.problemsAlert = problemsAlert(board.name(), current.problems);
+  }
+
+  /**
+   * What a board's problems' alert says: {@code "vision-front reports 2 problems, the first: ..."};
+   * empty when it has none.
+   */
+  static String problemsAlert(String board, List<String> problems) {
+    if (problems.isEmpty()) {
+      return "";
+    }
+    String first = problems.get(0);
+    if (first.length() > QUOTED_PROBLEM) {
+      first = first.substring(0, QUOTED_PROBLEM) + "...";
+    }
+    return board
+        + (problems.size() == 1
+            ? " reports a problem: "
+            : " reports " + problems.size() + " problems, the first: ")
+        + first;
   }
 
   private void values(Spotter.Values values, long now) {
@@ -621,6 +657,8 @@ final class Link implements Runnable, AgentClient.Challenges {
       raws = new Utf8String[0];
       current.changes++;
       current.alerts = List.of();
+      current.problems = List.of();
+      current.problemsAlert = "";
     }
     current.packs = "";
     packsState = Packs.SAME;

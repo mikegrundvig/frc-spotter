@@ -11,7 +11,8 @@ import java.util.TreeMap;
 /**
  * The packs a board has, read once as the agent starts (a change takes a restart): those installed
  * with it, in {@link #INSTALLED}, and those the robot pushed, in {@link #PUSHED}. A pushed pack
- * wins over an installed one of the same name: the robot's repository is the source of truth.
+ * wins over an installed one of the same name, as the design has it, so that's no problem: the
+ * robot's repository is the source of truth, and the description's packs say which was pushed.
  *
  * <p>An installed pack is trusted by its file, as {@code sshd} trusts its configuration: one whose
  * {@code pack.yaml} isn't root's, or that its group or anyone else may write, is ignored. So is a
@@ -80,13 +81,10 @@ final class Packs {
     }
     TreeMap<String, Pack> all = new TreeMap<>();
     installed.forEach((name, pack) -> pack.ifPresent(loaded -> all.put(name, loaded)));
+    // The documented rule, not a problem: the description's packs say which is pushed.
     pushed.forEach(
         (name, pack) -> {
-          if (installed.containsKey(name)) {
-            all.remove(name);
-            problems.add(
-                INSTALLED + "/" + name + ": ignored, as the robot pushed a pack of that name");
-          }
+          all.remove(name);
           pack.ifPresent(loaded -> all.put(name, loaded));
         });
     return new Loaded(new ArrayList<>(all.values()), problems, hash);

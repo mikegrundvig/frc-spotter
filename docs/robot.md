@@ -64,8 +64,12 @@ Each has a default (`Settings.DEFAULTS`); robot code changes those it needs with
   threshold), `CONNECTED`, `MISSING` (silent past the threshold), or `OTHER_PROTOCOL`. `why()` says
   why it isn't reached: the last attempt's failure, its silence, or the other protocol.
 - **`name()`:** its hostname once it's described itself; its address until then.
+- **`problems()`:** what its agent ignored, and why, as a list of text: a pack that didn't load
+  (each mistake with its file and line), a program anyone but root could change, an `agent.json`
+  that can't be read. While it has any, its alerts include a warning saying how many, and the
+  first, so a pack that didn't load is never silent on the robot.
 - **`description()`:** what it last described: its identity, packs, values', logs' and actions'
-  declarations, and its `problems`, as QuickBuffers' `Description`. A few lines of robot code
+  declarations, and its problems, as QuickBuffers' `Description`. A few lines of robot code
   against it can check anything more ("this board should have the PhotonVision pack at 1.2"); the
   manager validates nothing beyond limits and missing boards.
 - **`values()`, `value(id)`:** each value, by `pack.collector.field`: its number, text, flag or
@@ -120,6 +124,7 @@ until one changes. Robot code maps them onto its own, WPILib's `Alert` say: `FAI
 | A missing board | failing | `vision-front is missing: Connection refused` |
 | A board on another major version of the protocol | failing | `vision-front: it speaks Spotter protocol 3.0, the robot 2.0` |
 | Packs that differ and won't be pushed now | warning | `vision-front's packs differ from the robot's: they'll be pushed off the field` |
+| A board that reports problems | warning | `vision-front reports 2 problems, the first: /var/lib/frc-spotter/packs/detector/pack.yaml:8: unknown key "evry" in a collector; ...` |
 | No key pair, while a board requires signatures | warning | `no Spotter key pair on this controller (/home/systemcore/spotter.key, /home/systemcore/spotter.pub): boards that require signatures will refuse its actions and pushes` |
 | A limit override that matches nothing | warning | `Spotter's limits for vision.health.fsp match no value or response field on any board` |
 

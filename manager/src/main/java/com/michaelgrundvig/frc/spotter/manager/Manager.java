@@ -251,9 +251,10 @@ public final class Manager implements AutoCloseable {
 
   /**
    * The current alerts, as of the last {@link #update}, board by board in the order given: one per
-   * missing board, or board on another protocol; otherwise one per value at warning or failing, and
-   * one for packs that differ from the robot's and won't be pushed now. Then robot code's own: its
-   * key, its packs, and limit overrides that match nothing. The same list until one changes.
+   * missing board, or board on another protocol; otherwise one per value at warning or failing, one
+   * for packs that differ from the robot's and won't be pushed now, and one while it reports
+   * problems. Then robot code's own: its key, its packs, and limit overrides that match nothing.
+   * The same list until one changes.
    */
   public List<Alert> alerts() {
     return alerts;

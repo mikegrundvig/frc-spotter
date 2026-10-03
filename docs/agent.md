@@ -322,7 +322,8 @@ one: it's in place or it isn't.
 
 The agent reads both as it starts; a change takes a restart (`systemctl restart frc-spotter`). If a
 pushed pack and an installed one share a name, the pushed one wins (the robot's repository is the
-source of truth), and `problems` says so.
+source of truth); that's the rule, not a problem, and the description's `packs` say which was
+pushed.
 
 **Trust.** An installed pack is trusted by its file, as `sshd` trusts its configuration: one whose
 `pack.yaml` isn't root's, or that its group or anyone else may write, is ignored. The agent also
@@ -333,8 +334,9 @@ program is left alone, as it's usually data (a file to hash). A program that isn
 fail when it's run. A pushed pack is trusted because only the controller may push.
 
 **`problems`** lists everything ignored, and why: a pack that isn't root's, isn't a folder, has no
-`pack.yaml`, or can't be read (each mistake with its file and line), a pushed pack that wins over
-an installed one, an untrusted program, an `agent.json` that can't be read.
+`pack.yaml`, or can't be read (each mistake with its file and line), an untrusted program, an
+`agent.json` that can't be read. The robot's manager raises a warning for a board while it has any
+(`docs/robot.md`, *Alerts*), so a pack that didn't load is never silent.
 
 ### The format
 

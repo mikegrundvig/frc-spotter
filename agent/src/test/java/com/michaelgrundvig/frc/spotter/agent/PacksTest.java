@@ -58,14 +58,13 @@ class PacksTest {
   }
 
   @Test
-  void aPushedPackWinsOverAnInstalledOneOfItsNameAndProblemsSaySo() {
+  void aPushedPackWinsOverAnInstalledOneOfItsNameAsTheRuleSaysWithNoProblem() {
     fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
     fixture.pushed("vision", VISION.formatted("vision", "2.0.0"));
     Packs.Loaded loaded = Packs.load(fixture.host, true);
     assertThat(loaded.packs()).extracting(Pack::version).containsExactly("2.0.0");
-    assertThat(loaded.problems())
-        .containsExactly(
-            Packs.INSTALLED + "/vision: ignored, as the robot pushed a pack of that name");
+    assertThat(loaded.packs().get(0).pushed()).isTrue();
+    assertThat(loaded.problems()).isEmpty();
   }
 
   @Test
