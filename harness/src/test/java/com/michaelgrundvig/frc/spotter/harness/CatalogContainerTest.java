@@ -59,6 +59,10 @@ class CatalogContainerTest {
 
   @AfterAll
   void stop() {
+    long[] tasks = coprocessor.agentTasks();
+    System.out.printf(
+        "Catalog container: the agent's unit, its packs running, %d tasks now, %d at most%n",
+        tasks[0], tasks[1]);
     coprocessor.close();
     network.close();
   }
@@ -229,7 +233,7 @@ class CatalogContainerTest {
   private void driveHealth(String wear) {
     coprocessor.write("/run/stand-in-wear", wear);
     coprocessor.run(
-        "env", STAND_INS, "/etc/frc-spotter/packs/debian/drive-health", "/etc/hostname");
+        "env", STAND_INS, "/usr/local/lib/frc-spotter-debian/drive-health", "/etc/hostname");
   }
 
   @Test
@@ -269,6 +273,14 @@ class CatalogContainerTest {
           "-p",
           i % 2 == 0 ? "user.warning" : "user.info",
           "entry " + i);
+      // Lines of the auth facilities among them (logins, sudo, sshd): never paged.
+      coprocessor.run(
+          "logger",
+          "-t",
+          "catalog-test",
+          "-p",
+          i % 2 == 0 ? "auth.warning" : "authpriv.info",
+          "login " + i);
     }
     Board board = connected();
     // The journal has others' lines among the test's (the agent's, systemd's): each page is read

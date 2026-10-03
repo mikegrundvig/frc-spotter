@@ -1,0 +1,21 @@
+// An init script for writing gradle/verification-metadata.xml (README.md, Building): resolves
+// protoc and QuickBuffers' generator for every platform a build may run on, so their checksums are
+// recorded too (CI builds on x86 and ARM Linux, people on Windows and macOS). No build applies it.
+//
+//   ./gradlew --write-verification-metadata sha256 --init-script gradle/every-platform.gradle \
+//     ci :spotter-agent:agentRelease :spotter-tools:allJar :spotter-protocol:resolveEveryPlatform
+allprojects {
+    if (path == ":spotter-protocol") {
+        afterEvaluate {
+            def platforms = ["linux-aarch_64", "linux-x86_64", "osx-aarch_64", "osx-x86_64", "windows-x86_64"]
+            def deps = platforms.collectMany { c ->
+                [dependencies.create("com.google.protobuf:protoc:3.21.12:${c}@exe"),
+                 dependencies.create("us.hebi.quickbuf:protoc-gen-quickbuf:1.3.3:${c}@exe")]
+            }
+            def extra = configurations.detachedConfiguration(deps as Dependency[])
+            tasks.register("resolveEveryPlatform") {
+                doLast { println "resolved ${extra.files.size()} platform artifacts" }
+            }
+        }
+    }
+}

@@ -75,7 +75,11 @@ class CommandsTest {
     fixture.write(folder + "/plain", "echo not executable\n");
     Commands.Result denied = run("./plain");
     assertThat(denied.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COULD_NOT_START);
-    assertThat(denied.message()).isEqualTo("not allowed: " + folder + "/plain");
+    assertThat(denied.message())
+        .isEqualTo(
+            "not executable ("
+                + folder
+                + "/plain): chmod +x, or name its interpreter: run: [sh, ./plain]");
   }
 
   @Test
@@ -91,6 +95,87 @@ class CommandsTest {
     assertThat(result.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_TIMED_OUT);
     assertThat(result.message()).isEqualTo("timed out after 300ms");
     assertThat(result.text()).isEqualTo("started\n");
+  }
+
+  @Test
+  void aCommandEndsWhenItExitsAndWhatItLeftHoldingItsOutputIsStopped() throws Exception {
+    Path pid = dir.resolve("child");
+    long started = System.nanoTime();
+    // sh exits at once; the sleep it left in the background holds its output open.
+    Commands.Result result =
+        commands.run(
+            folder,
+            new Command.Run(List.of("sh", "-c", "echo $$ > " + pid + "; sleep 30 & echo left")),
+            Duration.ofSeconds(30),
+            1024);
+    try {
+      assertThat((System.nanoTime() - started) / 1e9).isLessThan(5);
+      assertThat(result.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+      assertThat(result.code()).isZero();
+      assertThat(result.text()).isEqualTo("left\n");
+      assertThat(result.ended()).isDone();
+    } finally {
+      // The sleep, if the JDK closed the pipe as sh exited (which it may), is the test's to stop.
+      new ProcessBuilder("/bin/sh", "-c", "kill -s KILL -- -$(cat " + pid + ") 2>/dev/null")
+          .start()
+          .waitFor();
+    }
+  }
+
+  @Test
+  void aCommandPastItsDeadlineIsStoppedWithItsWholeGroupOrphansIncluded() throws Exception {
+    Path pid = dir.resolve("orphan");
+    long started = System.nanoTime();
+    // The inner sh exits at once, leaving its sleep an orphan: no descendant of the command, but in
+    // its process group.
+    Commands.Result result =
+        commands.run(
+            folder,
+            new Command.Run(
+                List.of(
+                    "sh",
+                    "-c",
+                    "sh -c 'sleep 30 > /dev/null 2>&1 & echo $! > " + pid + "'; sleep 30")),
+            Duration.ofMillis(300),
+            1024);
+    assertThat((System.nanoTime() - started) / 1e9).isLessThan(3);
+    assertThat(result.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_TIMED_OUT);
+    assertThat(result.message()).isEqualTo("timed out after 300ms");
+    long orphan = Long.parseLong(java.nio.file.Files.readString(pid).strip());
+    for (int i = 0;
+        i < 50 && ProcessHandle.of(orphan).map(ProcessHandle::isAlive).orElse(false);
+        i++) {
+      Thread.sleep(20);
+    }
+    assertThat(ProcessHandle.of(orphan).map(ProcessHandle::isAlive).orElse(false)).isFalse();
+  }
+
+  @Test
+  void aProgramThatIsntOnThePathCouldNotStart() {
+    Commands.Result missing = run("no-such-program-anywhere");
+    assertThat(missing.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COULD_NOT_START);
+    assertThat(missing.message()).isEqualTo("no such file: no-such-program-anywhere");
+  }
+
+  @Test
+  void anEnvironmentNoProcessTakesCouldNotStartAndIsntQuoted() {
+    Commands.Result result =
+        commands.run(
+            folder,
+            new Command.Run(List.of("true")),
+            SECOND,
+            new Commands.Options(
+                null,
+                java.util.Map.of("SPOTTER_CURSOR", "a\u0000b"),
+                1024,
+                0,
+                line -> {},
+                Duration.ZERO),
+            new Commands.Cancellation());
+    assertThat(result.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COULD_NOT_START);
+    assertThat(result.message())
+        .isEqualTo(
+            "its environment can't be given to a process: a value has a character none takes");
   }
 
   @Test

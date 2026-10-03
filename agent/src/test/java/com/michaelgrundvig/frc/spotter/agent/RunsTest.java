@@ -51,6 +51,13 @@ class RunsTest {
           run: [printf, "PK zip bytes"]
           response:
             output: {type: file, name: settings.zip}
+        - id: lingering
+          run: [sh, -c, "sleep 30 &"]
+          timeout: 300ms
+        - id: deep
+          run: [./deep]
+          response:
+            report: {type: json}
       """;
 
   @BeforeEach
@@ -63,6 +70,10 @@ class RunsTest {
             + "echo 'step one' >&2\n"
             + "echo '{\"level\": \"warning\", \"message\": \"careful\"}' >&2\n"
             + "echo \"{\\\"answer\\\": 42, \\\"report\\\": {\\\"given\\\": \\\"$given\\\"}}\"");
+    // JSON nested 100,000 deep: what overflowed the stack of a run's thread, and left it running.
+    fixture.script(
+        folder + "/deep",
+        "printf '{\"report\": '; head -c 100000 /dev/zero | tr '\\0' '['; printf '}\\n'");
     commands = new Commands(fixture.host);
     runs = runs(Runs.MAX_KEPT);
   }
@@ -305,5 +316,70 @@ class RunsTest {
     assertThat(ids).containsExactly("core.power-off", "core.reboot");
     assertThat(runs.action("core.reboot").orElseThrow().action().command())
         .isEqualTo(new Command.Run(List.of("systemctl", "reboot")));
+  }
+
+  @Test
+  void aResponsePastWhatItMayBeHasItsLargestFieldsUnavailableSayingWhy() {
+    Spotter.RunResult result =
+        Spotter.RunResult.newInstance().setOutcome(Spotter.Outcome.OUTCOME_COMPLETED);
+    result.addResponse(Spotter.FieldValue.newInstance().setName("exit").setNumber(0));
+    result.addResponse(
+        Spotter.FieldValue.newInstance().setName("output").setText("z".repeat(900 * 1024)));
+    result.addResponse(Spotter.FieldValue.newInstance().setName("summary").setText("fine"));
+    Spotter.RunResult bounded = Runs.bounded(result);
+    assertThat(bounded.getSerializedSize())
+        .isLessThanOrEqualTo(com.michaelgrundvig.frc.spotter.protocol.Protocol.MAX_RESPONSE);
+    assertThat(bounded.getResponse().get(0).getNumber()).isZero();
+    assertThat(bounded.getResponse().get(1).getName()).isEqualTo("output");
+    assertThat(bounded.getResponse().get(1).getUnavailable())
+        .isEqualTo(
+            "too large to send: 900 KiB, more than the 256 KiB a run's response may be (declare"
+                + " the whole output type: file to download it)");
+    assertThat(bounded.getResponse().get(2).getText()).isEqualTo("fine");
+  }
+
+  @Test
+  void anOutputNestedDeeperThanJsonIsReadIsntJsonAndTheRunFinishes() throws Exception {
+    Spotter.RunState state = finished(runs.start("team.deep", null).getRun());
+    assertThat(state.getResult().getOutcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+    Spotter.FieldValue report = state.getResult().getResponse().get(4);
+    assertThat(report.getName()).isEqualTo("report");
+    // Not read as JSON: the output is its one field's value, as it is.
+    assertThat(report.getJson()).startsWith("{\"report\": [[[");
+    // And the action may run again: its slot is free.
+    assertThat(finished(runs.start("team.deep", null).getRun()).getRunning()).isFalse();
+  }
+
+  @Test
+  void anActionThatLeavesAChildHoldingItsOutputFinishesAndFreesItsSlot() throws Exception {
+    long started = System.nanoTime();
+    Spotter.RunState state = finished(runs.start("team.lingering", null).getRun());
+    // It exits at once; what it left holding its output is stopped, politely, and goes.
+    assertThat((System.nanoTime() - started) / 1e9).isLessThan(3);
+    assertThat(state.getResult().getOutcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+    assertThat(finished(runs.start("team.lingering", null).getRun()).getRunning()).isFalse();
+  }
+
+  @Test
+  void jsonsDepthIsCountedOutsideItsStrings() {
+    assertThat(JsonText.tooDeep("{\"a\": " + "[".repeat(64) + "]".repeat(64) + "}")).isTrue();
+    assertThat(JsonText.tooDeep("{\"a\": " + "[".repeat(63) + "]".repeat(63) + "}")).isFalse();
+    assertThat(JsonText.tooDeep("{\"a\": \"" + "[".repeat(100) + "\\\"[\"}")).isFalse();
+    assertThat(JsonText.asObject("{\"a\": " + "[".repeat(65) + "]".repeat(65) + "}")).isEmpty();
+  }
+
+  @Test
+  void aRunsLogIsReadByAtMostTwoAtOnce() throws Exception {
+    String run = runs.start("team.ok", input("Ada")).getRun();
+    finished(run);
+    runs.logReads.acquire(Runs.LOGS_AT_ONCE);
+    try {
+      Runs.Refused busy =
+          catchThrowableOfType(Runs.Refused.class, () -> runs.log(run, Logs.Paging.of(Map.of())));
+      assertThat(busy.status).isEqualTo(503);
+    } finally {
+      runs.logReads.release(Runs.LOGS_AT_ONCE);
+    }
+    assertThat(runs.log(run, Logs.Paging.of(Map.of())).getEntries().length()).isEqualTo(2);
   }
 }

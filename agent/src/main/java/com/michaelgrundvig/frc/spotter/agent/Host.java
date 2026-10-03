@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -51,13 +53,58 @@ final class Host {
   /**
    * A file's owner and permissions.
    *
-   * @param uid its owner's user ID: 0 is root
+   * @param user its owner's name, such as {@code root}
    * @param mode its permission bits, such as {@code 0644}
    */
-  record Owner(int uid, int mode) {
+  record Owner(String user, int mode) {
+    /** The account an installed pack, and a program it names, must belong to. */
+    static final String ROOT = "root";
+
+    /** A file of root's, with these permission bits. */
+    static Owner root(int mode) {
+      return new Owner(ROOT, mode);
+    }
+
+    /** Whether it's root's. */
+    boolean root() {
+      return user.equals(ROOT);
+    }
+
     /** Whether its group or anyone else may write it. */
     boolean writableByOthers() {
       return (mode & 0022) != 0;
+    }
+
+    /** A file's owner and permission bits, as the filesystem's POSIX attributes give them. */
+    static Owner of(PosixFileAttributes attributes) {
+      int mode = 0;
+      for (PosixFilePermission permission : attributes.permissions()) {
+        mode |= bit(permission);
+      }
+      return new Owner(attributes.owner().getName(), mode);
+    }
+
+    private static int bit(PosixFilePermission permission) {
+      switch (permission) {
+        case OWNER_READ:
+          return 0400;
+        case OWNER_WRITE:
+          return 0200;
+        case OWNER_EXECUTE:
+          return 0100;
+        case GROUP_READ:
+          return 0040;
+        case GROUP_WRITE:
+          return 0020;
+        case GROUP_EXECUTE:
+          return 0010;
+        case OTHERS_READ:
+          return 0004;
+        case OTHERS_WRITE:
+          return 0002;
+        default:
+          return 0001;
+      }
     }
   }
 
@@ -90,12 +137,9 @@ final class Host {
   static Host system(Path root, Consumer<String> log) {
     return new Host(
         root,
-        path -> {
-          Path file = root.resolve(path.substring(1));
-          return new Owner(
-              (Integer) Files.getAttribute(file, "unix:uid"),
-              (Integer) Files.getAttribute(file, "unix:mode") & 07777);
-        },
+        path ->
+            Owner.of(
+                Files.readAttributes(root.resolve(path.substring(1)), PosixFileAttributes.class)),
         Host::systemAddresses,
         System::nanoTime,
         log);
@@ -188,8 +232,39 @@ final class Host {
     return monotonicNanos.getAsLong();
   }
 
-  /** Writes a line to the agent's log: the journal, on a coprocessor. */
+  /** The most of a line written to the agent's log. */
+  static final int MAX_LOG_LINE = 2000;
+
+  /**
+   * Writes a line to the agent's log: the journal, on a coprocessor. Its control characters are
+   * written escaped ({@code \n}, {@code \u0000}), so what it quotes (a request's, a pack's) can't
+   * forge a line of its own or set a line's priority, and it's cut at {@link #MAX_LOG_LINE}.
+   */
   void log(String message) {
-    log.accept(message);
+    log.accept(escaped(message));
+  }
+
+  /** Text with its control characters escaped, cut at {@link #MAX_LOG_LINE}. */
+  static String escaped(String text) {
+    StringBuilder line = new StringBuilder(Math.min(text.length(), MAX_LOG_LINE) + 16);
+    for (int i = 0; i < text.length() && line.length() < MAX_LOG_LINE; i++) {
+      char c = text.charAt(i);
+      if (c == '\n') {
+        line.append("\\n");
+      } else if (c == '\r') {
+        line.append("\\r");
+      } else if (c == '\t') {
+        line.append("\\t");
+      } else if (c < ' ' || c == 0x7f || (c >= 0x80 && c < 0xa0)) {
+        line.append(String.format("\\u%04x", (int) c));
+      } else {
+        line.append(c);
+      }
+    }
+    if (line.length() >= MAX_LOG_LINE && text.length() > MAX_LOG_LINE) {
+      line.setLength(MAX_LOG_LINE);
+      line.append("...");
+    }
+    return line.toString();
   }
 }

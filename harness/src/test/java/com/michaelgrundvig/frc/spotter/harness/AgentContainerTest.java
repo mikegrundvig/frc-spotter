@@ -42,9 +42,11 @@ class AgentContainerTest {
   void stop() {
     if (coprocessor != null) {
       long[] memory = coprocessor.memoryMb();
+      long[] tasks = coprocessor.agentTasks();
       System.out.printf(
-          "Agent container: %d MiB now, %d MiB at most; the agent's unit %d MiB%n",
-          memory[0], memory[1], coprocessor.agentMemoryMb());
+          "Agent container: %d MiB now, %d MiB at most; the agent's unit %d MiB, %d tasks now, %d"
+              + " at most%n",
+          memory[0], memory[1], coprocessor.agentMemoryMb(), tasks[0], tasks[1]);
       coprocessor.stop();
     }
     if (network != null) {
@@ -180,11 +182,11 @@ class AgentContainerTest {
   void whatItCantTrustIsIgnoredAndSaysWhy() throws Exception {
     assertThat(client.describe().getProblems())
         .containsExactlyInAnyOrder(
-            "/etc/frc-spotter/packs/mine/pack.yaml: isn't root's (its owner is user 65534),"
+            "/etc/frc-spotter/packs/mine/pack.yaml: isn't root's (its owner is nobody),"
                 + " ignored",
             "/etc/frc-spotter/packs/shared/pack.yaml: may be written by its group or others (mode"
                 + " 664), ignored",
-            "/etc/frc-spotter/packs/program/check: isn't root's (its owner is user 65534), so"
+            "/etc/frc-spotter/packs/program/check: isn't root's (its owner is nobody), so"
                 + " program's collector check isn't run");
     assertThat(coprocessor.run("journalctl", "-u", "frc-spotter", "--no-pager"))
         .contains("/etc/frc-spotter/packs/mine/pack.yaml: isn't root's");

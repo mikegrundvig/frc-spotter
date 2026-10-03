@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -237,6 +239,19 @@ class LogsTest {
   }
 
   @Test
+  void aCommandThatLeavesAChildHoldingItsOutputIsntWaitedFor() throws Exception {
+    String folder =
+        fixture.pack("lingering", "pack: lingering\nlogs:\n  - id: log\n    run: [./log]\n");
+    fixture.script(folder + "/log", "sleep 30 &");
+    Logs logs = new Logs(commands, Packs.load(fixture.host, true).packs(), Duration.ofMillis(300));
+    long started = System.nanoTime();
+    // It exits at once; what it left holding its output is stopped, and never holds the page up.
+    Spotter.LogPage page = logs.page("lingering.log", paging());
+    assertThat((System.nanoTime() - started) / 1e9).isLessThan(3);
+    assertThat(page.getEntries()).isEmpty();
+  }
+
+  @Test
   void aRunsLogIsSlicedByItsPlacesAndLevel() throws Exception {
     List<Spotter.LogEntry> all = new ArrayList<>();
     for (int n = 1; n <= 10; n++) {
@@ -259,5 +274,16 @@ class LogsTest {
     assertThat(Logs.slice(all, paging("level", "error")).getEntries())
         .extracting(Spotter.LogEntry::getCursor)
         .containsExactly("5");
+  }
+
+  @Test
+  void aCommandsOutputIsCutToTheLinesAPageNeedsBeforeAnyIsRead() throws Exception {
+    byte[] output = "1\n\n  \n2\n3\n4\npartial".getBytes(StandardCharsets.UTF_8);
+    // The last line was cut short by the most kept: left out. Blank lines aren't entries.
+    assertThat(Logs.needed(output, true, paging("limit", "2"))).containsExactly("3", "4");
+    assertThat(Logs.needed(output, false, paging("limit", "2"))).containsExactly("4", "partial");
+    assertThat(Logs.needed(output, true, paging("from", "after", "cursor", "0", "limit", "2")))
+        .containsExactly("1", "2");
+    assertThat(Logs.needed(new byte[0], false, paging())).isEmpty();
   }
 }

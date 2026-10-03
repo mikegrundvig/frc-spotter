@@ -1,9 +1,9 @@
 # The coprocessors, from the robot
 
-The robot program's side of Spotter is its **manager**: `:manager`, published as
+The robot program's side of Spotter is its **manager**: `:spotter-manager`, published as
 `com.michaelgrundvig.frc:spotter-manager` in Spotter's Maven repository
 (`https://mikegrundvig.github.io/frc-spotter/maven`). It's plain Java 17 with nothing but
-`:protocol` (`spotter-protocol`, and QuickBuffers' runtime, which WPILib already ships): no WPILib,
+`:spotter-protocol` (and QuickBuffers' runtime, which WPILib already ships): no WPILib,
 no AdvantageKit. Robot code wires in what's robot-specific.
 
 It keeps each coprocessor agent's stream open on a thread of its own, judges each value against its
@@ -53,6 +53,7 @@ Each has a default (`Settings.DEFAULTS`); robot code changes those it needs with
 | `refuseWhileEnabled` | on | Refuse an action while the robot is enabled or the field is attached, unless the action says `whileEnabled: true` |
 | `pushAutomatically` | on | Push the team's packs to a board whose packs differ, while the robot is disabled and off the field |
 | `packs` | none | The team's packs: a folder of pack folders |
+| `boardPacks` | none | Which of them go to some boards alone, by board address (*Each board's packs*) |
 | `key` | `/home/systemcore/spotter.key` | The private key that signs writes, for boards that require signatures (*Signing*) |
 | `publicKey` | `spotter.pub` beside the key | Its public key, whose id each signature names |
 
@@ -64,8 +65,12 @@ Each has a default (`Settings.DEFAULTS`); robot code changes those it needs with
   threshold), `CONNECTED`, `MISSING` (silent past the threshold), or `OTHER_PROTOCOL`. `why()` says
   why it isn't reached: the last attempt's failure, its silence, or the other protocol.
 - **`name()`:** its hostname once it's described itself; its address until then.
+- **`problems()`:** what its agent ignored, and why, as a list of text: a pack that didn't load
+  (each mistake with its file and line), a program anyone but root could change, an `agent.json`
+  that can't be read. While it has any, its alerts include a warning saying how many, and the
+  first, so a pack that didn't load is never silent on the robot.
 - **`description()`:** what it last described: its identity, packs, values', logs' and actions'
-  declarations, and its `problems`, as QuickBuffers' `Description`. A few lines of robot code
+  declarations, and its problems, as QuickBuffers' `Description`. A few lines of robot code
   against it can check anything more ("this board should have the PhotonVision pack at 1.2"); the
   manager validates nothing beyond limits and missing boards.
 - **`values()`, `value(id)`:** each value, by `pack.collector.field`: its number, text, flag or
@@ -81,7 +86,21 @@ Each has a default (`Settings.DEFAULTS`); robot code changes those it needs with
 **Threads.** Each board's stream is read on a thread of the manager's, which publishes the board's
 state into one of three buffers it swaps with the loop's, with no lock: `update()` takes the newest,
 whole, so every read within a loop agrees. Requests (a log page, an action, a cancel, a push) go on
-the manager's request threads, never the loop's.
+each board's own request threads, never the loop's: three at once and eight waiting at most, one
+more refused at once ("too many requests to vision-front at once"), each finished within 30 s
+however slowly the board answers. Closing the manager finishes every request, refused or dropped.
+
+**What a board may send.** Whatever a board sends, by fault or on purpose, the robot allocates
+within what it sent, and never loses the board for good:
+
+- each event is read whole, at most 1 MiB (`Protocol.MAX_EVENT`), and checked before it's parsed
+  (`WireCheck`: every string within what holds it, at most 16,384 list elements); one past that,
+  or malformed, drops the connection, which is made again;
+- a description of more than 2,048 values, 128 actions or 128 problems isn't used, and says so (the
+  agent loads no more, so only a broken or hostile board does);
+- a board's values raise at most 32 alerts;
+- an answer to a request is at most 8 MiB, checked the same way;
+- whatever a board's thread meets, an `Error` included, it connects again after its backoff.
 
 **Garbage.** Decoding the stream into the board's state, publishing it, and `update()` allocate
 nothing in steady state: one event, one source and the buffers are reused, and text is decoded only
@@ -117,9 +136,14 @@ until one changes. Robot code maps them onto its own, WPILib's `Alert` say: `FAI
 | Alert | Level | Says |
 |---|---|---|
 | A value at warning or failing | its level | `vision-front: Frames per second below 30 fps` |
-| A missing board | failing | `vision-front is missing: Connection refused` |
+| A missing board | failing | `vision-front is missing: connection refused: is frc-spotter running on it?` (or `its name doesn't resolve`, `no answer in time: is it on the robot's network?`) |
 | A board on another major version of the protocol | failing | `vision-front: it speaks Spotter protocol 3.0, the robot 2.0` |
+| A board that describes more than the manager takes | failing | `vision-front describes 2049 values (at most 2048), more than the manager takes: its values and actions aren't used` |
+| More than 32 values at warning or failing on one board | the worst of the rest | the failing ones first, then `vision-front: 9 more values at warning or failing` |
 | Packs that differ and won't be pushed now | warning | `vision-front's packs differ from the robot's: they'll be pushed off the field` |
+| A board that reports problems | warning | `vision-front reports 2 problems, the first: /var/lib/frc-spotter/packs/detector/pack.yaml:8: unknown key "evry" in a collector; ...` |
+| Packs named for a board the manager wasn't given, or a pack that isn't in the folder | warning | `Spotter's packs for 10.26.11.12 name detector, which isn't among the team's packs (/home/systemcore/deploy/spotter-packs)` |
+| A board's packs past what a push may carry | warning | `the team's Spotter packs for 10.26.11.11 are 5000 files, more than the 4096 a push may carry: nothing is pushed to it` |
 | No key pair, while a board requires signatures | warning | `no Spotter key pair on this controller (/home/systemcore/spotter.key, /home/systemcore/spotter.pub): boards that require signatures will refuse its actions and pushes` |
 | A limit override that matches nothing | warning | `Spotter's limits for vision.health.fsp match no value or response field on any board` |
 
@@ -145,8 +169,9 @@ What a recorder throws is ignored, so a logging fault never takes a board away.
 board.log("debian.journal", LogQuery.latest(100).atLeast("warning"))
 ```
 
-returns a `CompletableFuture<Spotter.LogPage>`, fetched on the manager's threads: check it in a
-later loop (`isDone()`), and never wait on it in the loop. Page back with
+returns a `CompletableFuture<Spotter.LogPage>`, fetched on the board's request threads: check it in
+a later loop (`isDone()`), and never wait on it in the loop. A board that isn't connected is asked
+nothing: the future fails at once, saying why. Page back with
 `LogQuery.before(page.getBefore(), n)` and on with `LogQuery.after(page.getAfter(), n)`.
 
 ## Actions
@@ -164,6 +189,10 @@ date from the board's stream. Every call on it is safe from any thread and never
 - **`outcome()`, `why()`:** how it finished (completed, timed out, cancelled, lost...), in words.
 - **`response()`:** each response field its action declares, judged by its limits like a value (a
   `Value` with its level and reason), once it's finished. These are the run's own, never reused.
+- **`level()`, `reason()`:** its verdict, as the design judges a run: `FAILING` when it was refused
+  or didn't complete (timed out, cancelled, lost, couldn't start), whatever its pack says; once
+  completed, the worst level among its response's fields (`exit isn't 0`). `UNAVAILABLE` until it's
+  done. So `run.level() == Level.FAILING` is the whole check, a timeout and a refusal included.
 - **`cancel()`:** stops it, politely then firmly. Asked before the board has started it, it's sent
   as soon as it has.
 - **`file(name)`:** a `file` field of its response, as its bytes.
@@ -185,9 +214,29 @@ Given the team's packs (`Settings.withPacks(folder)`: a folder of pack folders, 
 directory so they live in Git with the robot code), the manager makes sure every board has them, so
 a spare board just works.
 
+**Each board's packs.** A robot's boards aren't all alike: a PhotonVision board and a detector
+board want different packs. Robot code says which board gets which, in code, from the one folder:
+
+```java
+Settings.DEFAULTS
+    .withPacks(deploy.resolve("spotter-packs"))      // debian, photonvision, detector
+    .withBoardPacks("10.26.11.11", "photonvision")   // and debian, which every board has
+    .withBoardPacks("10.26.11.12", "detector")
+```
+
+A pack named for a board (by its address, as the manager is given it) goes to the boards that name
+it, and no other; a pack named for none goes to every board. Each board gets its own bundle and its
+own hash, so each is pushed only when its own set changes. A name that isn't a pack in the folder,
+or an address that isn't one of the manager's, is a warning, and so is a board's set past what a
+push may carry (4,096 files, 16 MiB): nothing is pushed to that board.
+
 1. It reads them as it's made into the bundle it pushes: a `PackBundle` (`spotter.proto`), each
-   file's path in the folder, whether it's executable (`Files.isExecutable`), and its bytes,
-   exactly what the pack hash covers. It connects with the bundle's hash (`PackHash`, as the agent
+   file's path in the folder, whether it's executable, and its bytes, exactly what the pack hash
+   covers. A file is executable when any execute bit is set, or when it starts with `#!`: the
+   robot's deploy may copy files without their execute bits (unconfirmed on Systemcore: open
+   question Q51), and a script that names its interpreter still runs once pushed. A program
+   without `#!` (a binary, or a script that relies on a default shell) needs its bit, or its
+   interpreter named in the pack: `run: [sh, ./health]`. It connects with the bundle's hash (`PackHash`, as the agent
    hashes what it writes).
 2. A board whose packs match starts its stream as usual: nothing is pushed, and nothing restarts.
 3. A board whose packs differ answers `409`. A push is signed over a stream's challenge, so the
@@ -203,6 +252,12 @@ a spare board just works.
 
 **A forced push**, `spotter.push(board)`, pushes now, field or no field: it's robot code's call. It
 returns a `CompletableFuture` that completes once the board has taken the packs.
+
+**A board takes pushes only when its `agent.json` names its team** (`{"team": 2611}`) or its
+controller: one that only works its controller out from its own address refuses them (and runs no
+pack's action for the robot, only power-off and reboot), since on a school's or a home's 10.x
+network, .2 could be anyone. Its description says it refuses pushes, and a mismatch is a warning;
+the board's 403 says why.
 
 **A board can refuse pushes** (`{"acceptPushes": false}` in its `agent.json`): its description says
 so, and a mismatch is a warning. A forced push to it fails, with its reason.

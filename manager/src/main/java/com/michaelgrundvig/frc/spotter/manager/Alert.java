@@ -10,6 +10,8 @@ package com.michaelgrundvig.frc.spotter.manager;
  *   <li>one, failing, per missing board, and per board on another major version of the protocol;
  *   <li>one, a warning, per board whose packs differ from the robot's and won't be pushed now (it
  *       refuses pushes, the robot is on the field, a push failed);
+ *   <li>one, a warning, per board whose description lists problems (a pack it ignored, a program it
+ *       won't run): how many, and the first;
  *   <li>and robot code's own, warnings: no key to sign with while a board requires signatures,
  *       packs that can't be read, and each limit override that matches nothing.
  * </ul>

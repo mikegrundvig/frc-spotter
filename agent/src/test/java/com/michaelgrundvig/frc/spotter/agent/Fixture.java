@@ -50,7 +50,7 @@ final class Fixture {
             root,
             path ->
                 owners.getOrDefault(
-                    path, new Host.Owner(0, Files.isExecutable(path(path)) ? 0755 : 0644)),
+                    path, Host.Owner.root(Files.isExecutable(path(path)) ? 0755 : 0644)),
             () -> new ArrayList<>(addresses),
             nanos::get,
             log::add);
@@ -117,7 +117,12 @@ final class Fixture {
 
   /** The agent on this board, taking writes from one address, its collectors not started. */
   Agent agent(@org.jspecify.annotations.Nullable String controller) {
-    return new Agent(host, configuration(), "0.4.0-test", controller, exits::incrementAndGet);
+    return new Agent(
+        host,
+        Configuration.read(host, controller != null),
+        "0.4.0-test",
+        controller,
+        exits::incrementAndGet);
   }
 
   /** What the agent logged, one line each. */

@@ -45,7 +45,7 @@ public final class LocalAgent implements AutoCloseable {
     host =
         new Host(
             root,
-            path -> new Host.Owner(0, Files.isExecutable(path(path)) ? 0755 : 0644),
+            path -> Host.Owner.root(Files.isExecutable(path(path)) ? 0755 : 0644),
             () -> List.of("127.0.0.1"),
             System::nanoTime,
             log::add);
@@ -98,7 +98,8 @@ public final class LocalAgent implements AutoCloseable {
     if (server != null) {
       throw new IllegalStateException("the agent is already running");
     }
-    Agent started = new Agent(host, Configuration.read(host), VERSION, "127.0.0.1", this::exited);
+    Agent started =
+        new Agent(host, Configuration.read(host, true), VERSION, "127.0.0.1", this::exited);
     server = new AgentServer(started, new InetSocketAddress("127.0.0.1", port));
     port = server.port();
     agent = started;
@@ -129,11 +130,12 @@ public final class LocalAgent implements AutoCloseable {
     restart.start();
   }
 
-  /** Stops the agent, its collectors, and every connection to it. */
+  /** Stops the agent, cleanly, as systemd does: its collectors, and every connection to it. */
   public synchronized void stop() {
     AgentServer running = server;
     if (running != null) {
       running.close();
+      LastGood.stopped(host);
     }
     server = null;
     agent = null;

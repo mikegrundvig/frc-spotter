@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.io.IOException;
 import java.time.Duration;
@@ -32,6 +33,13 @@ final class Stream implements Events.Subscriber {
   /** The most run events waiting to be sent: a stream that falls this far behind is closed. */
   static final int MAX_QUEUED = 10_000;
 
+  /**
+   * The most an event's message may hold, in bytes: {@link Protocol#MAX_EVENT}, less room for the
+   * event around it. Values past it are sent as several events; the runs listed on connect are the
+   * running ones and the newest finished, as many as fit.
+   */
+  static final int MAX_HELD = Protocol.MAX_EVENT - 64;
+
   /** Where events go: the response, as protobuf's delimited form or JSON lines. */
   interface Sink {
     void send(Spotter.Event event) throws IOException;
@@ -47,6 +55,7 @@ final class Stream implements Events.Subscriber {
   private long dirtySince;
   private boolean behind;
   private long lastSent;
+  private volatile long sendingSince;
 
   Stream(Agent agent, Duration heartbeat, Sink sink) {
     this(agent, heartbeat, COMPLETE_NANOS, sink);
@@ -108,12 +117,8 @@ final class Stream implements Events.Subscriber {
     send(Spotter.Event.newInstance().setDescribed(description));
     ValueStore.Delta delta = agent.store().delta(-1, revision, agent.nanos());
     long seen = delta.changes();
-    send(Spotter.Event.newInstance().setValues(delta.values()));
-    Spotter.Runs runs = Spotter.Runs.newInstance();
-    for (Spotter.RunState state : agent.runs().states()) {
-      runs.addRuns(state);
-    }
-    send(Spotter.Event.newInstance().setRuns(runs));
+    send(delta.values());
+    send(Spotter.Event.newInstance().setRuns(runs(agent.runs().states())));
     long nextComplete = System.nanoTime() + complete;
     while (true) {
       List<Spotter.RunEvent> events;
@@ -158,13 +163,13 @@ final class Stream implements Events.Subscriber {
       if (everything || now >= nextComplete) {
         delta = agent.store().delta(-1, revision, agent.nanos());
         seen = delta.changes();
-        send(Spotter.Event.newInstance().setValues(delta.values()));
+        send(delta.values());
         nextComplete = now + complete;
       } else if (changed) {
         delta = agent.store().delta(seen, revision, agent.nanos());
         seen = delta.changes();
         if (delta.values().getValues().length() > 0) {
-          send(Spotter.Event.newInstance().setValues(delta.values()));
+          send(delta.values());
         }
       }
       if (System.nanoTime() - lastSent >= heartbeat) {
@@ -176,7 +181,82 @@ final class Stream implements Events.Subscriber {
   }
 
   private void send(Spotter.Event event) throws IOException {
-    sink.send(event);
+    sendingSince = System.nanoTime() | 1;
+    try {
+      sink.send(event);
+    } finally {
+      sendingSince = 0;
+    }
     lastSent = System.nanoTime();
+  }
+
+  /**
+   * How long its write under way has been stalled, in nanoseconds: a reader that stopped reading
+   * leaves it waiting; 0 when none is under way.
+   */
+  long stalledNanos(long now) {
+    long since = sendingSince;
+    return since == 0 ? 0 : now - since;
+  }
+
+  /**
+   * Sends values: in one event, or, past {@link #MAX_HELD}, in as many as they take, each with the
+   * same revision, time and completeness, one after another.
+   */
+  private void send(Spotter.Values values) throws IOException {
+    for (Spotter.Values part : parts(values)) {
+      send(Spotter.Event.newInstance().setValues(part));
+    }
+  }
+
+  /** Values as the events that carry them: one, or several each within {@link #MAX_HELD}. */
+  static List<Spotter.Values> parts(Spotter.Values values) {
+    if (values.getSerializedSize() <= MAX_HELD) {
+      return List.of(values);
+    }
+    List<Spotter.Values> parts = new ArrayList<>();
+    Spotter.Values part = null;
+    int size = 0;
+    for (Spotter.FieldValue value : values.getValues()) {
+      int its = value.getSerializedSize() + 8;
+      if (part == null || size + its > MAX_HELD) {
+        part =
+            Spotter.Values.newInstance()
+                .setRevision(values.getRevision())
+                .setTimeNanos(values.getTimeNanos())
+                .setComplete(values.getComplete());
+        parts.add(part);
+        size = part.getSerializedSize();
+      }
+      part.addValues(value);
+      size += its;
+    }
+    return parts;
+  }
+
+  /**
+   * The runs listed on connect, in the order they started: every running one, then the newest
+   * finished, as many as fit {@link #MAX_HELD}. One left out is still kept, and fetched by its id.
+   */
+  static Spotter.Runs runs(List<Spotter.RunState> states) {
+    List<Spotter.RunState> chosen = new ArrayList<>();
+    int size = 0;
+    for (boolean running : new boolean[] {true, false}) {
+      for (int i = states.size() - 1; i >= 0; i--) {
+        Spotter.RunState state = states.get(i);
+        int its = state.getSerializedSize() + 8;
+        if (state.getRunning() == running && size + its <= MAX_HELD) {
+          chosen.add(state);
+          size += its;
+        }
+      }
+    }
+    Spotter.Runs runs = Spotter.Runs.newInstance();
+    for (Spotter.RunState state : states) {
+      if (chosen.contains(state)) {
+        runs.addRuns(state);
+      }
+    }
+    return runs;
   }
 }

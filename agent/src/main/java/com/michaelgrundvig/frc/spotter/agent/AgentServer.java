@@ -15,12 +15,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import us.hebi.quickbuf.JsonSink;
@@ -44,8 +48,20 @@ import us.hebi.quickbuf.ProtoSink;
  * resolves to it.
  */
 final class AgentServer implements AutoCloseable {
-  /** How many streams may be open at once. */
-  static final int STREAMS = 4;
+  /**
+   * How many streams the robot controller's address may have open at once: its manager's, and one
+   * it's replacing. One more closes its oldest, which it can't still be reading.
+   */
+  static final int CONTROLLER_STREAMS = 2;
+
+  /** How many streams others may have open at once: one more is refused. */
+  static final int OTHER_STREAMS = 2;
+
+  /** How long a stream's write may stall, its reader not reading, before the stream is closed. */
+  static final Duration STALL = Duration.ofSeconds(10);
+
+  /** How many requests one address may have under way at once: one more is refused. */
+  static final int PER_ADDRESS = 8;
 
   /** How long between log lines about refused writes, in microseconds. */
   static final long REFUSAL_LOG_MICROS = 10_000_000;
@@ -62,9 +78,33 @@ final class AgentServer implements AutoCloseable {
 
   private final Agent agent;
   private final HttpServer server;
-  private final Semaphore streams = new Semaphore(STREAMS);
   private final Semaphore pushes = new Semaphore(1);
+  private final List<Open> open = new ArrayList<>();
+  private final Map<String, Integer> underWay = new HashMap<>();
+  private final long stallNanos;
+  private final ScheduledExecutorService watch =
+      Executors.newSingleThreadScheduledExecutor(
+          work -> {
+            Thread thread = new Thread(work, "spotter-streams");
+            thread.setDaemon(true);
+            return thread;
+          });
+
+  /** An open stream: whose, and the thread serving it, which closing it interrupts. */
+  private static final class Open {
+    final boolean controller;
+    final Thread thread;
+    volatile @Nullable Stream stream;
+    boolean closed;
+
+    Open(boolean controller, Thread thread) {
+      this.controller = controller;
+      this.thread = thread;
+    }
+  }
+
   private final RateLimitedLog refusals;
+  private final RateLimitedLog failures;
 
   /**
    * A thread for each request, made when one's needed: the server takes at most {@code
@@ -111,8 +151,20 @@ final class AgentServer implements AutoCloseable {
   }
 
   AgentServer(Agent agent, InetSocketAddress address) throws IOException {
+    this(agent, address, STALL);
+  }
+
+  /**
+   * @param stall how long a stream's write may stall before it's closed: {@link #STALL}, or a
+   *     test's
+   */
+  AgentServer(Agent agent, InetSocketAddress address, Duration stall) throws IOException {
     this.agent = agent;
+    this.stallNanos = stall.toNanos();
+    long every = Math.max(10, Math.min(1000, stall.toMillis() / 2));
+    watch.scheduleWithFixedDelay(this::closeStalled, every, every, TimeUnit.MILLISECONDS);
     this.refusals = new RateLimitedLog(agent::log, () -> agent.nanos() / 1000, REFUSAL_LOG_MICROS);
+    this.failures = new RateLimitedLog(agent::log, () -> agent.nanos() / 1000, REFUSAL_LOG_MICROS);
     this.server = HttpServer.create(address, 32);
     server.setExecutor(threads);
     server.createContext("/", this::handle);
@@ -126,9 +178,66 @@ final class AgentServer implements AutoCloseable {
 
   @Override
   public void close() {
+    watch.shutdownNow();
     server.stop(0);
     threads.shutdownNow();
     agent.close();
+  }
+
+  /** How many streams are open: for tests. */
+  int streams() {
+    synchronized (open) {
+      return open.size();
+    }
+  }
+
+  /** Closes each stream whose write has stalled past its bound: its reader stopped reading. */
+  private void closeStalled() {
+    long now = System.nanoTime();
+    synchronized (open) {
+      for (Open each : open) {
+        Stream stream = each.stream;
+        if (stream != null && stream.stalledNanos(now) > stallNanos) {
+          close(each);
+        }
+      }
+    }
+  }
+
+  /**
+   * Closes a stream: its serving thread interrupted, which ends its wait, or its write (a socket's
+   * channel closes when a thread blocked writing it is interrupted). Only while it's open, under
+   * the lock its thread takes to leave: so no other request of that thread's is ever interrupted.
+   */
+  private void close(Open stream) {
+    if (!stream.closed) {
+      stream.closed = true;
+      stream.thread.interrupt();
+    }
+  }
+
+  /** A request from an address, under way: false when it has as many under way as may. */
+  boolean enter(String from) {
+    synchronized (underWay) {
+      int now = underWay.getOrDefault(from, 0);
+      if (now >= PER_ADDRESS) {
+        return false;
+      }
+      underWay.put(from, now + 1);
+      return true;
+    }
+  }
+
+  /** A request from an address, done. */
+  void leave(String from) {
+    synchronized (underWay) {
+      int now = underWay.getOrDefault(from, 1) - 1;
+      if (now <= 0) {
+        underWay.remove(from);
+      } else {
+        underWay.put(from, now);
+      }
+    }
   }
 
   private void handle(HttpExchange exchange) throws IOException {
@@ -138,9 +247,16 @@ final class AgentServer implements AutoCloseable {
       exchange.getResponseHeaders().set(Protocol.HEADER, Protocol.VERSION);
       exchange.getResponseHeaders().set("Cache-Control", "no-store");
       exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+      String from = exchange.getRemoteAddress().getAddress().getHostAddress();
+      boolean entered = false;
       try {
         if (!addressedHere(exchange.getRequestHeaders().getFirst("Host"))) {
           throw new Refused(421, "this agent answers requests addressed to it only");
+        }
+        entered = enter(from);
+        if (!entered) {
+          throw new Refused(
+              503, from + " has " + PER_ADDRESS + " requests under way, as many as one may");
         }
         route(request);
       } catch (Refused e) {
@@ -153,13 +269,18 @@ final class AgentServer implements AutoCloseable {
         }
         send(exchange, e.status, problem, request.json);
       } catch (IOException | RuntimeException | Error e) {
-        // The detail (which may name files) goes to the journal; the answer says only that.
-        agent.log("Answering " + request.method + " " + request.path + " failed: " + e);
+        // The detail (which may name files) goes to the journal, at most a line each 10 s; the
+        // answer says only that.
+        failures.log("Answering " + request.method + " " + request.path + " failed: " + e);
         send(
             exchange,
             500,
             problem("the agent couldn't answer; its journal says why"),
             request.json);
+      } finally {
+        if (entered) {
+          leave(from);
+        }
       }
     } catch (IOException e) {
       // The client went away mid-answer, or an answer failed after it began: nothing to do.
@@ -234,9 +355,7 @@ final class AgentServer implements AutoCloseable {
               + (ours.isEmpty() ? "it has none" : "it has " + ours),
           ours);
     }
-    if (!streams.tryAcquire()) {
-      throw new Refused(503, STREAMS + " streams are open, as many as may");
-    }
+    Open entry = admit(request);
     String challenge = agent.signatures().open();
     Stream stream = null;
     try {
@@ -266,18 +385,58 @@ final class AgentServer implements AutoCloseable {
             };
       }
       stream = new Stream(agent, heartbeat, sink);
+      entry.stream = stream;
       agent.events().subscribe(stream);
       stream.serve();
     } catch (InterruptedException e) {
+      // Closed: stalled, or replaced by the controller's newer stream. Still interrupted, its
+      // answer's end isn't written to a reader that may not read it: its connection just closes.
       Thread.currentThread().interrupt();
     } catch (IOException e) {
-      // The manager went away: the stream ends.
+      // The manager went away, or the stream was closed as it wrote: the stream ends.
     } finally {
       if (stream != null) {
         agent.events().unsubscribe(stream);
       }
       agent.signatures().close(challenge);
-      streams.release();
+      synchronized (open) {
+        open.remove(entry);
+      }
+    }
+  }
+
+  /**
+   * Opens a stream, if one more may be: the robot controller's address may have {@link
+   * #CONTROLLER_STREAMS}, its oldest closed for one more; anyone else's together {@link
+   * #OTHER_STREAMS}, one more refused. So a reader that holds streams it no longer reads (a laptop
+   * unplugged mid-stream) can never keep the robot's manager out.
+   */
+  private Open admit(Request request) throws Refused {
+    String from = request.exchange.getRemoteAddress().getAddress().getHostAddress();
+    boolean controller;
+    try {
+      controller = from.equals(agent.controller().address());
+    } catch (IOException e) {
+      controller = false;
+    }
+    synchronized (open) {
+      List<Open> theirs = new ArrayList<>();
+      for (Open each : open) {
+        if (each.controller == controller && !each.closed) {
+          theirs.add(each);
+        }
+      }
+      if (controller && theirs.size() >= CONTROLLER_STREAMS) {
+        close(theirs.get(0));
+      } else if (!controller && theirs.size() >= OTHER_STREAMS) {
+        throw new Refused(
+            503,
+            OTHER_STREAMS
+                + " streams are open to others than the robot controller, as many as may");
+      }
+      Open entry = new Open(controller, Thread.currentThread());
+      open.add(entry);
+      return entry;
     }
   }
 
@@ -285,9 +444,21 @@ final class AgentServer implements AutoCloseable {
 
   /**
    * Refuses a write unless the board's settings can be read and it comes from the robot
-   * controller's address.
+   * controller's address; and, but for a built-in action, unless the controller is named.
    */
   private void writer(Request request, String what) throws Refused, IOException {
+    writer(request, what, false);
+  }
+
+  /**
+   * Refuses a write unless the board's settings can be read and it comes from the robot
+   * controller's address; and, unless it's starting a built-in action, unless that controller is
+   * named (in agent.json, or on the command line), not only worked out from the board's own
+   * address, which on a school's or a home's 10.x network could be anyone's.
+   *
+   * @param builtIn whether it starts a built-in action (power-off, reboot)
+   */
+  private void writer(Request request, String what, boolean builtIn) throws Refused, IOException {
     String unreadable = agent.configuration().unreadable();
     if (!unreadable.isEmpty()) {
       throw new Refused(503, "every write is refused while " + unreadable);
@@ -303,6 +474,27 @@ final class AgentServer implements AutoCloseable {
       throw new Refused(
           403, "only the robot controller (" + controller.address() + ") may " + what);
     }
+    if (!may(controller, builtIn)) {
+      refusals.log(
+          "Refused a write (" + what + ") from " + from + ": a controller only worked out");
+      throw new Refused(
+          403,
+          "this board takes only its built-in actions from a robot controller it works out from"
+              + " its own address ("
+              + controller.address()
+              + "): name the controller, or the team, in "
+              + AgentConfig.PATH
+              + " to "
+              + what);
+    }
+  }
+
+  /**
+   * Whether the controller may make a write: one that's named, any; one only worked out from the
+   * board's own address, the start of a built-in action.
+   */
+  static boolean may(Agent.Controller controller, boolean builtIn) {
+    return builtIn || controller.named();
   }
 
   /** Checks a write's signature, when the board requires them. */
@@ -349,7 +541,7 @@ final class AgentServer implements AutoCloseable {
   }
 
   private void action(Request request, String id) throws Refused, IOException {
-    writer(request, "run an action");
+    writer(request, "run an action", id.startsWith(Describer.CORE + "."));
     Runs.Declared declared =
         agent
             .runs()
@@ -414,7 +606,7 @@ final class AgentServer implements AutoCloseable {
   private void push(Request request) throws Refused, IOException {
     writer(request, "push packs");
     if (!agent.configuration().acceptsPushes()) {
-      throw new Refused(403, "this board refuses pushes: its agent.json says acceptPushes: false");
+      throw new Refused(403, "this board refuses pushes: " + agent.configuration().pushesRefused());
     }
     if (!pushes.tryAcquire()) {
       throw new Refused(503, "a push is under way");

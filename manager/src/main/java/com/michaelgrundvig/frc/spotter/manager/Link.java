@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.spotter.manager;
 
 import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
+import com.michaelgrundvig.frc.spotter.protocol.WireCheck;
 import java.io.BufferedInputStream;
 import java.io.EOFException;
 import java.io.IOException;
@@ -13,15 +14,22 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.jspecify.annotations.Nullable;
 import us.hebi.quickbuf.ProtoMessage;
@@ -36,29 +44,57 @@ import us.hebi.quickbuf.Utf8String;
  * the stream can't be opened, or ends, or is silent for the missing threshold (its connection's own
  * timeout), it connects again, backing off.
  *
+ * <p>It reads each event whole before parsing it, at most {@link Protocol#MAX_EVENT} bytes, and
+ * checks it ({@link WireCheck}) first, so whatever a board sends, parsing it allocates within its
+ * size; an event past that, or malformed, drops the connection, which is made again. It takes a
+ * description of at most {@link Protocol#MAX_VALUES} values, {@link Protocol#MAX_ACTIONS} actions
+ * and {@link Protocol#MAX_PROBLEMS} problems, and raises at most {@link #MAX_ALERTS} alerts for its
+ * values. Whatever its thread meets, an {@link Error} included, it connects again.
+ *
  * <p>In steady state, decoding the stream into the table and publishing it allocate nothing: one
- * event, one source and one table are reused, and text is decoded only when its bytes differ from
- * what the value holds. A description, a change of level and a text that changed allocate. The
- * JDK's HTTP client, which reads the stream's chunks, allocates a little of its own for each.
+ * event, one buffer, two sources and one table are reused, and text is decoded only when its bytes
+ * differ from what the value holds. A description, a change of level and a text that changed
+ * allocate. The JDK's HTTP client, which reads the stream's chunks, allocates a little of its own
+ * for each.
  *
  * <p>It also follows the board's runs (each run event goes to its {@link Run}), sends the board's
- * requests on the manager's request threads ({@link AgentClient}), and keeps the board's packs the
- * robot's: it connects with their hash, and when the board's differ, pushes them while the robot is
- * disabled and off the field, once for each set of packs the board has, so a push that fails or
- * doesn't take is never repeated in a loop.
+ * requests on request threads of its own ({@link AgentClient}): at most {@link #REQUEST_THREADS} at
+ * once and {@link #REQUESTS_WAITING} waiting, any more refused at once, so robot code asking every
+ * loop can't pile threads up on the robot. And it keeps the board's packs the robot's: it connects
+ * with their hash, and when the board's differ, pushes them while the robot is disabled and off the
+ * field, once for each set of packs the board has, so a push that fails or doesn't take is never
+ * repeated in a loop.
  */
 final class Link implements Runnable, AgentClient.Challenges {
   /** The first wait after a failure. */
   static final long FIRST_BACKOFF_MILLIS = 250;
 
-  /** The most one event may be, in bytes: a description is the largest, at a few KiB. */
-  static final int MAX_EVENT = 16 << 20;
+  /** The most one event may be, in bytes. */
+  static final int MAX_EVENT = Protocol.MAX_EVENT;
+
+  /** The size of the buffer each event is read into, reused; a larger event gets its own. */
+  static final int FRAME = 64 << 10;
+
+  /**
+   * The most alerts a board's values raise: past them, the failing ones first, and one more says
+   * how many others there are.
+   */
+  static final int MAX_ALERTS = 32;
 
   /** The most runs followed at once that robot code didn't start, or that are done. */
   static final int MAX_RUNS = 64;
 
   /** The most of a refusal's body read, in bytes. */
   private static final int MAX_PROBLEM = 64 << 10;
+
+  /** How many of a board's requests run at once. */
+  static final int REQUEST_THREADS = 3;
+
+  /** How many of a board's requests may wait for a thread; one more is refused at once. */
+  static final int REQUESTS_WAITING = 8;
+
+  /** How long a request thread waits for another request before it ends. */
+  private static final long IDLE_SECONDS = 30;
 
   /** Where the board's packs are, against the robot's. */
   enum Packs {
@@ -84,6 +120,7 @@ final class Link implements Runnable, AgentClient.Challenges {
   private final Recorder recorder;
   private final @Nullable TeamPacks packs;
   private final Executor requests;
+  private final @Nullable ExecutorService pool;
   private final Address address;
   private final URL url;
   private final URL urlWithPacks;
@@ -91,7 +128,9 @@ final class Link implements Runnable, AgentClient.Challenges {
   private final Exchange exchange;
   private final Table current = new Table();
   private final Spotter.Event event = Spotter.Event.newInstance();
-  private final ProtoSource source = ProtoSource.newStreamSource();
+  private final ProtoSource source = ProtoSource.newArraySource();
+  private final ProtoSource checked = ProtoSource.newArraySource();
+  private final byte[] frame = new byte[FRAME];
   private final ClockMap clock = new ClockMap();
   private final LinkedHashMap<String, Run> runs = new LinkedHashMap<>();
   private final AtomicLong counter = new AtomicLong();
@@ -111,15 +150,20 @@ final class Link implements Runnable, AgentClient.Challenges {
   private volatile long events;
   private volatile @Nullable Thread thread;
 
-  /** A link without packs, a key, or anywhere to send requests: for tests of the stream alone. */
+  /**
+   * A link without packs, a key, deadlines, or threads for requests (they run on the caller's): for
+   * tests of the stream alone.
+   */
   Link(Board board, Robot robot, Settings settings, Recorder recorder) {
-    this(board, robot, settings, recorder, null, null, Runnable::run);
+    this(board, robot, settings, recorder, null, null, null, Runnable::run, null);
   }
 
   /**
-   * @param packs the team's packs, to push; null for none
+   * A board's link, as the manager makes it: its requests on threads of its own.
+   *
+   * @param packs the team's packs, to push to this board; null for none
    * @param signer the key that signs writes; null for none
-   * @param requests where requests are sent from: the manager's threads
+   * @param deadlines where each request's overall deadline is kept: the manager's
    */
   Link(
       Board board,
@@ -128,21 +172,68 @@ final class Link implements Runnable, AgentClient.Challenges {
       Recorder recorder,
       @Nullable TeamPacks packs,
       @Nullable Signer signer,
-      Executor requests) {
+      ScheduledExecutorService deadlines) {
+    this(board, robot, settings, recorder, packs, signer, deadlines, pool(board.address()));
+  }
+
+  private Link(
+      Board board,
+      Robot robot,
+      Settings settings,
+      Recorder recorder,
+      @Nullable TeamPacks packs,
+      @Nullable Signer signer,
+      ScheduledExecutorService deadlines,
+      ThreadPoolExecutor pool) {
+    this(board, robot, settings, recorder, packs, signer, deadlines, pool, pool);
+  }
+
+  private Link(
+      Board board,
+      Robot robot,
+      Settings settings,
+      Recorder recorder,
+      @Nullable TeamPacks packs,
+      @Nullable Signer signer,
+      @Nullable ScheduledExecutorService deadlines,
+      Executor requests,
+      @Nullable ExecutorService pool) {
     this.board = board;
     this.robot = robot;
     this.settings = settings;
     this.recorder = recorder;
     this.packs = packs;
     this.requests = requests;
+    this.pool = pool;
     this.exchange = board.exchange();
     this.address = address(board.address());
     String stream = Protocol.STREAM + "?heartbeat=" + settings.heartbeat().toMillis() + "ms";
     this.url = url(address, stream);
     this.urlWithPacks = packs == null ? url : url(address, stream + "&packs=" + packs.hash());
     int connect = (int) Math.min(Integer.MAX_VALUE, settings.missing().toMillis());
-    this.client = new AgentClient(address, connect, signer, this);
+    this.client = new AgentClient(address, connect, signer, this, deadlines);
     board.link(this);
+  }
+
+  /**
+   * A board's request threads: {@link #REQUEST_THREADS} at most, made as they're needed and ended
+   * when idle; {@link #REQUESTS_WAITING} requests may wait, and one more is refused at once.
+   */
+  private static ThreadPoolExecutor pool(String address) {
+    ThreadPoolExecutor pool =
+        new ThreadPoolExecutor(
+            REQUEST_THREADS,
+            REQUEST_THREADS,
+            IDLE_SECONDS,
+            TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(REQUESTS_WAITING),
+            work -> {
+              Thread thread = new Thread(work, "Spotter requests " + address);
+              thread.setDaemon(true);
+              return thread;
+            });
+    pool.allowCoreThreadTimeOut(true);
+    return pool;
   }
 
   /**
@@ -203,7 +294,7 @@ final class Link implements Runnable, AgentClient.Challenges {
     started.start();
   }
 
-  /** Stops its thread, dropping its connection. */
+  /** Stops its thread, dropping its connection, and its request threads. */
   void close() {
     closed = true;
     Thread running = thread;
@@ -214,6 +305,14 @@ final class Link implements Runnable, AgentClient.Challenges {
     if (open != null) {
       open.disconnect();
     }
+    if (pool != null) {
+      for (Runnable waiting : pool.shutdownNow()) {
+        if (waiting instanceof Request) {
+          ((Request) waiting).refuse("the manager is closed");
+        }
+      }
+    }
+    client.close();
   }
 
   /** How many events it's received: for tests, to measure what it allocates per event. */
@@ -267,7 +366,8 @@ final class Link implements Runnable, AgentClient.Challenges {
       boolean opened = false;
       try {
         opened = attempt();
-      } catch (IOException | RuntimeException e) {
+      } catch (Throwable e) {
+        // Anything, an Error included: the board is reached again, never left for good.
         if (closed) {
           return;
         }
@@ -338,6 +438,12 @@ final class Link implements Runnable, AgentClient.Challenges {
         return true;
       }
       throw e;
+    } catch (Error e) {
+      // Not a stream that opened well: the next attempt waits its backoff.
+      if (!closed) {
+        failed(why(e));
+      }
+      return false;
     } finally {
       challenge = "";
       connection = null;
@@ -361,7 +467,7 @@ final class Link implements Runnable, AgentClient.Challenges {
     try (InputStream body = c.getErrorStream()) {
       if (body != null) {
         message =
-            ProtoMessage.mergeFrom(Spotter.Problem.newInstance(), body.readNBytes(MAX_PROBLEM))
+            parse(WireCheck.PROBLEM, Spotter.Problem.newInstance(), body.readNBytes(MAX_PROBLEM))
                 .getMessage();
       }
     } catch (IOException e) {
@@ -370,32 +476,76 @@ final class Link implements Runnable, AgentClient.Challenges {
     return "it answered " + code + (message.isEmpty() ? "" : ": " + message);
   }
 
-  /** Why something failed, in a few words: its message, or its kind without one. */
+  /**
+   * Why something failed, in a few words: a connection's failure in plain ones ("connection
+   * refused: is frc-spotter running on it?"), else its message, or its kind without one.
+   */
   static String why(Throwable e) {
     Throwable cause = e.getCause();
     if (!(e instanceof CompletionException) || cause == null) {
       cause = e;
     }
     String message = cause.getMessage();
+    if (cause instanceof java.net.UnknownHostException) {
+      return "its name doesn't resolve" + (message == null ? "" : " (" + message.strip() + ")");
+    }
+    if (cause instanceof java.net.ConnectException) {
+      return "connection refused: is frc-spotter running on it?";
+    }
+    if (cause instanceof java.net.NoRouteToHostException) {
+      return "no route to it: is it on the robot's network?";
+    }
+    if (cause instanceof java.net.SocketTimeoutException) {
+      return "no answer in time: is it on the robot's network?";
+    }
     return message == null || message.isBlank()
         ? cause.getClass().getSimpleName()
         : message.strip();
   }
 
   /**
-   * Reads events until the stream ends (which throws) or the link is closed: each decoded into the
-   * one reused event, applied to the table, and published.
+   * A message from an answer's bytes, checked before it's parsed ({@link WireCheck}).
+   *
+   * @throws WireCheck.Malformed when the bytes can't be parsed safely
+   */
+  static <T extends ProtoMessage<T>> T parse(WireCheck.Type type, T message, byte[] bytes)
+      throws IOException {
+    WireCheck.check(type, bytes);
+    return ProtoMessage.mergeFrom(message, bytes);
+  }
+
+  /**
+   * Reads events until the stream ends (which throws) or the link is closed: each, its length a
+   * varint first, read whole, checked, decoded into the one reused event, applied to the table, and
+   * published. An event past {@link #MAX_EVENT}, or malformed, throws: the connection is dropped.
    */
   void read(InputStream in) throws IOException {
-    source.setInput(in);
-    source.setSizeLimit(MAX_EVENT);
     while (!closed) {
-      source.resetSizeCounter();
-      if (source.isAtEnd()) {
+      int first = in.read();
+      if (first < 0) {
         throw new EOFException("the stream ended");
       }
+      int length = ProtoSource.readRawVarint32(first, in);
+      if (length < 0 || length > MAX_EVENT) {
+        throw new IOException(
+            "it sent an event of "
+                + (length & 0xffffffffL)
+                + " bytes, past the "
+                + MAX_EVENT / 1024
+                + " KiB the manager takes");
+      }
+      byte[] bytes = length <= frame.length ? frame : new byte[length];
+      if (in.readNBytes(bytes, 0, length) < length) {
+        throw new EOFException("the stream ended within an event");
+      }
+      try {
+        WireCheck.check(WireCheck.EVENT, checked.setInput(bytes, 0, length), length);
+      } catch (WireCheck.Malformed e) {
+        throw new IOException("it sent an event that can't be read safely: " + e.getMessage(), e);
+      }
+      source.setInput(bytes, 0, length);
       event.clearQuick();
-      source.readMessage(event);
+      event.mergeFrom(source);
       received(event);
     }
   }
@@ -442,6 +592,19 @@ final class Link implements Runnable, AgentClient.Challenges {
       // A reconnect: the same description, so nothing changed.
       return false;
     }
+    String past = past(described);
+    if (!past.isEmpty()) {
+      String hostname = described.getIdentity().getHostname();
+      board.named(hostname.isEmpty() ? board.address() : hostname);
+      forget();
+      current.refused =
+          board.name()
+              + " describes "
+              + past
+              + ", more than the manager takes: its values and actions aren't used";
+      return true;
+    }
+    current.refused = "";
     Spotter.Description copy = described.clone();
     Field[] fields = Field.of(copy, settings.limits());
     current.describe(copy, fields);
@@ -453,7 +616,75 @@ final class Link implements Runnable, AgentClient.Challenges {
     current.alerts = List.of();
     String hostname = copy.getIdentity().getHostname();
     board.named(hostname.isEmpty() ? board.address() : hostname);
+    problems(copy);
     return true;
+  }
+
+  /**
+   * What a description has more of than the manager takes ({@code "5000 values (at most 2048)"});
+   * empty when it's within them.
+   */
+  static String past(Spotter.Description described) {
+    int values = described.getValues().length();
+    if (values > Protocol.MAX_VALUES) {
+      return values + " values (at most " + Protocol.MAX_VALUES + ")";
+    }
+    int actions = described.getActions().length();
+    if (actions > Protocol.MAX_ACTIONS) {
+      return actions + " actions (at most " + Protocol.MAX_ACTIONS + ")";
+    }
+    int problems = described.getProblems().length();
+    if (problems > Protocol.MAX_PROBLEMS) {
+      return problems + " problems (at most " + Protocol.MAX_PROBLEMS + ")";
+    }
+    return "";
+  }
+
+  /** Forgets the board's description: its values and actions aren't used. */
+  private void forget() {
+    if (current.description != Table.NONE) {
+      current.describe(Table.NONE, new Field[0]);
+      raws = new Utf8String[0];
+      current.changes++;
+    }
+    current.alerts = List.of();
+    current.problems = List.of();
+    current.problemsAlert = "";
+  }
+
+  /** The longest a problem is quoted in its alert; the board's problems have it whole. */
+  static final int QUOTED_PROBLEM = 200;
+
+  /**
+   * Takes a description's problems, and its alert: the count and the first, so a pack the board
+   * ignored (a typo, a key a newer agent knows) is never silent on the robot.
+   */
+  private void problems(Spotter.Description described) {
+    List<String> problems = new ArrayList<>();
+    for (int i = 0; i < described.getProblems().length(); i++) {
+      problems.add(described.getProblems().get(i));
+    }
+    current.problems = List.copyOf(problems);
+    current.problemsAlert = problemsAlert(board.name(), current.problems);
+  }
+
+  /**
+   * What a board's problems' alert says: {@code "vision-front reports 2 problems, the first: ..."};
+   * empty when it has none.
+   */
+  static String problemsAlert(String board, List<String> problems) {
+    if (problems.isEmpty()) {
+      return "";
+    }
+    String first = problems.get(0);
+    if (first.length() > QUOTED_PROBLEM) {
+      first = first.substring(0, QUOTED_PROBLEM) + "...";
+    }
+    return board
+        + (problems.size() == 1
+            ? " reports a problem: "
+            : " reports " + problems.size() + " problems, the first: ")
+        + first;
   }
 
   private void values(Spotter.Values values, long now) {
@@ -572,21 +803,46 @@ final class Link implements Runnable, AgentClient.Challenges {
     }
   }
 
-  /** The board's value alerts: one per value at warning or failing, in its pack's words. */
+  /**
+   * The board's value alerts: one per value at warning or failing, in its pack's words. Past {@link
+   * #MAX_ALERTS}, the failing ones first, then one says how many more there are, at the worst of
+   * their levels.
+   */
   private List<Alert> alerts() {
     String name = board.name();
-    List<Alert> alerts = new ArrayList<>();
+    List<Value> raised = new ArrayList<>();
     for (Value value : current.values) {
       if (value.level == Level.WARNING || value.level == Level.FAILING) {
-        alerts.add(new Alert(value.level, name, text(name, value)));
+        raised.add(value);
       }
+    }
+    if (raised.size() > MAX_ALERTS) {
+      // Stable: within a level, in the description's order.
+      raised.sort(Comparator.comparing(value -> value.level != Level.FAILING));
+    }
+    List<Alert> alerts = new ArrayList<>();
+    for (int i = 0;
+        i < raised.size() && i < MAX_ALERTS - (raised.size() > MAX_ALERTS ? 1 : 0);
+        i++) {
+      Value value = raised.get(i);
+      alerts.add(new Alert(value.level, name, text(name, value)));
+    }
+    int more = raised.size() - alerts.size();
+    if (more > 0) {
+      Level worst = raised.get(alerts.size()).level;
+      alerts.add(new Alert(worst, name, name + ": " + more + " more values at warning or failing"));
     }
     return List.copyOf(alerts);
   }
 
   /** What an alert about a value says: {@code "vision-front: CPU temperature above 80 °C"}. */
   static String text(String board, Value value) {
-    String label = board + ": " + value.label();
+    return board + ": " + text(value);
+  }
+
+  /** Why a value is at its level, its label first: {@code "CPU temperature above 80 °C"}. */
+  static String text(Value value) {
+    String label = value.label();
     if (value.kind == Value.Kind.STATUS && value.status != Level.UNAVAILABLE) {
       return label + ": " + value.reason;
     }
@@ -615,13 +871,9 @@ final class Link implements Runnable, AgentClient.Challenges {
             : "it speaks Spotter protocol " + version + ", the robot " + Protocol.VERSION;
     current.heard = true;
     current.heardNanos = now;
-    if (current.description != Table.NONE) {
-      // Its values and actions aren't used.
-      current.describe(Table.NONE, new Field[0]);
-      raws = new Utf8String[0];
-      current.changes++;
-      current.alerts = List.of();
-    }
+    // Its values and actions aren't used.
+    forget();
+    current.refused = "";
     current.packs = "";
     packsState = Packs.SAME;
     publish();
@@ -718,31 +970,25 @@ final class Link implements Runnable, AgentClient.Challenges {
     pushes.incrementAndGet();
     triedFrom = theirs;
     CompletableFuture<Void> pushed = new CompletableFuture<>();
-    try {
-      requests.execute(
-          () -> {
-            try {
-              client.write("POST", Protocol.PACKS, team.bundle(), Protocol.PROTOBUF);
-              pushFailure = null;
-              restarting = true;
-              askWithPacks = true;
-              try {
-                recorder.pushed(board, team.hash(), forced);
-              } catch (RuntimeException e) {
-                // A logging fault never fails a push.
-              }
-              pushed.complete(null);
-            } catch (IOException e) {
-              pushFailure = why(e);
-              pushed.completeExceptionally(e);
-            } finally {
-              pushing = false;
-            }
-          });
-    } catch (RuntimeException e) {
-      pushing = false;
-      pushed.completeExceptionally(e);
-    }
+    execute(
+        why -> {
+          pushFailure = why;
+          pushing = false;
+          pushed.completeExceptionally(new IOException(why));
+        },
+        () -> {
+          client.write("POST", Protocol.PACKS, team.bundle(), Protocol.PROTOBUF);
+          pushFailure = null;
+          restarting = true;
+          askWithPacks = true;
+          pushing = false;
+          try {
+            recorder.pushed(board, team.hash(), forced);
+          } catch (RuntimeException e) {
+            // A logging fault never fails a push.
+          }
+          pushed.complete(null);
+        });
     return pushed;
   }
 
@@ -755,7 +1001,7 @@ final class Link implements Runnable, AgentClient.Challenges {
         () -> {
           byte[] answer =
               client.write("POST", Protocol.ACTIONS + action, input, "application/octet-stream");
-          String id = ProtoMessage.mergeFrom(Spotter.Started.newInstance(), answer).getRun();
+          String id = parse(WireCheck.STARTED, Spotter.Started.newInstance(), answer).getRun();
           boolean cancel = run.started(id);
           attach(id, run);
           if (cancel) {
@@ -796,8 +1042,10 @@ final class Link implements Runnable, AgentClient.Challenges {
   CompletableFuture<Spotter.LogPage> log(String id, LogQuery query) {
     return call(
         () ->
-            ProtoMessage.mergeFrom(
-                Spotter.LogPage.newInstance(), client.get(Protocol.LOGS + id + query.query())));
+            parse(
+                WireCheck.LOG_PAGE,
+                Spotter.LogPage.newInstance(),
+                client.get(Protocol.LOGS + id + query.query())));
   }
 
   /** A request that answers something. */
@@ -818,20 +1066,54 @@ final class Link implements Runnable, AgentClient.Challenges {
     return answer;
   }
 
-  /** Runs a request on a request thread: what it throws goes to {@code failed}, as why. */
+  /**
+   * Runs a request on one of the board's request threads: what it throws goes to {@code failed}, as
+   * why; when they're all busy and as many wait as may, it's refused at once.
+   */
   private void execute(java.util.function.Consumer<String> failed, Task task) {
     try {
-      requests.execute(
-          () -> {
-            try {
-              task.run();
-            } catch (IOException | RuntimeException e) {
-              failed.accept(why(e));
-            }
-          });
-    } catch (RuntimeException e) {
-      failed.accept("the manager is closed: " + why(e));
+      requests.execute(new Request(failed, task));
+    } catch (RejectedExecutionException e) {
+      failed.accept(busy(e));
     }
+  }
+
+  /** A request, waiting for a thread or under way: what it throws goes to its failure, as why. */
+  private static final class Request implements Runnable {
+    private final java.util.function.Consumer<String> failed;
+    private final Task task;
+
+    Request(java.util.function.Consumer<String> failed, Task task) {
+      this.failed = failed;
+      this.task = task;
+    }
+
+    @Override
+    public void run() {
+      try {
+        task.run();
+      } catch (IOException | RuntimeException e) {
+        failed.accept(why(e));
+      }
+    }
+
+    /** It never ran, and why. */
+    void refuse(String why) {
+      failed.accept(why);
+    }
+  }
+
+  /** Why a request was refused before it was sent: the manager closed, or too many at once. */
+  private String busy(RejectedExecutionException e) {
+    return closed || (pool != null && pool.isShutdown())
+        ? "the manager is closed"
+        : "too many requests to "
+            + board.name()
+            + " at once: "
+            + REQUEST_THREADS
+            + " under way and "
+            + REQUESTS_WAITING
+            + " waiting";
   }
 
   // ---- runs ----
@@ -915,7 +1197,8 @@ final class Link implements Runnable, AgentClient.Challenges {
           why -> {},
           () -> {
             Spotter.LogPage page =
-                ProtoMessage.mergeFrom(
+                parse(
+                    WireCheck.LOG_PAGE,
                     Spotter.LogPage.newInstance(),
                     client.get(Protocol.RUNS + id + "/log?limit=" + LogQuery.MAX_LIMIT));
             List<Spotter.LogEntry> entries = new ArrayList<>();

@@ -18,26 +18,40 @@ import java.util.regex.Pattern;
  * agent needs none of them. A push can't change them: the file is the installer's.
  *
  * <pre>
- * {"port": 5809, "controller": "10.12.34.2", "bind": "10.12.34.11",
+ * {"team": 1234, "port": 5809, "bind": "10.12.34.11",
  *  "acceptPushes": false, "trustedKeys": ["MCowBQYDK2VwAyEA..."]}
  * </pre>
  *
+ * <p>Naming the robot controller, by its address or its team's number, is what lets the robot push
+ * packs and run the packs' actions: a controller the agent only works out from its own address
+ * (10.TE.AM.2 on whatever 10.x network it's on, a school's or a home's included) may run its two
+ * built-in actions and nothing else.
+ *
  * @param port the port it serves on
  * @param controller the one address a write is taken from; empty to find it from the computer's own
- *     address (10.TE.AM.2)
+ *     address (10.TE.AM.2), unless the team is named
+ * @param team the robot's team, whose controller, 10.TE.AM.2, a write is taken from; 0 for none
  * @param bind the address it listens on; empty for every address
  * @param acceptPushes whether the robot may push packs to it; when not, it ignores pushed packs
  * @param trustedKeys the Ed25519 public keys a write must be signed by, each its X.509 encoding in
  *     base64; none for no signatures
  */
 record AgentConfig(
-    int port, String controller, String bind, boolean acceptPushes, List<String> trustedKeys) {
+    int port,
+    String controller,
+    int team,
+    String bind,
+    boolean acceptPushes,
+    List<String> trustedKeys) {
   /** Where the settings are. */
   static final String PATH = "/etc/frc-spotter/agent.json";
 
   /** The keys the file may have, and no others. */
   static final Set<String> KEYS =
-      Set.of("port", "controller", "bind", "acceptPushes", "trustedKeys");
+      Set.of("port", "controller", "team", "bind", "acceptPushes", "trustedKeys");
+
+  /** The highest team number a robot's network can hold: 10.255.99.x. */
+  static final int MAX_TEAM = 25599;
 
   /** An IPv4 address written out: four numbers from 0 to 255, without leading zeros. */
   static final Pattern IPV4 =
@@ -45,7 +59,7 @@ record AgentConfig(
           "((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])");
 
   /** Nothing set. */
-  static final AgentConfig DEFAULT = new AgentConfig(Protocol.PORT, "", "", true, List.of());
+  static final AgentConfig DEFAULT = new AgentConfig(Protocol.PORT, "", 0, "", true, List.of());
 
   AgentConfig {
     trustedKeys = List.copyOf(trustedKeys);
@@ -59,9 +73,25 @@ record AgentConfig(
             "\"" + address + "\" isn't an IPv4 address written out, such as 10.12.34.2");
       }
     }
+    if (team < 0 || team > MAX_TEAM) {
+      throw new IllegalArgumentException("team " + team + " is out of range: 1 to " + MAX_TEAM);
+    }
+    if (team > 0 && !controller.isEmpty()) {
+      throw new IllegalArgumentException(
+          "it names the controller or the team, not both: the team's controller is 10.TE.AM."
+              + Protocol.CONTROLLER);
+    }
     for (String key : trustedKeys) {
       publicKey(key);
     }
+  }
+
+  /** The robot controller it names, by its address or its team's; empty when it names none. */
+  String namedController() {
+    if (!controller.isEmpty()) {
+      return controller;
+    }
+    return team == 0 ? "" : "10." + team / 100 + "." + team % 100 + "." + Protocol.CONTROLLER;
   }
 
   /** A trusted key's text as the key it is. */
@@ -106,6 +136,10 @@ record AgentConfig(
     if (!(port instanceof Long)) {
       throw new IllegalArgumentException("port must be a whole number");
     }
+    Object team = o.getOrDefault("team", 0L);
+    if (!(team instanceof Long)) {
+      throw new IllegalArgumentException("team must be a whole number, such as 1234");
+    }
     Object accept = o.getOrDefault("acceptPushes", true);
     if (!(accept instanceof Boolean)) {
       throw new IllegalArgumentException("acceptPushes must be true or false");
@@ -113,6 +147,7 @@ record AgentConfig(
     return new AgentConfig(
         (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, (Long) port)),
         text(o, "controller"),
+        (int) Math.max(-1, Math.min(Integer.MAX_VALUE, (Long) team)),
         text(o, "bind"),
         (Boolean) accept,
         keys);

@@ -16,7 +16,10 @@ Type=simple
 # Its own system user (its package makes it, with systemd-sysusers), in systemd-journal so a pack can
 # read the journal. Its one privilege, by its package's polkit rule, is powering off or rebooting (the
 # built-in actions core.power-off and core.reboot). A pack's commands run as this user, in this
-# sandbox: whatever more they need is their installer's to grant.
+# sandbox: whatever more they need is their installer's to grant, with a drop-in of its own in
+# /etc/systemd/system/frc-spotter.service.d/ (SupplementaryGroups=, DeviceAllow=, ReadWritePaths=,
+# ProtectHome=read-only) and, for one command, a polkit rule sorting before 99-frc-spotter.rules
+# (docs/agent.md, "Giving a pack more"). sudo can't work here: NoNewPrivileges.
 User=frc-spotter
 Group=frc-spotter
 SupplementaryGroups=systemd-journal
@@ -35,7 +38,14 @@ KillMode=mixed
 Nice=10
 AllowedCPUs=0-3
 MemoryMax=200M
-TasksMax=64
+# Its tasks: the JVM's threads and every process its packs run, and theirs, together. Measured in the
+# container tests: 32 with the stand-in pack's collectors running, 42 at most with the catalog's
+# (the JVM's own threads are most of them). On top of that, at worst: a thread for each of 32
+# connections, three for each command running (its own, and one for each of its output and its
+# standard error: four collectors, two actions, two logs), the processes of each, and a leftover's
+# readers. 256 holds all that and an action that starts a threaded program (OpenCV starts one per
+# core), while a fork bomb in a pack still can't take the board.
+TasksMax=256
 UMask=0077
 # It writes nothing but its own /tmp, its actions' runs (/run/frc-spotter, kept across its restarts,
 # gone at a reboot), and pushed packs (/var/lib/frc-spotter, made by its tmpfiles.d entry; on a

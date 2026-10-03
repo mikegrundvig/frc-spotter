@@ -215,4 +215,57 @@ class StreamTest {
     assertThat(Stream.heartbeat("1m")).hasValue(Stream.MAX_HEARTBEAT);
     assertThat(Stream.heartbeat("often")).isEmpty();
   }
+
+  @Test
+  void valuesPastWhatAnEventHoldsAreSentAsSeveral() {
+    Spotter.Values small = Spotter.Values.newInstance().setRevision(3);
+    small.addValues(Spotter.FieldValue.newInstance().setIndex(0).setNumber(1));
+    assertThat(Stream.parts(small)).containsExactly(small);
+
+    // Forty texts of 60 KiB, as forty collectors' whole outputs: 2.3 MiB in all.
+    Spotter.Values values =
+        Spotter.Values.newInstance().setRevision(3).setTimeNanos(7).setComplete(true);
+    String text = "x".repeat(60 * 1024);
+    for (int i = 0; i < 40; i++) {
+      values.addValues(Spotter.FieldValue.newInstance().setIndex(i).setText(text));
+    }
+    List<Spotter.Values> parts = Stream.parts(values);
+    assertThat(parts)
+        .hasSize(3)
+        .allMatch(part -> part.getSerializedSize() <= Stream.MAX_HELD)
+        .allMatch(part -> part.getRevision() == 3 && part.getTimeNanos() == 7)
+        .allMatch(Spotter.Values::getComplete);
+    List<Integer> indexes = new ArrayList<>();
+    for (Spotter.Values part : parts) {
+      for (Spotter.FieldValue value : part.getValues()) {
+        indexes.add(value.getIndex());
+      }
+    }
+    assertThat(indexes).hasSize(40).isSorted();
+  }
+
+  @Test
+  void theRunsListedOnConnectFitAnEventTheRunningOnesFirst() {
+    List<Spotter.RunState> states = new ArrayList<>();
+    states.add(Spotter.RunState.newInstance().setRun("00").setAction("p.wait").setRunning(true));
+    String output = "y".repeat(250 * 1024);
+    for (int i = 1; i <= 10; i++) {
+      Spotter.RunResult result =
+          Spotter.RunResult.newInstance()
+              .addResponse(Spotter.FieldValue.newInstance().setName("output").setText(output));
+      states.add(
+          Spotter.RunState.newInstance()
+              .setRun(String.format("%02d", i))
+              .setAction("p.a" + i)
+              .setResult(result));
+    }
+    Spotter.Runs runs = Stream.runs(states);
+    assertThat(runs.getSerializedSize()).isLessThanOrEqualTo(Stream.MAX_HELD);
+    List<String> listed = new ArrayList<>();
+    for (Spotter.RunState state : runs.getRuns()) {
+      listed.add(state.getRun());
+    }
+    // The running one, then the newest four that fit, in the order they started.
+    assertThat(listed).containsExactly("00", "07", "08", "09", "10");
+  }
 }

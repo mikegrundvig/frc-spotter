@@ -47,6 +47,78 @@ class CollectorsTest {
   }
 
   @Test
+  void aCollectorThatLeavesAChildHoldingItsOutputIsntStuck() throws Exception {
+    Fixture fixture = new Fixture(dir);
+    String runs = fixture.path("/runs").toString();
+    fixture.pack(
+        "lingering",
+        "pack: lingering\ncollectors:\n  - id: c\n    run: [sh, -c, \"echo run >> "
+            + runs
+            + "; sleep 30 &\"]\n    every: 100ms\n    timeout: 300ms\n"
+            + "    fields:\n      n: {type: text}\n");
+    ValueStore store = new ValueStore(1);
+    Commands commands = new Commands(fixture.host);
+    try (Collectors collectors =
+        new Collectors(fixture.host, Packs.load(fixture.host, true).packs(), commands, store)) {
+      collectors.start();
+      // It runs, and runs again: what it left is stopped as it ends, and never holds it up.
+      for (int i = 0; i < 300 && lines(runs) < 3; i++) {
+        Thread.sleep(20);
+      }
+      assertThat(lines(runs)).isGreaterThanOrEqualTo(3);
+      assertThat(store.get(0).hasText()).isTrue();
+    } finally {
+      commands.close();
+    }
+  }
+
+  private static int lines(String file) throws java.io.IOException {
+    Path path = Path.of(file);
+    return java.nio.file.Files.exists(path) ? java.nio.file.Files.readAllLines(path).size() : 0;
+  }
+
+  @Test
+  void aCollectorWhoseCommandWontGoIsUnavailableAndIsntRunAgainUntilItHas() throws Exception {
+    Fixture fixture = new Fixture(dir);
+    Pack pack = pack("p", Map.of("stuck", Duration.ofMillis(100)));
+    ValueStore store = new ValueStore(1);
+    AtomicInteger ran = new AtomicInteger();
+    java.util.concurrent.CompletableFuture<Void> ended =
+        new java.util.concurrent.CompletableFuture<>();
+    // As Commands answers a command it stopped that won't go: stuck in the kernel, say.
+    Runner stuck =
+        (folder, command, timeout, max) -> {
+          ran.incrementAndGet();
+          return new Commands.Result(
+              Commands.Kind.RUN,
+              Spotter.Outcome.OUTCOME_TIMED_OUT,
+              "timed out after 5s; its command is still running",
+              0,
+              new byte[0],
+              false,
+              "",
+              ended);
+        };
+    try (Collectors collectors = new Collectors(fixture.host, List.of(pack), stuck, store)) {
+      collectors.start();
+      for (int i = 0; i < 100 && ran.get() == 0; i++) {
+        Thread.sleep(20);
+      }
+      Thread.sleep(500);
+      // Due every 100 ms, it isn't run again while its command is still running.
+      assertThat(ran.get()).isEqualTo(1);
+      assertThat(store.get(0).getUnavailable())
+          .isEqualTo("timed out after 5s; its command is still running");
+      // Once it has ended, its turns come again.
+      ended.complete(null);
+      for (int i = 0; i < 100 && ran.get() < 2; i++) {
+        Thread.sleep(20);
+      }
+      assertThat(ran.get()).isGreaterThan(1);
+    }
+  }
+
+  @Test
   void valuesFollowTheirPacksAndCollectorsInOrder() throws Exception {
     Fixture fixture = new Fixture(dir);
     Pack a = pack("a", Map.of("one", Duration.ofSeconds(1)));

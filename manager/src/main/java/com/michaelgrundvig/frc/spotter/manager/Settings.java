@@ -3,8 +3,11 @@ package com.michaelgrundvig.frc.spotter.manager;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * The manager's settings, each with a default ({@link #DEFAULTS}); robot code changes those it
@@ -26,7 +29,12 @@ import java.util.Optional;
  * @param pushAutomatically whether to push the team's packs to a board whose packs differ, while
  *     the robot is disabled and the field isn't attached; never on the field (default true)
  * @param packs the team's packs: a folder of pack folders, which every board that accepts pushes is
- *     to have (default none: nothing is pushed)
+ *     to have, but those {@code boardPacks} names for some boards, which go to those alone (default
+ *     none: nothing is pushed)
+ * @param boardPacks which of the team's packs go to some boards alone: by each board's address, as
+ *     the manager is given it, the names of the packs it has besides those every board has. A pack
+ *     named here goes only to the boards that name it; one named nowhere goes to every board
+ *     (default none: every pack goes to every board)
  * @param key the private key that signs writes, for boards that require signatures (default {@code
  *     /home/systemcore/spotter.key}); without it, reading still works
  * @param publicKey its public key (default: {@code spotter.pub} beside the private key, as
@@ -40,6 +48,7 @@ public record Settings(
     boolean refuseWhileEnabled,
     boolean pushAutomatically,
     Optional<Path> packs,
+    Map<String, Set<String>> boardPacks,
     Path key,
     Optional<Path> publicKey) {
   /** Where the private key is unless robot code says: on the robot controller, outside Git. */
@@ -55,6 +64,7 @@ public record Settings(
           true,
           true,
           Optional.empty(),
+          Map.of(),
           KEY,
           Optional.empty());
 
@@ -73,6 +83,9 @@ public record Settings(
       throw new IllegalArgumentException("the backoff must be positive: " + backoff);
     }
     limits = Map.copyOf(limits);
+    Map<String, Set<String>> copied = new HashMap<>();
+    boardPacks.forEach((address, names) -> copied.put(address, Set.copyOf(names)));
+    boardPacks = Map.copyOf(copied);
   }
 
   /** These settings with another heartbeat interval. */
@@ -85,6 +98,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         publicKey);
   }
@@ -99,6 +113,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         publicKey);
   }
@@ -113,6 +128,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         publicKey);
   }
@@ -129,6 +145,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         publicKey);
   }
@@ -143,6 +160,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         publicKey);
   }
@@ -157,6 +175,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         publicKey);
   }
@@ -171,8 +190,52 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         Optional.of(folder),
+        boardPacks,
         key,
         publicKey);
+  }
+
+  /**
+   * These settings with packs for one board besides those every board has: the team's packs by
+   * these names go to the board at this address (as the manager is given it), and to no board that
+   * doesn't name them. Robot code assigns its boards their packs in code: a PhotonVision board and
+   * a detector board get different sets from one packs folder.
+   *
+   * <pre>{@code
+   * Settings.DEFAULTS
+   *     .withPacks(deploy.resolve("spotter-packs"))      // debian, photonvision, detector
+   *     .withBoardPacks("10.26.11.11", "photonvision")   // and debian, which every board has
+   *     .withBoardPacks("10.26.11.12", "detector")
+   * }</pre>
+   */
+  public Settings withBoardPacks(String address, String... names) {
+    Map<String, Set<String>> all = new HashMap<>(boardPacks);
+    Set<String> its = new LinkedHashSet<>(all.getOrDefault(address.strip(), Set.of()));
+    its.addAll(List.of(names));
+    all.put(address.strip(), its);
+    return new Settings(
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        all,
+        key,
+        publicKey);
+  }
+
+  /**
+   * Whether one of the team's packs, by its name, goes to a board: one named for no board does, and
+   * one named for this one.
+   */
+  boolean packFor(String address, String pack) {
+    boolean named = false;
+    for (Set<String> names : boardPacks.values()) {
+      named |= names.contains(pack);
+    }
+    return !named || boardPacks.getOrDefault(address.strip(), Set.of()).contains(pack);
   }
 
   /** These settings with the private key elsewhere: its public key beside it, unless given. */
@@ -185,6 +248,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         publicKey);
   }
@@ -199,6 +263,7 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         packs,
+        boardPacks,
         key,
         Optional.of(publicKey));
   }

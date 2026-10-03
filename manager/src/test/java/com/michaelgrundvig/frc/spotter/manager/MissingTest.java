@@ -185,7 +185,7 @@ class MissingTest {
     try (ServerSocket silent = new ServerSocket(0)) {
       Manager manager = manage("127.0.0.1:" + silent.getLocalPort());
       Board board = manager.boards().get(0);
-      await(manager, "a timed-out attempt", () -> board.why().contains("timed out"));
+      await(manager, "a timed-out attempt", () -> board.why().contains("no answer in time"));
       clock.addAndGet(2 * SECOND);
       manager.update();
       assertThat(board.connection()).isEqualTo(Connection.MISSING);

@@ -4,6 +4,7 @@ import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import org.jspecify.annotations.Nullable;
@@ -51,6 +52,8 @@ public final class Run {
   private @Nullable CompletableFuture<Void> cancelling;
   private long changes;
   private Spotter.@Nullable RunResult result;
+  private Level level = Level.UNAVAILABLE;
+  private String reason = NOT_DONE;
 
   /**
    * @param declaration its action's declaration, from the board's description
@@ -111,6 +114,26 @@ public final class Run {
   /** The lines it's logged so far (its standard error, line by line), oldest first. */
   public synchronized List<Spotter.LogEntry> log() {
     return List.copyOf(log);
+  }
+
+  /**
+   * Its verdict, as the design judges a run: {@link Level#FAILING} when it was refused, or finished
+   * without completing (it timed out, was cancelled or lost, couldn't start or reach its URL),
+   * whatever its pack says; once completed, the worst level among its {@link #response} fields, by
+   * their limits (a field with no value and no {@code missing} rule counts as ok, as it raises no
+   * alert). {@link Level#UNAVAILABLE} until it's done.
+   */
+  public synchronized Level level() {
+    return level;
+  }
+
+  /**
+   * Why it's at its level: why it was refused or didn't complete ({@code "timed out after 60s"}),
+   * or its first response field at that level, in its pack's words ({@code "exit isn't 0"}); empty
+   * when it's ok, and {@value #NOT_DONE} until it's done.
+   */
+  public synchronized String reason() {
+    return reason;
   }
 
   /**
@@ -205,6 +228,8 @@ public final class Run {
       }
       state = State.REFUSED;
       why = reason;
+      level = Level.FAILING;
+      this.reason = reason;
       changes++;
       later = cancelling;
     }
@@ -262,6 +287,7 @@ public final class Run {
       outcome = sent.getOutcome();
       why = sent.getOutcomeMessage();
       response = judge(declaration, sent, overrides);
+      verdict();
       changes++;
     }
     done.complete(this);
@@ -339,4 +365,32 @@ public final class Run {
 
   /** Why a declared response field has no value: the result didn't have it. */
   static final String NOT_IN_RESPONSE = "not in its response";
+
+  /** Why a run that isn't done has no verdict. */
+  static final String NOT_DONE = "not done yet";
+
+  /** Judges it, once finished: its outcome first, then its response's worst. */
+  private void verdict() {
+    if (outcome != Spotter.Outcome.OUTCOME_COMPLETED) {
+      level = Level.FAILING;
+      reason =
+          why.isEmpty()
+              ? outcome
+                  .name()
+                  .substring("OUTCOME_".length())
+                  .toLowerCase(Locale.ROOT)
+                  .replace('_', ' ')
+              : why;
+      return;
+    }
+    level = Level.OK;
+    reason = "";
+    for (Value value : response) {
+      if (value.level() == Level.FAILING && level != Level.FAILING
+          || value.level() == Level.WARNING && level == Level.OK) {
+        level = value.level();
+        reason = Link.text(value);
+      }
+    }
+  }
 }

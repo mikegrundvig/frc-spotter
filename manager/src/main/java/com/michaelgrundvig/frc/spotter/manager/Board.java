@@ -30,6 +30,8 @@ public final class Board {
   private String why = "";
   private List<Alert> valueAlerts = List.of();
   private String packsAlert = "";
+  private String problemsAlert = "";
+  private String refusedAlert = "";
   private String alertsName;
   private List<Alert> alerts = List.of();
 
@@ -80,6 +82,17 @@ public final class Board {
     return front().description;
   }
 
+  /**
+   * What its agent ignored, and why, as its description lists them: a pack that didn't load (each
+   * mistake with its file and line), a program anyone but root could change, settings that can't be
+   * read. Empty when there are none, or before it's described itself. The same list until its
+   * description changes; while it has any, its alerts include a warning saying how many, and the
+   * first.
+   */
+  public List<String> problems() {
+    return front().problems;
+  }
+
   /** Its values, in its description's order. Each is reused: see {@link Value}. */
   public List<Value> values() {
     return front().list;
@@ -110,8 +123,10 @@ public final class Board {
   }
 
   /**
-   * Its alerts: one for it, when it's missing or on another protocol; otherwise one per value at
-   * warning or failing, and one when its packs differ from the robot's and won't be pushed now.
+   * Its alerts: one for it, when it's missing or on another protocol, or describes more than the
+   * manager takes; otherwise one per value at warning or failing (at most 32, the last saying how
+   * many more), one when its packs differ from the robot's and won't be pushed now, and one, a
+   * warning, while its description lists problems ({@link #problems}).
    */
   public List<Alert> alerts() {
     return alerts;
@@ -119,13 +134,18 @@ public final class Board {
 
   /**
    * A page of one of its logs ({@code pack.log}, as its description declares them), fetched on the
-   * manager's threads: completes with the page, or exceptionally, saying why there's none.
+   * board's request threads: completes with the page, or exceptionally, saying why there's none.
+   * Refused at once, without asking the board, when it isn't connected (it's missing, or on another
+   * protocol), so asking every loop while a board is away costs nothing.
    */
   public CompletableFuture<Spotter.LogPage> log(String id, LogQuery query) {
     Link through = link;
-    if (through == null || connection == Connection.OTHER_PROTOCOL) {
+    if (through == null || connection != Connection.CONNECTED) {
       return CompletableFuture.failedFuture(
-          new IllegalStateException(name + "'s logs can't be read: " + why));
+          new IllegalStateException(
+              name
+                  + "'s logs can't be read: it isn't connected"
+                  + (why.isEmpty() ? "" : ": " + why)));
     }
     return through.log(id, query);
   }
@@ -238,6 +258,8 @@ public final class Board {
             || !because.equals(why)
             || table.alerts != valueAlerts
             || !table.packs.equals(packsAlert)
+            || !table.problemsAlert.equals(problemsAlert)
+            || !table.refused.equals(refusedAlert)
             || !named.equals(alertsName);
     connection = judged;
     why = because;
@@ -246,16 +268,25 @@ public final class Board {
     }
     valueAlerts = table.alerts;
     packsAlert = table.packs;
+    problemsAlert = table.problemsAlert;
+    refusedAlert = table.refused;
     alertsName = named;
     if (judged == Connection.MISSING) {
       alerts = List.of(new Alert(Level.FAILING, named, named + " is missing: " + because));
     } else if (judged == Connection.OTHER_PROTOCOL) {
       alerts = List.of(new Alert(Level.FAILING, named, named + ": " + because));
-    } else if (packsAlert.isEmpty()) {
+    } else if (!refusedAlert.isEmpty()) {
+      alerts = List.of(new Alert(Level.FAILING, named, refusedAlert));
+    } else if (packsAlert.isEmpty() && problemsAlert.isEmpty()) {
       alerts = valueAlerts;
     } else {
       List<Alert> all = new ArrayList<>(valueAlerts);
-      all.add(new Alert(Level.WARNING, named, packsAlert));
+      if (!packsAlert.isEmpty()) {
+        all.add(new Alert(Level.WARNING, named, packsAlert));
+      }
+      if (!problemsAlert.isEmpty()) {
+        all.add(new Alert(Level.WARNING, named, problemsAlert));
+      }
       alerts = List.copyOf(all);
     }
     return true;

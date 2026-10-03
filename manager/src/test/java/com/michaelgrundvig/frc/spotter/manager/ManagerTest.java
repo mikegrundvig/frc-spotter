@@ -176,6 +176,44 @@ class ManagerTest {
   }
 
   @Test
+  void aBoardsProblemsAreAWarningWithHowManyAndTheFirstUntilTheyreGone() throws Exception {
+    // Two packs it ignores: a misspelled key, and a folder named for another pack.
+    agent.stop();
+    agent.pack("broken", "pack: broken\nversoin: 1.0.0\n");
+    agent.pack("misnamed", "pack: other\n");
+    agent.start();
+    Manager manager = manage(Settings.DEFAULTS, Recorder.NONE);
+    Board board = connected(manager);
+    assertThat(board.problems())
+        .hasSize(2)
+        .allMatch(problem -> problem.contains("(the pack is ignored)"));
+    assertThat(board.problems().get(0))
+        .startsWith("/etc/frc-spotter/packs/broken/pack.yaml:2: unknown key \"versoin\"");
+    assertThat(manager.alerts())
+        .containsExactly(
+            new Alert(
+                Level.WARNING,
+                "vision-front",
+                "vision-front reports 2 problems, the first: " + board.problems().get(0)));
+
+    // Fixed, and the agent restarted with them: no problems, no alert.
+    agent.stop();
+    agent.pack("broken", "pack: broken\n");
+    agent.pack("misnamed", "pack: misnamed\n");
+    agent.start();
+    await(manager, "no problems", () -> board.problems().isEmpty());
+    assertThat(manager.alerts()).isEmpty();
+  }
+
+  @Test
+  void aProblemsAlertQuotesALongFirstProblemCut() {
+    String first = "x".repeat(Link.QUOTED_PROBLEM + 50);
+    assertThat(Link.problemsAlert("vision-front", List.of(first)))
+        .isEqualTo("vision-front reports a problem: " + "x".repeat(Link.QUOTED_PROBLEM) + "...");
+    assertThat(Link.problemsAlert("vision-front", List.of())).isEmpty();
+  }
+
+  @Test
   void theAlertsAreTheSameListUntilOneChanges() throws Exception {
     Manager manager = manage(Settings.DEFAULTS, Recorder.NONE);
     Board board = connected(manager);

@@ -157,6 +157,9 @@ class ActionsTest {
     assertThat(speed.level()).isEqualTo(Level.WARNING);
     assertThat(speed.reason()).isEqualTo("above 3 m/s");
     assertThat(run.response("nothing")).isNull();
+    // Its verdict: completed, and its worst field a warning.
+    assertThat(run.level()).isEqualTo(Level.WARNING);
+    assertThat(run.reason()).isEqualTo("Speed above 3 m/s");
     assertThat(run.changes()).isPositive();
     assertThat(run.toString()).startsWith("team.hello (" + run.id() + "): FINISHED");
   }
@@ -169,6 +172,8 @@ class ActionsTest {
     Run run = done(board.run("team.hello", "Ada"));
     assertThat(field(run, "speed").level()).isEqualTo(Level.FAILING);
     assertThat(field(run, "speed").overridden()).isTrue();
+    assertThat(run.level()).isEqualTo(Level.FAILING);
+    assertThat(run.reason()).isEqualTo("Speed above 4 m/s");
   }
 
   @Test
@@ -179,9 +184,14 @@ class ActionsTest {
       Thread.sleep(50);
     }
     assertThat(run.state()).isEqualTo(Run.State.RUNNING);
+    assertThat(run.level()).isEqualTo(Level.UNAVAILABLE);
+    assertThat(run.reason()).isEqualTo(Run.NOT_DONE);
     run.cancel().get(10, TimeUnit.SECONDS);
     done(run);
     assertThat(run.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_CANCELLED);
+    // Not completed: failing, whatever its pack says.
+    assertThat(run.level()).isEqualTo(Level.FAILING);
+    assertThat(run.reason()).isEqualTo("cancelled");
     assertThat(run.log())
         .extracting(Spotter.LogEntry::getMessage)
         .containsSubsequence("waiting", "stopping");
@@ -221,8 +231,13 @@ class ActionsTest {
     assertThat(refused.why())
         .isEqualTo("the robot is enabled, and team.hello doesn't say whileEnabled");
     assertThat(refused.whenDone()).isDone();
-    assertThat(done(board.run("team.steady")).outcome())
-        .isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+    assertThat(refused.level()).isEqualTo(Level.FAILING);
+    assertThat(refused.reason()).isEqualTo(refused.why());
+    Run steady = done(board.run("team.steady"));
+    assertThat(steady.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+    // Completed, its response within its limits: ok.
+    assertThat(steady.level()).isEqualTo(Level.OK);
+    assertThat(steady.reason()).isEmpty();
 
     enabled.set(false);
     field.set(true);

@@ -277,7 +277,10 @@ class ManagerContainerTest {
       assertThat(board.description().getPushedPacks()).isEqualTo(hash);
       assertThat(pushed).containsExactly(hash);
       assertThat(coprocessor.run("ls", "/var/lib/frc-spotter/packs/team")).contains("greet");
-      assertThat(manager.alerts()).noneMatch(alert -> alert.text().contains("packs"));
+      // Its packs are the robot's: no alert says they differ. (Its problems, the packs its image
+      // holds that it mustn't trust, are a warning of their own.)
+      assertThat(manager.alerts())
+          .noneMatch(alert -> alert.text().startsWith("vision-managed's packs"));
     }
   }
 }

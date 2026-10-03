@@ -595,6 +595,48 @@ class PackReaderTest {
   }
 
   @Test
+  void aPackNestedDeeperThanAnyNeedsIsRefusedBeforeItsBuilt() {
+    assertThat(problems("p", "pack: p\nversion: " + "[".repeat(33) + "]".repeat(33) + "\n"))
+        .containsExactly(
+            PACKS + "/p/pack.yaml:2: nested deeper than 32 (a pack needs five or six)");
+    // Deep enough to overflow the agent's stack, were it composed: refused all the same, at once.
+    assertThat(problems("p", "pack: p\nversion: " + "[".repeat(100_000)))
+        .containsExactly(
+            PACKS + "/p/pack.yaml:2: nested deeper than 32 (a pack needs five or six)");
+  }
+
+  @Test
+  void aPacksListsFieldsAndTextsAreBounded() {
+    StringBuilder many = new StringBuilder("pack: p\ncollectors:\n");
+    for (int i = 0; i <= PackReader.MAX_COLLECTORS; i++) {
+      many.append("  - {id: c")
+          .append(i)
+          .append(", file: /proc/uptime, every: 1s,")
+          .append(" fields: {s: {type: number}}}\n");
+    }
+    assertThat(problems("p", many.toString()))
+        .containsExactly(PACKS + "/p/pack.yaml:2: a pack has at most 64 collectors, not 65");
+
+    StringBuilder fields = new StringBuilder("pack: p\ncollectors:\n  - id: c\n");
+    fields.append("    file: /proc/uptime\n    every: 1s\n    fields:\n");
+    for (int i = 0; i <= PackReader.MAX_FIELDS; i++) {
+      fields.append("      f").append(i).append(": {type: number}\n");
+    }
+    assertThat(problems("p", fields.toString()))
+        .containsExactly(PACKS + "/p/pack.yaml:6: collector c has at most 64 fields, not 65");
+
+    String label = "x".repeat(PackReader.MAX_TEXT + 1);
+    assertThat(
+            problems(
+                "p",
+                "pack: p\ncollectors:\n  - id: c\n    file: /proc/uptime\n    every: 1s\n"
+                    + "    fields:\n      s: {type: number, label: "
+                    + label
+                    + "}\n"))
+        .containsExactly(PACKS + "/p/pack.yaml:7: label is 1025 characters, more than 1024");
+  }
+
+  @Test
   void nothingButAMappingIsAPack() {
     assertThatThrownBy(() -> read("p", "")).isInstanceOf(PackException.class);
     assertThat(problems("p", "pack: p\ncollectors: x\n"))

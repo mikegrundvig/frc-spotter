@@ -10,8 +10,8 @@ when it last did. A brownout resets USB cameras and can corrupt an SD card, so a
 
 **How:** `./undervoltage` counts the kernel's `Undervoltage detected!` lines in this boot's log
 (`journalctl -k -b`). Read unprivileged, with the `systemd-journal` group the agent's package gives
-its user; not with `vcgencmd`, which needs the `video` group and a device the agent's sandbox
-closes.
+its user; not with `vcgencmd`, which needs the `video` group and `/dev/vcio`, a device the agent's
+sandbox closes (a drop-in could open it: `docs/agent.md`, *Giving a pack more*).
 
 **Checked against the Raspberry Pi kernel's source (rpi-6.12.y), not on a board:**
 

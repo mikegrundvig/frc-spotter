@@ -51,8 +51,24 @@ class WritesContainerTest {
       assertThat(write(stranger, "POST", agent + "/v2/actions/standin.fail")).isEqualTo("403");
       assertThat(write(stranger, "DELETE", agent + "/v2/runs/0123456789abcdef")).isEqualTo("403");
       assertThat(write(stranger, "POST", agent + "/v2/packs")).isEqualTo("403");
-      assertThat(write(controller, "POST", agent + "/v2/actions/standin.fail")).isEqualTo("202");
-      assertThat(write(controller, "DELETE", agent + "/v2/runs/0123456789abcdef")).isEqualTo("404");
+      // A controller only worked out from the board's address (on any 10.x network, a school's
+      // included) runs the built-in actions alone: a pack's action, a cancel, a push are refused.
+      assertThat(write(controller, "POST", agent + "/v2/actions/standin.fail")).isEqualTo("403");
+      assertThat(write(controller, "DELETE", agent + "/v2/runs/0123456789abcdef")).isEqualTo("403");
+      assertThat(write(controller, "POST", agent + "/v2/packs")).isEqualTo("403");
+      Container.ExecResult why =
+          controller.execInContainer(
+              "curl",
+              "-s",
+              "-H",
+              "Accept: application/json",
+              "-X",
+              "POST",
+              agent + "/v2/actions/standin.fail");
+      assertThat(why.getStdout())
+          .contains(
+              "this board takes only its built-in actions from a robot controller it works out"
+                  + " from its own address (10.99.71.2)");
       // Reading is open to anyone.
       Container.ExecResult read =
           stranger.execInContainer(
@@ -60,6 +76,40 @@ class WritesContainerTest {
       assertThat(read.getStdout()).contains("\"hostname\": \"vision-writes\"");
       assertThat(coprocessor.run("journalctl", "-u", "frc-spotter", "--no-pager"))
           .contains("from " + Images.address(50) + ": not the robot controller");
+    }
+  }
+
+  @Test
+  void aBoardWhoseSettingsNameItsTeamTakesEveryWriteFromItsController() throws Exception {
+    try (Network network = TestNetwork.create();
+        Coprocessor coprocessor =
+            new Coprocessor(
+                TestImages.agentWith("{\"team\": " + Images.TEAM + "}"),
+                network,
+                64,
+                "vision-team");
+        GenericContainer<?> controller = computer(network, 2);
+        GenericContainer<?> stranger = computer(network, 50)) {
+      coprocessor.start();
+      controller.start();
+      stranger.start();
+      String agent = "http://" + Images.address(64) + ":5808";
+      assertThat(write(stranger, "POST", agent + "/v2/actions/standin.fail")).isEqualTo("403");
+      assertThat(write(controller, "POST", agent + "/v2/actions/standin.fail")).isEqualTo("202");
+      assertThat(write(controller, "DELETE", agent + "/v2/runs/0123456789abcdef")).isEqualTo("404");
+      // A push is taken, and read: this one's body isn't a bundle.
+      Container.ExecResult push =
+          controller.execInContainer(
+              "curl",
+              "-s",
+              "-o",
+              "/dev/null",
+              "-w",
+              "%{http_code}",
+              "--data-binary",
+              "zip",
+              agent + "/v2/packs");
+      assertThat(push.getStdout()).isEqualTo("400");
     }
   }
 

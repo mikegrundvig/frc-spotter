@@ -21,6 +21,8 @@ quickbuf = "1.4"
 avaje-jsonb = "3.14"
 # Packs (YAML 1.2, safe by default).
 snakeyaml-engine = "3.1.1"
+# Tests only: reads spotter.proto's own descriptor, to check WireCheck's table against it.
+protobuf-java = "4.36.2"
 
 [libraries]
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
@@ -36,6 +38,7 @@ testcontainers-toxiproxy = { module = "org.testcontainers:testcontainers-toxipro
 quickbuf-runtime = { module = "us.hebi.quickbuf:quickbuf-runtime", version.ref = "quickbuf" }
 avaje-jsonb = { module = "io.avaje:avaje-jsonb", version.ref = "avaje-jsonb" }
 snakeyaml-engine = { module = "org.snakeyaml:snakeyaml-engine", version.ref = "snakeyaml-engine" }
+protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf-java" }
 
 [plugins]
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

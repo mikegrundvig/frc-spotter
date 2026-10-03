@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeSet;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -40,6 +42,7 @@ final class Agent implements AutoCloseable {
   private final @Nullable String controllerOverride;
   private Spotter.@Nullable Description description;
   private long describedNanos;
+  private volatile boolean closed;
 
   /**
    * An agent on a board.
@@ -76,12 +79,19 @@ final class Agent implements AutoCloseable {
 
   /**
    * Takes up the runs a previous agent kept, tidies pushed bundles, and starts the collectors on
-   * their schedules.
+   * their schedules; once it has been up {@link LastGood#HEALTHY}, this start counts as good.
    */
   void start() {
     runs.restore();
     push.tidy();
     collectors.start();
+    CompletableFuture.delayedExecutor(LastGood.HEALTHY.toMillis(), TimeUnit.MILLISECONDS)
+        .execute(
+            () -> {
+              if (!closed) {
+                LastGood.healthy(host);
+              }
+            });
   }
 
   /** The settings and packs it read. */
@@ -181,8 +191,11 @@ final class Agent implements AutoCloseable {
    *
    * @param address the address; empty when there's none, and none is taken
    * @param why where the address came from, or why there's none
+   * @param named whether it's named (on the command line, or in the settings), rather than worked
+   *     out from the board's own address: only a named one may push packs, or run more than the
+   *     built-in actions
    */
-  record Controller(String address, String why) {}
+  record Controller(String address, String why, boolean named) {}
 
   /**
    * The one address a write is taken from: the command line's, else the settings', else the robot
@@ -192,10 +205,11 @@ final class Agent implements AutoCloseable {
    */
   Controller controller() throws IOException {
     if (controllerOverride != null) {
-      return new Controller(controllerOverride, "named on the command line");
+      return new Controller(controllerOverride, "named on the command line", true);
     }
-    if (!configuration.config().controller().isEmpty()) {
-      return new Controller(configuration.config().controller(), "named in " + AgentConfig.PATH);
+    if (!configuration.config().namedController().isEmpty()) {
+      return new Controller(
+          configuration.config().namedController(), "named in " + AgentConfig.PATH, true);
     }
     TreeSet<String> networks = new TreeSet<>();
     for (String address : host.addresses()) {
@@ -209,20 +223,23 @@ final class Agent implements AutoCloseable {
           "",
           "this computer has no 10.TE.AM.x address to find the robot controller (10.TE.AM."
               + Protocol.CONTROLLER
-              + ") by; name it in "
-              + AgentConfig.PATH
-              + " if it's elsewhere");
+              + ") by; name it, or the team, in "
+              + AgentConfig.PATH,
+          false);
     }
     if (networks.size() > 1) {
       return new Controller(
           "",
           "this computer has addresses on more than one 10.x network ("
               + String.join(", ", networks.stream().map(n -> n + ".x").toList())
-              + "), so which robot controller it answers to isn't clear; name it in "
-              + AgentConfig.PATH);
+              + "), so which robot controller it answers to isn't clear; name it, or the team, in "
+              + AgentConfig.PATH,
+          false);
     }
     return new Controller(
-        networks.first() + "." + Protocol.CONTROLLER, "the robot controller on its own network");
+        networks.first() + "." + Protocol.CONTROLLER,
+        "the robot controller on its own network",
+        false);
   }
 
   /** The names this computer answers to: its hostname, and its hostname in .local. */
@@ -233,6 +250,7 @@ final class Agent implements AutoCloseable {
 
   @Override
   public void close() {
+    closed = true;
     collectors.close();
     runs.close();
     commands.close();

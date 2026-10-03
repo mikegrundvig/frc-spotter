@@ -236,4 +236,75 @@ class PushTest {
         .startsWith("the team's Spotter packs can't be read (")
         .endsWith("): nothing is pushed");
   }
+
+  /** A pack of one value, its script printing it: {@code <name>.health.answer}. */
+  private static void pack(Path folder, String name, int answer) throws Exception {
+    Path pack = folder.resolve(name);
+    Files.createDirectories(pack);
+    Files.writeString(pack.resolve("pack.yaml"), TEAM.replace("pack: team", "pack: " + name));
+    // No execute bit, as a deploy may leave it: its #! carries it.
+    Files.writeString(pack.resolve("health"), "#!/bin/sh\necho '{\"answer\": " + answer + "}'\n");
+  }
+
+  @Test
+  void eachBoardGetsThePacksEveryBoardHasAndThoseNamedForIt() throws Exception {
+    Path all = dir.resolve("deploy/all-packs");
+    pack(all, "common", 1);
+    pack(all, "vision", 2);
+    pack(all, "detector", 3);
+    try (LocalAgent other = new LocalAgent(dir.resolve("other"), "detector-board")) {
+      agent.start();
+      other.start();
+      Manager both =
+          new Manager(
+              new Robot(enabled::get, field::get, System::nanoTime),
+              List.of(agent.address(), other.address()),
+              Settings.DEFAULTS
+                  .withPacks(all)
+                  .withBoardPacks(agent.address(), "vision")
+                  .withBoardPacks(other.address(), "detector")
+                  .withKey(dir.resolve("no.key")),
+              Recorder.NONE);
+      manager = both;
+      both.start();
+      Board vision = both.boards().get(0);
+      Board detector = both.boards().get(1);
+      await(
+          both,
+          "each board's packs",
+          () ->
+              vision.value("vision.health.answer") != null
+                  && detector.value("detector.health.answer") != null);
+      assertThat(vision.description().getPacks())
+          .extracting(pack -> pack.getName())
+          .containsExactly("common", "vision");
+      assertThat(detector.description().getPacks())
+          .extracting(pack -> pack.getName())
+          .containsExactly("common", "detector");
+      assertThat(vision.description().getPushedPacks())
+          .isNotEqualTo(detector.description().getPushedPacks());
+      assertThat(both.alerts()).isEmpty();
+    }
+  }
+
+  @Test
+  void packsNamedForABoardThatIsntOneOrAPackThatIsntThereAreSaid() throws Exception {
+    agent.start();
+    Manager manager =
+        manage(
+            Settings.DEFAULTS
+                .withBoardPacks(agent.address(), "team", "nothing")
+                .withBoardPacks("10.26.11.13", "team"));
+    await(manager, "described", () -> manager.boards().get(0).description().getRevision() != 0);
+    assertThat(manager.alerts())
+        .extracting(Alert::text)
+        .contains(
+            "Spotter's packs for 10.26.11.13 name a board the manager wasn't given: none of its"
+                + " addresses is 10.26.11.13",
+            "Spotter's packs for "
+                + agent.address()
+                + " name nothing, which isn't among the team's packs ("
+                + packs
+                + ")");
+  }
 }

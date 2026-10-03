@@ -41,6 +41,11 @@ end0]`.
 or more severe: `./journal` runs `journalctl -o json` by what the agent asks in `SPOTTER_*`. Reading
 the system journal takes the `systemd-journal` group, which the agent's package gives its user.
 
+**The auth facilities are left out:** anyone on the robot's network may page a log, and the
+journal's `auth` and `authpriv` lines (logins, sudo, sshd) carry user names, addresses and command
+lines. A board whose owner wants them anyway gives the script `--with-auth` first:
+`run: [./journal, --with-auth]`.
+
 ## Installing it
 
 It's a folder: copy it to `/etc/frc-spotter/packs/debian/`, root's and written by root alone (the
@@ -55,25 +60,35 @@ sudo systemctl restart frc-spotter
 
 Or the robot pushes it: put the folder in the robot program's packs folder (`docs/robot.md`). A
 pushed pack can't install the timer below, so its drive values are unavailable unless the board's
-installer added the timer too.
+installer added the timer too, from a copy of its own.
 
 ### The drive's health: a root timer
 
 Reading an NVMe drive's SMART log takes root, which the agent hasn't. So `drive-health`, run as root
 each minute by `frc-spotter-debian-drive.timer`, writes `/run/frc-spotter-debian/drive.json` for
 the agent to read. It needs nvme-cli (`apt install nvme-cli`). Spotter doesn't install it: the
-board's installer does, once:
+board's installer does, once, from the pack's folder (installed, or a checkout of the catalog):
 
 ```sh
 sudo apt install nvme-cli
-sudo cp /etc/frc-spotter/packs/debian/frc-spotter-debian-drive.service \
-        /etc/frc-spotter/packs/debian/frc-spotter-debian-drive.timer /etc/systemd/system/
+# The script root runs: a copy of root's own, outside both pack folders.
+sudo install -D -o root -g root -m 0755 debian/drive-health \
+     /usr/local/lib/frc-spotter-debian/drive-health
+sudo install -o root -g root -m 0644 debian/frc-spotter-debian-drive.service \
+     debian/frc-spotter-debian-drive.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now frc-spotter-debian-drive.timer
 ```
 
-The service runs `/etc/frc-spotter/packs/debian/drive-health /dev/nvme0`: a pack installed
-elsewhere, or a drive by another name, changes its `ExecStart`. Without the drive or nvme-cli it
+**Root runs only a copy of root's own**, `/usr/local/lib/frc-spotter-debian/drive-health`, outside
+both pack folders. Never point the timer at a pack's folder: a pushed pack's
+(`/var/lib/frc-spotter/packs/`) is the agent's, and the next push puts whatever it brings there, so
+root would run it each minute. Copy the script again when the pack's changes.
+
+The service runs it as `drive-health /dev/nvme0`: a drive by another name changes its `ExecStart`
+and its `DeviceAllow`. It runs with only what reading a drive's SMART log needs: `CAP_SYS_ADMIN`
+alone (for the NVMe admin command), that one device read-only, no network, the kernel's tunables,
+logs and clock out of reach, and the system calls a service makes. Without the drive or nvme-cli it
 writes no file, and the drive values say so. It writes the file whole, then renames it, so the
 agent never reads half of one.
 

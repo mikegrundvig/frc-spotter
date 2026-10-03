@@ -11,10 +11,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -34,13 +31,10 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>{@link #update}, and everything it updates (each {@link Board}, its {@link Value}s, the
  * alerts), belong to one thread, the robot loop's. In steady state an update allocates nothing, nor
- * does a board's thread decoding its stream. Requests (a log page, a run, a push) go on the
- * manager's own threads.
+ * does a board's thread decoding its stream. Requests (a log page, a run, a push) go on each
+ * board's own request threads, a few at most, each request within a deadline.
  */
 public final class Manager implements AutoCloseable {
-  /** How long a request thread waits for another request before it ends. */
-  private static final long IDLE_SECONDS = 30;
-
   private final Robot robot;
   private final Settings settings;
   private final Board[] boards;
@@ -48,10 +42,12 @@ public final class Manager implements AutoCloseable {
   private final Link[] links;
   private final long missing;
   private final Spotter.Description[] seen;
-  private final ExecutorService requests;
+  private final ScheduledThreadPoolExecutor deadlines;
   private final @Nullable Signer signer;
   private final String keyProblem;
   private final String packsProblem;
+  private final @Nullable TeamPacks teamPacks;
+  private final List<String> tooLarge = new ArrayList<>();
   private long started;
   private boolean running;
   private boolean settled;
@@ -101,18 +97,17 @@ public final class Manager implements AutoCloseable {
       }
     }
     packsProblem = problem;
-    requests =
-        new ThreadPoolExecutor(
-            0,
-            Integer.MAX_VALUE,
-            IDLE_SECONDS,
-            TimeUnit.SECONDS,
-            new SynchronousQueue<>(),
+    teamPacks = packs;
+    // Each request's deadline: one thread for all of them, a cancelled one gone at once.
+    deadlines =
+        new ScheduledThreadPoolExecutor(
+            1,
             work -> {
-              Thread thread = new Thread(work, "Spotter requests");
+              Thread thread = new Thread(work, "Spotter deadlines");
               thread.setDaemon(true);
               return thread;
             });
+    deadlines.setRemoveOnCancelPolicy(true);
     Set<String> given = new HashSet<>();
     boards = new Board[agents.size()];
     links = new Link[agents.size()];
@@ -122,7 +117,18 @@ public final class Manager implements AutoCloseable {
         throw new IllegalArgumentException("an agent's address is given twice: " + address);
       }
       boards[i] = new Board(address, settings);
-      links[i] = new Link(boards[i], robot, settings, recorder, packs, signer, requests);
+      // Its packs: those every board has, and those named for it.
+      TeamPacks its = packs == null ? null : packs.select(pack -> settings.packFor(address, pack));
+      if (its != null && !its.tooLarge().isEmpty()) {
+        tooLarge.add(
+            "the team's Spotter packs for "
+                + address
+                + " are "
+                + its.tooLarge()
+                + ": nothing is pushed to it");
+        its = null;
+      }
+      links[i] = new Link(boards[i], robot, settings, recorder, its, signer, deadlines);
     }
     boardList = List.of(boards);
     seen = new Spotter.Description[boards.length];
@@ -201,6 +207,36 @@ public final class Manager implements AutoCloseable {
               "",
               "the team's Spotter packs can't be read (" + packsProblem + "): nothing is pushed"));
     }
+    for (String each : tooLarge) {
+      found.add(new Alert(Level.WARNING, "", each));
+    }
+    for (String address : new TreeSet<>(settings.boardPacks().keySet())) {
+      if (boardList.stream().noneMatch(board -> board.address().equals(address))) {
+        found.add(
+            new Alert(
+                Level.WARNING,
+                "",
+                "Spotter's packs for "
+                    + address
+                    + " name a board the manager wasn't given: none of its addresses is "
+                    + address));
+        continue;
+      }
+      for (String pack : new TreeSet<>(settings.boardPacks().get(address))) {
+        if (teamPacks == null || !teamPacks.names().contains(pack)) {
+          found.add(
+              new Alert(
+                  Level.WARNING,
+                  "",
+                  "Spotter's packs for "
+                      + address
+                      + " name "
+                      + pack
+                      + ", which isn't among the team's packs"
+                      + settings.packs().map(folder -> " (" + folder + ")").orElse("")));
+        }
+      }
+    }
     boolean signatures = false;
     for (Spotter.Description description : seen) {
       signatures |= description.getRequiresSignatures();
@@ -251,9 +287,10 @@ public final class Manager implements AutoCloseable {
 
   /**
    * The current alerts, as of the last {@link #update}, board by board in the order given: one per
-   * missing board, or board on another protocol; otherwise one per value at warning or failing, and
-   * one for packs that differ from the robot's and won't be pushed now. Then robot code's own: its
-   * key, its packs, and limit overrides that match nothing. The same list until one changes.
+   * missing board, or board on another protocol; otherwise one per value at warning or failing, one
+   * for packs that differ from the robot's and won't be pushed now, and one while it reports
+   * problems. Then robot code's own: its key, its packs, and limit overrides that match nothing.
+   * The same list until one changes.
    */
   public List<Alert> alerts() {
     return alerts;
@@ -295,7 +332,7 @@ public final class Manager implements AutoCloseable {
     for (Link link : links) {
       link.close();
     }
-    requests.shutdownNow();
+    deadlines.shutdownNow();
     for (Link link : links) {
       try {
         link.join(1000);

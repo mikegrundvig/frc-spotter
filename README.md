@@ -28,25 +28,34 @@ curl -H 'Accept: application/json' http://<board>:5808/v2/values
 
 Use `amd64` in the package's name on x86. A browser gets protobuf, so `curl` with that header is
 the way to read it by hand. Its name is the computer's hostname. It takes writes (actions, pushes)
-only from the robot controller, 10.TE.AM.2 on the network of its own 10.TE.AM.x address, and,
-when the board's `/etc/frc-spotter/agent.json` lists trusted keys, only when they're signed.
+only from the robot controller, and, when the board's `/etc/frc-spotter/agent.json` lists trusted
+keys, only when they're signed. Name the team there, so it knows its controller (10.TE.AM.2) for
+sure: with nothing named, it works the controller out from its own 10.x address and takes only
+power-off and reboot from it, no pushes and no pack's actions.
+
+```sh
+# 3. Name the robot's team: the board then takes pushes and the packs' actions from its controller.
+echo '{"team": 2611}' | sudo tee /etc/frc-spotter/agent.json
+sudo systemctl restart frc-spotter
+```
 
 **A pack is a folder**, `<name>/pack.yaml` beside the scripts it runs, in `/etc/frc-spotter/packs/`
 (installed, root's) or `/var/lib/frc-spotter/packs/` (pushed by the robot). The agent reads them as
 it starts (`sudo systemctl restart frc-spotter` after changing them); an installed pack that anyone
 but root could change, or that names such a program, is ignored, and the description's `problems`
-says why. `docs/agent.md` has the format. The catalog, `packs/`, has ready-made packs to copy in
+says why. `docs/agent.md` has the format; `spotter-tools check` (`docs/tools.md`) checks a pack
+on any computer, and `spotter-tools status` reads a board. The catalog, `packs/`, has ready-made packs to copy in
 (`debian` for a board's own health and journal, `photonvision`, `raspberry-pi`); none is installed
 by default.
 
 ## The robot's side
 
-The robot program's manager, `:manager` (`com.michaelgrundvig.frc:spotter-manager` in Spotter's Maven
-repository at `https://mikegrundvig.github.io/frc-spotter/maven`), keeps each agent's stream open on
-a thread of its own, judges each value against its limits (or robot code's), and gives the robot
+The robot program's manager, `:spotter-manager` (`com.michaelgrundvig.frc:spotter-manager` in
+Spotter's Maven repository at `https://mikegrundvig.github.io/frc-spotter/maven`), keeps each
+agent's stream open on a thread of its own, judges each value against its limits (or robot code's), and gives the robot
 loop each board's state and the current alerts as data, without waiting on the network or making
 garbage. It pages a board's logs, runs its actions, pushes the team's packs (off the field), and
-signs its writes for boards that require it. It needs nothing but `:protocol` (`spotter-protocol`):
+signs its writes for boards that require it. It needs nothing but `:spotter-protocol`:
 the generated messages, and the pack hash both sides compute. `docs/robot.md` has it all. 0.3's
 client, and the `spotter-api` and `spotter-client` artifacts, are gone with protocol 1.
 
@@ -64,6 +73,8 @@ tmpfiles entry, and install script. `SHA256SUMS` has their checksums. Image buil
 - `protocol/`: the protocol (`spotter.proto`) and the code the agent and the manager share;
 - `agent/`: the agent, its systemd unit, polkit rules, and package (`docs/agent.md`);
 - `manager/`: the robot program's manager (`docs/robot.md`);
+- `tools/`: the tools for a pack's author and a board's installer: check packs, read a board
+  (`docs/tools.md`);
 - `packs/`: the catalog of packs to copy in (`packs/README.md`);
 - `harness/`: container tests of the agent and the catalog's packs, and a library a pack's own
   tests use.
@@ -72,8 +83,19 @@ tmpfiles entry, and install script. `SHA256SUMS` has their checksums. Image buil
 
 `./gradlew ci` runs every check: formatting, static analysis, the tests (with the container tests,
 when Docker or Podman is there), and coverage. Java 25 is downloaded if it's missing; the code is
-compiled for Java 17, so the agent also runs on a board's own Java. `./gradlew :agent:agentRelease`
-builds the agent's packages for the computer it runs on.
+compiled for Java 17, so the agent also runs on a board's own Java.
+`./gradlew :spotter-agent:agentRelease` builds the agent's packages for the computer it runs on.
+
+Every dependency, plugin and tool Gradle downloads is checked against its SHA-256 in
+`gradle/verification-metadata.xml`, so one that changes on a server fails the build. After changing
+a version in `gradle/libs.versions.toml`, write the file again from a build that resolves everything
+(`gradle/every-platform.gradle` adds protoc and QuickBuffers' generator for each platform), and read
+the diff:
+
+```sh
+./gradlew --write-verification-metadata sha256 --init-script gradle/every-platform.gradle \
+  ci :spotter-agent:agentRelease :spotter-tools:allJar :spotter-protocol:resolveEveryPlatform
+```
 
 ## License
 

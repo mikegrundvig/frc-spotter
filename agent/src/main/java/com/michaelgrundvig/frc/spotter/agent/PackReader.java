@@ -18,6 +18,10 @@ import org.jspecify.annotations.Nullable;
 import org.snakeyaml.engine.v2.api.Load;
 import org.snakeyaml.engine.v2.api.LoadSettings;
 import org.snakeyaml.engine.v2.api.lowlevel.Compose;
+import org.snakeyaml.engine.v2.api.lowlevel.Parse;
+import org.snakeyaml.engine.v2.events.CollectionEndEvent;
+import org.snakeyaml.engine.v2.events.CollectionStartEvent;
+import org.snakeyaml.engine.v2.events.Event;
 import org.snakeyaml.engine.v2.exceptions.MarkedYamlEngineException;
 import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 import org.snakeyaml.engine.v2.nodes.MappingNode;
@@ -32,6 +36,12 @@ import org.snakeyaml.engine.v2.schema.CoreSchema;
  * Reads a pack's {@code pack.yaml} (YAML 1.2's core schema, with snakeyaml-engine) into a {@link
  * Pack}, every problem with its file and line. Everything is checked as it's read, so a mistake
  * shows at its line, and a key nobody reads is a problem, so a misspelling can't pass silently.
+ *
+ * <p>Bounded, as a pushed pack is anyone's who can reach the controller's address: its file at most
+ * {@link Host#MAX_FILE}, nested at most {@link #MAX_DEPTH} deep (checked on snakeyaml-engine's own
+ * events before anything's built, as its composer recurses), at most {@link #MAX_COLLECTORS}
+ * collectors, {@link #MAX_LOGS} logs and {@link #MAX_ACTIONS} actions, {@link #MAX_FIELDS} fields
+ * to a collector or a response, and {@link #MAX_TEXT} characters to any text a description carries.
  */
 final class PackReader {
   /** What a pack's name may be: its folder's. */
@@ -54,6 +64,27 @@ final class PackReader {
 
   /** The longest a collector's timeout may be. */
   static final Duration MAX_COLLECTOR_TIMEOUT = Duration.ofHours(1);
+
+  /** How deep a pack's YAML may nest: a pack needs five or six. */
+  static final int MAX_DEPTH = 32;
+
+  /** The most collectors a pack may have. */
+  static final int MAX_COLLECTORS = 64;
+
+  /** The most logs a pack may have. */
+  static final int MAX_LOGS = 16;
+
+  /** The most actions a pack may have. */
+  static final int MAX_ACTIONS = 32;
+
+  /** The most fields a collector may fill, or an action's response may declare. */
+  static final int MAX_FIELDS = 64;
+
+  /**
+   * The most characters of any text a board's description carries: a label, a description, a
+   * prompt, a unit, a version, a comparison's text, a file's name.
+   */
+  static final int MAX_TEXT = 1024;
 
   static final Set<String> PACK_KEYS = Set.of("pack", "version", "collectors", "logs", "actions");
   static final Set<String> COLLECTOR_KEYS =
@@ -97,9 +128,27 @@ final class PackReader {
 
   private final String source;
   private final List<String> problems = new ArrayList<>();
+  private final @Nullable Checks checks;
 
-  private PackReader(String source) {
+  private PackReader(String source, @Nullable Checks checks) {
     this.source = source;
+    this.checks = checks;
+  }
+
+  /**
+   * What a check off any board looks for, beyond what the agent refuses (spotter-tools' check):
+   * mistakes the agent takes but a pack shouldn't have, each a problem at its line, and notes. Null
+   * on a board, where only what the agent refuses counts.
+   */
+  interface Checks {
+    /**
+     * Why a program a pack names as its own ({@code ./name}, relative to its folder) won't run once
+     * pushed; null when it will.
+     */
+    @Nullable String program(String relative);
+
+    /** A note at its line: worth knowing, never a problem. */
+    void note(String note);
   }
 
   /**
@@ -111,12 +160,26 @@ final class PackReader {
    * @throws PackException listing every problem, each with its file and line
    */
   static Pack read(String yaml, String folder, boolean pushed) {
+    return read(yaml, folder, pushed, null);
+  }
+
+  /**
+   * Reads and checks a pack, and, given checks, looks for what a check off any board looks for
+   * besides.
+   *
+   * @param checks what more to look for; null for none, as on a board
+   * @throws PackException listing every problem, each with its file and line
+   */
+  static Pack read(String yaml, String folder, boolean pushed, @Nullable Checks checks) {
     String source = folder + "/" + Pack.FILE;
-    PackReader reader = new PackReader(source);
+    PackReader reader = new PackReader(source, checks);
     Optional<Node> root;
     try {
       LoadSettings settings = settings(source);
-      // Loaded first, so snakeyaml-engine refuses what YAML 1.2 does, a duplicate key among them
+      // Its depth first, on the parser's events, which build nothing and don't recurse: loading
+      // and composing recurse as deep as the YAML nests.
+      depth(yaml, settings, source);
+      // Loaded, so snakeyaml-engine refuses what YAML 1.2 does, a duplicate key among them
       // (which only loading checks); then composed, for its nodes' lines and text as written.
       new Load(settings).loadFromString(yaml);
       root = new Compose(settings).composeString(yaml);
@@ -138,6 +201,29 @@ final class PackReader {
       throw new PackException(reader.problems);
     }
     return pack;
+  }
+
+  /**
+   * Refuses YAML nested deeper than {@link #MAX_DEPTH}, from snakeyaml-engine's own parser events,
+   * before anything is built.
+   */
+  private static void depth(String yaml, LoadSettings settings, String source) {
+    int depth = 0;
+    for (Event event : new Parse(settings).parseString(yaml)) {
+      if (event instanceof CollectionStartEvent) {
+        if (++depth > MAX_DEPTH) {
+          throw new PackException(
+              List.of(
+                  source
+                      + event.getStartMark().map(m -> ":" + (m.getLine() + 1)).orElse("")
+                      + ": nested deeper than "
+                      + MAX_DEPTH
+                      + " (a pack needs five or six)"));
+        }
+      } else if (event instanceof CollectionEndEvent) {
+        depth--;
+      }
+    }
   }
 
   private static LoadSettings settings(String source) {
@@ -174,10 +260,13 @@ final class PackReader {
       }
       name = given;
     }
-    String version = optional(keys, "version").flatMap(n -> text(n, "version")).orElse("");
+    String version = optional(keys, "version").flatMap(n -> described(n, "version")).orElse("");
     // Names are unique where they're declared: collectors', logs' and actions' in the pack, fields'
     // in their collector or response (a mapping's keys, which loading checks).
     List<Pack.Collector> collectors = new ArrayList<>();
+    most(keys.get("collectors"), "collectors", MAX_COLLECTORS);
+    most(keys.get("logs"), "logs", MAX_LOGS);
+    most(keys.get("actions"), "actions", MAX_ACTIONS);
     for (Node item : sequence(keys.get("collectors"), "collectors")) {
       Pack.Collector collector = collector(item);
       if (collector != null) {
@@ -240,9 +329,23 @@ final class PackReader {
           "collector " + id + " needs fields:, the values it fills");
     } else {
       Map<String, Fill.Part> parts = command == null ? Map.of() : Fill.parts(Fill.kind(command));
+      fields(declared, "collector " + id);
       for (NodeTuple each : entries((MappingNode) declared.getValueNode())) {
         String name = keyText(each);
         Fill.Part part = parts.get(name);
+        if (part != null && checks != null) {
+          checks.note(
+              at(each)
+                  + "collector "
+                  + id
+                  + "'s field "
+                  + name
+                  + " is its command's own "
+                  + (part == Fill.Part.CODE
+                      ? "exit code or HTTP status"
+                      : part == Fill.Part.WHOLE ? "whole output" : "outcome")
+                  + ", not a key of its output");
+        }
         // A named part is the command's, as an action's: a value's types are text and number.
         Field field =
             part == null
@@ -272,7 +375,7 @@ final class PackReader {
     int before = problems.size();
     Map<String, NodeTuple> keys = mapping((MappingNode) node, LOG_KEYS, "a log");
     String id = id(keys, node, "log");
-    String label = optional(keys, "label").flatMap(n -> text(n, "label")).orElse("");
+    String label = optional(keys, "label").flatMap(n -> described(n, "label")).orElse("");
     if (keys.containsKey("http")) {
       problem(
           keys.get("http"),
@@ -370,11 +473,11 @@ final class PackReader {
     }
     return new Pack.Action(
         id,
-        optional(keys, "label").flatMap(n -> text(n, "label")).orElse(""),
-        optional(keys, "description").flatMap(n -> text(n, "description")).orElse(""),
+        optional(keys, "label").flatMap(n -> described(n, "label")).orElse(""),
+        optional(keys, "description").flatMap(n -> described(n, "description")).orElse(""),
         command,
         input,
-        optional(keys, "confirm").flatMap(n -> text(n, "confirm")).orElse(""),
+        optional(keys, "confirm").flatMap(n -> described(n, "confirm")).orElse(""),
         timeout,
         whileEnabled,
         response);
@@ -398,6 +501,7 @@ final class PackReader {
       if (!(declared.getValueNode() instanceof MappingNode)) {
         problem(declared, "response is a mapping of fields: name: {type: ...}");
       } else {
+        fields(declared, "a response");
         for (NodeTuple each : entries((MappingNode) declared.getValueNode())) {
           String name = keyText(each);
           Set<String> types;
@@ -506,6 +610,12 @@ final class PackReader {
       problem(key, "run names a program first");
       return null;
     }
+    if (checks != null && argv.get(0).startsWith("./")) {
+      String why = checks.program(argv.get(0).substring(2));
+      if (why != null) {
+        problem(key, why);
+      }
+    }
     return new Command.Run(argv);
   }
 
@@ -598,6 +708,9 @@ final class PackReader {
       problem(entry, "field \"" + name + "\" isn't a name: letters, digits, and . _ -");
       return null;
     }
+    if (checks != null && name.contains(".")) {
+      problem(entry, dotted("field", name));
+    }
     if (!(entry.getValueNode() instanceof MappingNode)) {
       problem(entry, "field " + name + " is a mapping: {type: ..., label: ...}");
       return null;
@@ -620,7 +733,7 @@ final class PackReader {
         type = named;
       }
     }
-    String fileName = optional(keys, "name").flatMap(n -> text(n, "name")).orElse("");
+    String fileName = optional(keys, "name").flatMap(n -> described(n, "name")).orElse("");
     if (keys.containsKey("name") && !typeName.equals("file")) {
       problem(keys.get("name"), "name is the file a file field downloads as");
     }
@@ -631,9 +744,9 @@ final class PackReader {
     }
     return new Field(
         name,
-        optional(keys, "label").flatMap(n -> text(n, "label")).orElse(""),
+        optional(keys, "label").flatMap(n -> described(n, "label")).orElse(""),
         type,
-        optional(keys, "unit").flatMap(n -> text(n, "unit")).orElse(""),
+        optional(keys, "unit").flatMap(n -> described(n, "unit")).orElse(""),
         warn,
         fail,
         fileName);
@@ -668,6 +781,18 @@ final class PackReader {
         }
       }
     }
+    if (checks != null && type == Spotter.FieldType.FIELD_TYPE_STATUS) {
+      for (String compared : List.of("equals", "notEquals")) {
+        NodeTuple at = keys.get(compared);
+        if (at != null) {
+          problem(
+              at,
+              compared
+                  + " on a status is never applied: a status's level is its script's, and only"
+                  + " missing applies to one");
+        }
+      }
+    }
     NodeTuple equals = keys.get("equals");
     if (equals != null) {
       Spotter.Scalar scalar = scalar(equals.getValueNode(), type, "equals");
@@ -698,7 +823,9 @@ final class PackReader {
     if (type == Spotter.FieldType.FIELD_TYPE_BOOLEAN) {
       return Spotter.Scalar.newInstance().setFlag(bool(node, what));
     }
-    return text(node, what).map(text -> Spotter.Scalar.newInstance().setText(text)).orElse(null);
+    return described(node, what)
+        .map(text -> Spotter.Scalar.newInstance().setText(text))
+        .orElse(null);
   }
 
   // ---- scalars ----
@@ -712,6 +839,8 @@ final class PackReader {
     String id = text(key.getValueNode(), "id").orElse("");
     if (!ID.matcher(id).matches()) {
       problem(key, what + " id \"" + id + "\" isn't a name: letters, digits, and . _ -");
+    } else if (checks != null && id.contains(".")) {
+      problem(key, dotted(what + " id", id));
     }
     return id;
   }
@@ -805,6 +934,40 @@ final class PackReader {
     return Optional.of(((ScalarNode) node).getValue());
   }
 
+  /** Text a description carries: as {@link #text}, and at most {@link #MAX_TEXT} characters. */
+  private Optional<String> described(Node node, String what) {
+    Optional<String> text = text(node, what);
+    if (text.isPresent() && text.get().length() > MAX_TEXT) {
+      problem(node, what + " is " + text.get().length() + " characters, more than " + MAX_TEXT);
+      return Optional.empty();
+    }
+    return text;
+  }
+
+  /** A problem when a list has more than its most. */
+  private void most(@Nullable NodeTuple key, String what, int most) {
+    if (key != null
+        && key.getValueNode() instanceof SequenceNode
+        && ((SequenceNode) key.getValueNode()).getValue().size() > most) {
+      problem(
+          key,
+          "a pack has at most "
+              + most
+              + " "
+              + what
+              + ", not "
+              + ((SequenceNode) key.getValueNode()).getValue().size());
+    }
+  }
+
+  /** A problem when a collector or a response declares more than the most fields. */
+  private void fields(NodeTuple key, String what) {
+    int count = ((MappingNode) key.getValueNode()).getValue().size();
+    if (count > MAX_FIELDS) {
+      problem(key, what + " has at most " + MAX_FIELDS + " fields, not " + count);
+    }
+  }
+
   // ---- mappings and sequences ----
 
   /** A mapping's entries by key, each key known, none twice. */
@@ -871,6 +1034,20 @@ final class PackReader {
   }
 
   // ---- problems ----
+
+  /** Why a name with a dot is a mistake: a value's id joins names with dots. */
+  private static String dotted(String what, String name) {
+    return what
+        + " \""
+        + name
+        + "\" has a dot, so its values' ids (pack.collector.field) can read two ways: use - or _";
+  }
+
+  /** Where a node is, as a problem starts: {@code file:line: }. */
+  private String at(NodeTuple entry) {
+    int line = entry.getKeyNode().getStartMark().map(m -> m.getLine() + 1).orElse(0);
+    return source + (line > 0 ? ":" + line : "") + ": ";
+  }
 
   private void problem(@Nullable NodeTuple entry, String message) {
     problem(entry == null ? null : entry.getKeyNode(), message);

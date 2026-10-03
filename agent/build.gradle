@@ -31,7 +31,7 @@ repositories {
 }
 
 dependencies {
-    implementation project(":protocol")
+    implementation project(":spotter-protocol")
     // Only its mapper (avaje-json-core's) is used; its avaje-inject plugin isn't.
     implementation(libs.avaje.jsonb) {
         exclude group: "io.avaje", module: "avaje-jsonb-inject-plugin"
@@ -80,8 +80,8 @@ apply from: rootProject.file("gradle/quality.gradle")
 
 // ---- The agent's package (docs/agent.md, "The agent's package") ----
 //
-//   ./gradlew :agent:agentPackage   the package's files as installed: build/package/root
-//   ./gradlew :agent:agentRelease   build/distributions: the .deb (where dpkg-deb is), the
+//   ./gradlew :spotter-agent:agentPackage   the package's files as installed: build/package/root
+//   ./gradlew :spotter-agent:agentRelease   build/distributions: the .deb (where dpkg-deb is), the
 //                                   tarball, and the -all.jar with its files
 //
 // One set of files three ways: a .deb with its own Java runtime, a tarball of the same for systems

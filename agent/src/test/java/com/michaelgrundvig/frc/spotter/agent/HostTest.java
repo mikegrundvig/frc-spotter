@@ -23,7 +23,8 @@ class HostTest {
     Files.writeString(file, "pack: vision\n");
     Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-rw-r--"));
     Host.Owner owner = host.owner("/etc/frc-spotter/packs/vision/pack.yaml");
-    assertThat(owner.uid()).isEqualTo((Integer) Files.getAttribute(file, "unix:uid"));
+    assertThat(owner.user()).isEqualTo(Files.getOwner(file).getName());
+    assertThat(owner.root()).isEqualTo(owner.user().equals("root"));
     assertThat(owner.mode()).isEqualTo(0664);
     assertThat(owner.writableByOthers()).isTrue();
     assertThat(host.list("/etc/frc-spotter/packs")).containsExactly("vision");

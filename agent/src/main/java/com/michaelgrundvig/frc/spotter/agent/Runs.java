@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
@@ -59,6 +61,9 @@ final class Runs implements AutoCloseable {
 
   /** How long a cancelled run has, once asked to stop, before it's killed. */
   static final Duration GRACE = Duration.ofSeconds(5);
+
+  /** How many runs' logs are read at once; another asked meanwhile is refused as busy. */
+  static final int LOGS_AT_ONCE = 2;
 
   /** What a run's id is: its start on the monotonic clock, and some randomness. */
   static final Pattern ID = Pattern.compile("[0-9a-f]{16}");
@@ -101,6 +106,8 @@ final class Runs implements AutoCloseable {
   private final Map<String, Declared> actions = new LinkedHashMap<>();
   private final LinkedHashMap<String, Kept> kept = new LinkedHashMap<>();
   private final SecureRandom random = new SecureRandom();
+  // Package-private, for a test to hold.
+  final Semaphore logReads = new Semaphore(LOGS_AT_ONCE);
   private final ExecutorService threads =
       Executors.newCachedThreadPool(
           work -> {
@@ -199,8 +206,9 @@ final class Runs implements AutoCloseable {
           write(path.resolve("state"), state);
           Files.deleteIfExists(path.resolve("input"));
         }
+        // Its log isn't read: a run taken up never logs again (one that was going is lost), so
+        // its count of lines is never needed.
         Kept restored = new Kept(run, state.getAction(), state);
-        restored.lines = read(path.resolve("log")).size();
         synchronized (this) {
           kept.put(run, restored);
         }
@@ -297,7 +305,9 @@ final class Runs implements AutoCloseable {
               run.cancellation);
       Files.write(folder.resolve("output"), result.output());
       state = finished(run.state, result, declared.action().response(), run.run);
-    } catch (IOException | RuntimeException e) {
+    } catch (Throwable e) {
+      // Whatever it meets, a stack overflow on a deeply nested output included, the run finishes
+      // and its slot is free again.
       host.log("Run " + run.run + " of " + run.action + " failed: " + e);
       state =
           finished(
@@ -366,7 +376,39 @@ final class Runs implements AutoCloseable {
     for (int i = 0; i < fields.size(); i++) {
       finished.addResponse(values.get(i).setName(fields.get(i).name()));
     }
-    return state.clone().setRunning(false).setResult(finished);
+    return state.clone().setRunning(false).setResult(bounded(finished));
+  }
+
+  /**
+   * A result within {@link Protocol#MAX_RESPONSE}, as a stream's event carries it: its largest
+   * fields made unavailable, saying why, until it fits. Its output stays whole in the run's folder,
+   * where a {@code file} field downloads it.
+   */
+  static Spotter.RunResult bounded(Spotter.RunResult result) {
+    while (result.getSerializedSize() > Protocol.MAX_RESPONSE) {
+      Spotter.FieldValue largest = null;
+      for (Spotter.FieldValue each : result.getMutableResponse()) {
+        if (largest == null || each.getSerializedSize() > largest.getSerializedSize()) {
+          largest = each;
+        }
+      }
+      if (largest == null || largest.getSerializedSize() < 1024) {
+        break;
+      }
+      int size = largest.getSerializedSize();
+      String name = largest.getName();
+      largest
+          .clear()
+          .setName(name)
+          .setUnavailable(
+              "too large to send: "
+                  + size / 1024
+                  + " KiB, more than the "
+                  + Protocol.MAX_RESPONSE / 1024
+                  + " KiB a run's response may be (declare the whole output type: file to"
+                  + " download it)");
+    }
+    return result;
   }
 
   /** Where a run's file fields are fetched. */
@@ -444,28 +486,36 @@ final class Runs implements AutoCloseable {
     throw new Refused(404, "run " + run + " has no file " + field);
   }
 
-  /** A page of a kept run's log. */
+  /**
+   * A page of a kept run's log: read as a stream, a page's worth held, at most {@link
+   * #LOGS_AT_ONCE} at once ({@code 503} past that).
+   */
   Spotter.LogPage log(String run, Logs.Paging paging) throws Refused, IOException {
     if (state(run).isEmpty()) {
       throw new Refused(404, "no run " + run + " is kept");
     }
-    return Logs.slice(read(folder().resolve(run).resolve("log")), paging);
-  }
-
-  private static List<Spotter.LogEntry> read(Path log) throws IOException {
-    List<Spotter.LogEntry> entries = new ArrayList<>();
-    if (!Files.exists(log)) {
-      return entries;
+    if (!logReads.tryAcquire()) {
+      throw new Refused(503, "as many runs' logs are being read as may; ask again shortly");
     }
-    try (InputStream in = new BufferedInputStream(Files.newInputStream(log))) {
-      ProtoSource source = ProtoSource.newInstance(in);
-      while (!source.isAtEnd()) {
-        entries.add(Spotter.LogEntry.newInstance().mergeDelimitedFrom(source));
+    try {
+      Logs.Slice slice = new Logs.Slice(paging);
+      Path log = folder().resolve(run).resolve("log");
+      if (Files.exists(log)) {
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(log))) {
+          ProtoSource source = ProtoSource.newInstance(in);
+          while (!source.isAtEnd()) {
+            if (!slice.take(Spotter.LogEntry.newInstance().mergeDelimitedFrom(source))) {
+              break;
+            }
+          }
+        } catch (IOException e) {
+          // The last entry was cut short as the agent stopped: the rest stand.
+        }
       }
-    } catch (IOException e) {
-      // The last entry was cut short as the agent stopped: the rest stand.
+      return slice.page();
+    } finally {
+      logReads.release();
     }
-    return entries;
   }
 
   /** Drops the oldest finished runs while the kept ones take more than the most kept. */
