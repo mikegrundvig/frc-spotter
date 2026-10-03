@@ -1,0 +1,13 @@
+# Reads the NVMe drive's health for the debian pack soon after boot, then each minute
+# (frc-spotter-debian-drive.service, README.md).
+
+[Unit]
+Description=Spotter's debian pack: read the NVMe drive's health each minute
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
