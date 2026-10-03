@@ -67,7 +67,7 @@ enum FieldType {
 
 // A value, or a field of an action's response.
 message FieldDeclaration {
-  string id = 1;                      // a value's "pack.field"; a response field's name
+  string id = 1;                      // a value's "pack.collector.field"; a response field's name
   string label = 2;
   FieldType type = 3;
   string unit = 4;

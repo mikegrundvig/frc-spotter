@@ -114,19 +114,19 @@ class AgentContainerTest {
     assertThat(description.getValues())
         .extracting(Spotter.FieldDeclaration::getId)
         .containsExactly(
-            "standin.running",
-            "standin.broken",
-            "standin.exit",
-            "standin.outcome",
-            "standin.status",
-            "standin.state",
-            "standin.uptime",
-            "standin.answer",
-            "standin.mood",
-            "standin.user",
-            "standin.slow",
-            "standin.front-camera",
-            "standin.second");
+            "standin.service.running",
+            "standin.broken.state",
+            "standin.broken.exit",
+            "standin.web.outcome",
+            "standin.web.status",
+            "standin.web.state",
+            "standin.uptime.seconds",
+            "standin.answer.answer",
+            "standin.answer.mood",
+            "standin.user.name",
+            "standin.slow.text",
+            "standin.gone.product",
+            "standin.ticker.second");
     assertThat(description.getLogs())
         .extracting(Spotter.LogDeclaration::getId)
         .containsExactly("standin.log");
@@ -151,23 +151,25 @@ class AgentContainerTest {
     StringBuilder said = new StringBuilder();
     values.forEach((id, value) -> said.append(id).append(": ").append(value).append('\n'));
     System.out.print(said);
-    assertThat(value(values, "standin.running").getText()).as(said.toString()).isEqualTo("active");
+    assertThat(value(values, "standin.service.running").getText())
+        .as(said.toString())
+        .isEqualTo("active");
     // systemctl is-active exits 3 for a failed unit, saying so: its words fill the value, and
     // its exit code the named part, for the pack's limit to judge.
-    assertThat(value(values, "standin.broken").getText()).isEqualTo("failed");
-    assertThat(value(values, "standin.exit").getNumber()).isEqualTo(3);
-    assertThat(value(values, "standin.outcome").getText()).isEqualTo("completed");
-    assertThat(value(values, "standin.status").getNumber()).isEqualTo(200);
-    assertThat(value(values, "standin.state").getText()).isEqualTo("up");
-    assertThat(value(values, "standin.uptime").getNumber()).isPositive();
-    assertThat(value(values, "standin.answer").getNumber()).isEqualTo(42);
-    assertThat(value(values, "standin.mood").getStatus().getLevel())
+    assertThat(value(values, "standin.broken.state").getText()).isEqualTo("failed");
+    assertThat(value(values, "standin.broken.exit").getNumber()).isEqualTo(3);
+    assertThat(value(values, "standin.web.outcome").getText()).isEqualTo("completed");
+    assertThat(value(values, "standin.web.status").getNumber()).isEqualTo(200);
+    assertThat(value(values, "standin.web.state").getText()).isEqualTo("up");
+    assertThat(value(values, "standin.uptime.seconds").getNumber()).isPositive();
+    assertThat(value(values, "standin.answer.answer").getNumber()).isEqualTo(42);
+    assertThat(value(values, "standin.answer.mood").getStatus().getLevel())
         .isEqualTo(Spotter.Level.LEVEL_OK);
-    assertThat(value(values, "standin.mood").getStatus().getMessage()).isEqualTo("fine");
+    assertThat(value(values, "standin.answer.mood").getStatus().getMessage()).isEqualTo("fine");
     // Commands run as the agent's own user, never root.
-    assertThat(value(values, "standin.user").getText()).isEqualTo("frc-spotter");
-    assertThat(value(values, "standin.slow").getUnavailable()).isEqualTo("timed out after 1s");
-    assertThat(value(values, "standin.front-camera").getUnavailable())
+    assertThat(value(values, "standin.user.name").getText()).isEqualTo("frc-spotter");
+    assertThat(value(values, "standin.slow.text").getUnavailable()).isEqualTo("timed out after 1s");
+    assertThat(value(values, "standin.gone.product").getUnavailable())
         .isEqualTo("no such file: /sys/bus/usb/devices/7-1/product");
     // The slow one's sleep was killed, not left running.
     assertThat(coprocessor.run("sh", "-c", "pgrep -u frc-spotter -x sleep | wc -l").strip())

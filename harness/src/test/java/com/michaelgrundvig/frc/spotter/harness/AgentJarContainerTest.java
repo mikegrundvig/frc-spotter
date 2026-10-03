@@ -42,7 +42,7 @@ class AgentJarContainerTest {
       assertThat(description.getIdentity().getHostname()).isEqualTo("vision-java17");
       assertThat(description.getIdentity().getOsRelease())
           .anyMatch(e -> e.getKey().equals("ID") && e.getValue().equals("ubuntu"));
-      assertThat(description.getValues().get(0).getId()).isEqualTo("standin.running");
+      assertThat(description.getValues().get(0).getId()).isEqualTo("standin.service.running");
       // The stand-in's software isn't on this computer: its pack's values say so.
       Map<String, Spotter.FieldValue> values = client.valuesById();
       for (int i = 0;
@@ -53,9 +53,9 @@ class AgentJarContainerTest {
         Thread.sleep(100);
         values = client.valuesById();
       }
-      assertThat(value(values, "standin.running").getText()).isEqualTo("inactive");
-      assertThat(value(values, "standin.outcome").getText()).isEqualTo("unreachable");
-      assertThat(value(values, "standin.state").getUnavailable())
+      assertThat(value(values, "standin.service.running").getText()).isEqualTo("inactive");
+      assertThat(value(values, "standin.web.outcome").getText()).isEqualTo("unreachable");
+      assertThat(value(values, "standin.web.state").getUnavailable())
           .startsWith("connection refused (localhost:5800)");
     }
   }

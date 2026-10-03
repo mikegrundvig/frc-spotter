@@ -72,7 +72,7 @@ final class Describer {
     }
     for (Collectors.Slot slot : Collectors.slots(packs.packs())) {
       for (Field field : slot.collector().fields()) {
-        description.addValues(field.declaration(slot.pack().name() + "." + field.name()));
+        description.addValues(field.declaration(slot.id(field)));
       }
     }
     for (Pack pack : packs.packs()) {

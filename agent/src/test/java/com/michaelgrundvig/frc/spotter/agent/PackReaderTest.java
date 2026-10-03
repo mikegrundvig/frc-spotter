@@ -48,7 +48,7 @@ class PackReaderTest {
     assertThat(cpu.command()).isEqualTo(new Command.Run(List.of("./cpu")));
     assertThat(cpu.every()).isEqualTo(Duration.ofSeconds(1));
     assertThat(cpu.timeout()).isEqualTo(Pack.Collector.TIMEOUT);
-    assertThat(cpu.fields()).extracting(Field::name).containsExactly("cpu.busiest", "cpu.capped");
+    assertThat(cpu.fields()).extracting(Field::name).containsExactly("busiest", "capped");
     Field busiest = cpu.fields().get(0);
     assertThat(busiest.label()).isEqualTo("Busiest core");
     assertThat(busiest.type()).isEqualTo(Spotter.FieldType.FIELD_TYPE_NUMBER);
@@ -86,7 +86,7 @@ class PackReaderTest {
     assertThat(vision.collectors().get(0).fields().get(0).fail().getNotEquals().getText())
         .isEqualTo("active");
     assertThat(vision.collectors().get(1).command())
-        .isEqualTo(new Command.Http("GET", "http://localhost:5800/api/status", ""));
+        .isEqualTo(new Command.Http("GET", "http://localhost:5800/", ""));
     Field answers = vision.collectors().get(1).fields().get(0);
     assertThat(answers.name()).isEqualTo("status");
     assertThat(answers.type()).isEqualTo(Spotter.FieldType.FIELD_TYPE_NUMBER);
@@ -190,8 +190,10 @@ class PackReaderTest {
   @Test
   void yamlItCantParseSaysWhere() {
     assertThat(problems("vision", "pack: vision\ncollectors: [\n").get(0))
-        .startsWith(PACKS + "/vision/pack.yaml: ");
-    assertThat(problems("vision", "pack: vision\npack: other\n").get(0)).contains("twice");
+        .isEqualTo(
+            PACKS + "/vision/pack.yaml:3: expected the node content, but found '<stream end>'");
+    assertThat(problems("vision", "pack: vision\npack: other\n"))
+        .containsExactly(PACKS + "/vision/pack.yaml:2: found duplicate key pack");
     assertThat(problems("vision", "- a\n- b\n"))
         .containsExactly(PACKS + "/vision/pack.yaml: expected pack:, and its collectors:");
   }
@@ -256,13 +258,15 @@ class PackReaderTest {
         .anyMatch(p -> p.endsWith("field v is a mapping: {type: ..., label: ...}"));
     assertThat(problems("p", collector("run: [a]\nevery: 1s\nfields: {\"v w\": {type: text}}")))
         .anyMatch(p -> p.contains("isn't a name"));
+    // A field's name is its collector's: two collectors may each have a v.
     assertThat(
-            problems(
-                "p",
-                "pack: p\ncollectors:\n"
-                    + "  - {id: a, run: [a], every: 1s, fields: {v: {type: text}}}\n"
-                    + "  - {id: b, run: [b], every: 1s, fields: {v: {type: text}}}\n"))
-        .anyMatch(p -> p.endsWith("field v is filled by another collector already"));
+            read(
+                    "p",
+                    "pack: p\ncollectors:\n"
+                        + "  - {id: a, run: [a], every: 1s, fields: {v: {type: text}}}\n"
+                        + "  - {id: b, run: [b], every: 1s, fields: {v: {type: text}}}\n")
+                .collectors())
+        .hasSize(2);
     assertThat(
             problems(
                 "p",
@@ -382,14 +386,56 @@ class PackReaderTest {
     assertThat(
             read("p", collector("file: /x\nevery: 1s\nfields: {exit: {type: text}}")).collectors())
         .hasSize(1);
-    // One collector per pack may declare a part: its id is pack.part.
+    // Each collector may declare its parts: their ids are pack.collector.part.
+    assertThat(
+            read(
+                    "p",
+                    "pack: p\ncollectors:\n"
+                        + "  - {id: a, run: [a], every: 1s, fields: {exit: {type: number}}}\n"
+                        + "  - {id: b, run: [b], every: 1s, fields: {exit: {type: number}}}\n")
+                .collectors())
+        .hasSize(2);
+  }
+
+  @Test
+  void namesAreUniqueWhereTheyreDeclaredAndADuplicateIgnoresThePack() {
+    // A field twice in one collector, or one response: snakeyaml-engine refuses the duplicate key.
     assertThat(
             problems(
                 "p",
-                "pack: p\ncollectors:\n"
-                    + "  - {id: a, run: [a], every: 1s, fields: {exit: {type: number}}}\n"
-                    + "  - {id: b, run: [b], every: 1s, fields: {exit: {type: number}}}\n"))
-        .anyMatch(p -> p.endsWith("field exit is filled by another collector already"));
+                """
+                pack: p
+                collectors:
+                  - id: health
+                    run: [./health]
+                    every: 1s
+                    fields:
+                      fps: {type: number}
+                      fps: {type: text}
+                """))
+        .containsExactly(PACKS + "/p/pack.yaml:8: found duplicate key fps");
+    assertThat(
+            problems(
+                "p",
+                "pack: p\nactions:\n  - id: go\n    run: [./go]\n    response:\n"
+                    + "      answer: {type: number}\n      answer: {type: text}\n"))
+        .containsExactly(PACKS + "/p/pack.yaml:7: found duplicate key answer");
+    // Collectors', logs' and actions' ids, in the pack's lists, checked one by one.
+    assertThat(
+            problems(
+                "p",
+                "pack: p\nactions:\n  - {id: go, run: [a]}\n  - {id: stop, run: [b]}\n"
+                    + "  - {id: go, run: [c]}\n"))
+        .containsExactly(PACKS + "/p/pack.yaml:5: action go is declared twice");
+    // The same name in different places is no clash: a collector, a log and an action.
+    Pack pack =
+        read(
+            "p",
+            "pack: p\ncollectors:\n  - {id: same, run: [a], every: 1s, fields: {same: {type: text}}}\n"
+                + "logs:\n  - {id: same, run: [b]}\nactions:\n  - {id: same, run: [c]}\n");
+    assertThat(pack.collectors().get(0).id()).isEqualTo("same");
+    assertThat(pack.logs().get(0).id()).isEqualTo("same");
+    assertThat(pack.actions().get(0).id()).isEqualTo("same");
   }
 
   @Test

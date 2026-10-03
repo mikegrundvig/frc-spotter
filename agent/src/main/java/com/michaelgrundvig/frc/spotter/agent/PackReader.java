@@ -5,7 +5,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -16,8 +15,10 @@ import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
+import org.snakeyaml.engine.v2.api.Load;
 import org.snakeyaml.engine.v2.api.LoadSettings;
 import org.snakeyaml.engine.v2.api.lowlevel.Compose;
+import org.snakeyaml.engine.v2.exceptions.MarkedYamlEngineException;
 import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 import org.snakeyaml.engine.v2.nodes.MappingNode;
 import org.snakeyaml.engine.v2.nodes.Node;
@@ -114,7 +115,18 @@ final class PackReader {
     PackReader reader = new PackReader(source);
     Optional<Node> root;
     try {
-      root = new Compose(settings(source)).composeString(yaml);
+      LoadSettings settings = settings(source);
+      // Loaded first, so snakeyaml-engine refuses what YAML 1.2 does, a duplicate key among them
+      // (which only loading checks); then composed, for its nodes' lines and text as written.
+      new Load(settings).loadFromString(yaml);
+      root = new Compose(settings).composeString(yaml);
+    } catch (MarkedYamlEngineException e) {
+      throw new PackException(
+          List.of(
+              source
+                  + e.getProblemMark().map(m -> ":" + (m.getLine() + 1)).orElse("")
+                  + ": "
+                  + oneLine(e.getProblem())));
     } catch (YamlEngineException e) {
       throw new PackException(List.of(source + ": " + oneLine(e.getMessage())));
     }
@@ -163,10 +175,11 @@ final class PackReader {
       name = given;
     }
     String version = optional(keys, "version").flatMap(n -> text(n, "version")).orElse("");
-    Set<String> fieldNames = new HashSet<>();
+    // Names are unique where they're declared: collectors', logs' and actions' in the pack, fields'
+    // in their collector or response (a mapping's keys, which loading checks).
     List<Pack.Collector> collectors = new ArrayList<>();
     for (Node item : sequence(keys.get("collectors"), "collectors")) {
-      Pack.Collector collector = collector(item, fieldNames);
+      Pack.Collector collector = collector(item);
       if (collector != null) {
         if (collectors.stream().anyMatch(c -> c.id().equals(collector.id()))) {
           problem(item, "collector " + collector.id() + " is declared twice");
@@ -199,7 +212,7 @@ final class PackReader {
 
   // ---- collectors ----
 
-  private Pack.@Nullable Collector collector(Node node, Set<String> fieldNames) {
+  private Pack.@Nullable Collector collector(Node node) {
     if (!(node instanceof MappingNode)) {
       problem(node, "each collector is a mapping: - id: ...");
       return null;
@@ -236,9 +249,6 @@ final class PackReader {
                 ? field(each, VALUE_TYPES, "a value's type")
                 : field(each, Set.of(part == Fill.Part.CODE ? "number" : "text"), name + "'s type");
         if (field != null) {
-          if (!fieldNames.add(field.name())) {
-            problem(each, "field " + field.name() + " is filled by another collector already");
-          }
           fields.add(field);
         }
       }
@@ -778,17 +788,15 @@ final class PackReader {
     return keys;
   }
 
-  /** A mapping's entries, in its order; a problem for a key that isn't text, or comes twice. */
+  /**
+   * A mapping's entries, in its order; a problem for a key that isn't text. A key twice is refused
+   * as the pack is loaded.
+   */
   private List<NodeTuple> entries(MappingNode node) {
     List<NodeTuple> entries = new ArrayList<>();
-    Set<String> seen = new HashSet<>();
     for (NodeTuple entry : node.getValue()) {
       if (!(entry.getKeyNode() instanceof ScalarNode)) {
         problem(entry.getKeyNode(), "a key is a single value");
-        continue;
-      }
-      if (!seen.add(keyText(entry))) {
-        problem(entry, "\"" + keyText(entry) + "\" is there twice");
         continue;
       }
       entries.add(entry);

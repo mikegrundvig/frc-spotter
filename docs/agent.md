@@ -120,8 +120,9 @@ its length as a varint (protobuf's delimited form). At most four are open at onc
 
 ## Values
 
-A value is a field a collector fills on a schedule. Its id is `pack.field`, such as
-`debian.memory.available`. The description lists every value in order (packs by name, each pack's
+A value is a field a collector fills on a schedule. Its id is `pack.collector.field`, such as
+`debian.memory.available` or `photonvision.web.status`, the way an action's response fields are
+named within their action. The description lists every value in order (packs by name, each pack's
 collectors in its order, each collector's fields in its order), and a value's index is its place in
 that list. A value that can't be filled is **unavailable**, with the reason, never stale: `not
 collected yet`, `timed out after 5s`, `no such file: /sys/bus/usb/devices/7-1/product`, `its output
@@ -142,9 +143,9 @@ One rule, the same for collectors and actions.
   | `output` / `body` | Standard output | The body | |
 
   An action's response always has them (`outcome`, `outcomeMessage`, `exit` or `status`, `output`
-  or `body`, in that order, then the pack's own); a collector has the ones it declares. Their types
-  are fixed (text, number, and the whole output's text, or for an action `json` or `file`), and a
-  collector's value ids are `pack.part`, so one collector per pack may declare each.
+  or `body`, in that order, then the pack's own); a collector has the ones it declares, each its
+  own (`photonvision.web.status`). Their types are fixed: text, a number, and the whole output's
+  text, or for an action's `json` or `file`.
 - **Every other field:** if the output is a JSON object, each takes the key with its name (keys
   nobody declared are ignored), whatever the exit code or status. The pack's limits on `exit` or
   `status` judge success, not the agent. If the output isn't a JSON object, it's one value, trimmed
@@ -153,11 +154,14 @@ One rule, the same for collectors and actions.
   - a **boolean** is `true` or `false`;
   - a **status** must come as a JSON object, `{"level": "ok", "message": "..."}`, its level `ok`,
     `warning` or `failing`.
-- **When the command didn't complete** (it couldn't start, timed out, couldn't reach its URL), or
-  printed more than is kept (64 KiB for a collector, 1 MiB for an action), `outcome` and
-  `outcomeMessage` still say so, and every other field is unavailable, with that as its reason.
-- **JSON keys are field names exactly:** a field `cpu.busiest` takes the key `"cpu.busiest"`, so a
-  script prints `{"cpu.busiest": 87}`.
+- **When the command didn't complete** (it couldn't start, timed out, couldn't reach its URL),
+  `outcome` and `outcomeMessage` say so, and every other field is unavailable, with that as its
+  reason.
+- **When its output passes its cap** (64 KiB for a collector, 1 MiB for an action), the call still
+  completed: `outcome`, `outcomeMessage`, and `exit` or `status` stand, and every field read from
+  the output (the whole output, and the JSON keys) is unavailable, with that as its reason.
+- **JSON keys are field names exactly:** the `cpu` collector's field `busiest` takes the key
+  `"busiest"`, so its script prints `{"busiest": 87}`.
 
 ## Logs
 
@@ -363,7 +367,11 @@ actions:
   `post` (an action's may add `form`); `file` reads a file, absolute, for collectors only.
 - **Fields:** `type` (`number`, `text`, `boolean`, `status`; an action's response may also have
   `json`, and its whole output `file`), and optionally `label`, `unit`, `warn`, `fail`, and for a
-  `file` field `name`, the name it downloads as. Value ids are `pack.field`.
+  `file` field `name`, the name it downloads as. Value ids are `pack.collector.field`.
+- **Names are unique where they're declared:** collectors', logs' and actions' ids in the pack, and
+  fields' names in their collector or response (a mapping's keys: snakeyaml-engine refuses a
+  duplicate key). The same name in different places is no clash. A duplicate is an error, so the
+  pack is ignored, and `problems` says why.
 - **Limits:** `warn` and `fail`, each any of `above` and `below` (numbers), `equals` and
   `notEquals` (read as the field's type: a number, `true`/`false`, or text as written), and
   `missing: true` (unavailable, or empty text). The agent evaluates none of them.
@@ -371,7 +379,7 @@ actions:
 - **Mistakes:** a key nobody reads is a problem, so a misspelling can't pass silently; a pack with
   any problem is ignored, each problem with its file and line.
 
-`agent/src/test/resources/packs/` has the design's example packs (`debian`, `photonvision`,
+`agent/src/test/resources/packs/` has the design's example packs, copied as it writes them (`debian`, `photonvision`,
 `raspberry-pi`, `detector`), which the unit tests read. The catalog of packs to copy is being
 rewritten for this format (milestone 3).
 

@@ -96,7 +96,7 @@ class AgentServerTest {
     assertThat(response.headers().firstValue("Content-Type")).hasValue(Protocol.PROTOBUF);
     Spotter.Description description = read(Spotter.Description.newInstance(), response);
     assertThat(description.getIdentity().getHostname()).isEqualTo("vision-front");
-    assertThat(description.getValues().get(0).getId()).isEqualTo("vision.fps");
+    assertThat(description.getValues().get(0).getId()).isEqualTo("vision.health.fps");
     HttpResponse<byte[]> asked = get(Protocol.DESCRIBE, Protocol.PROTOBUF);
     assertThat(read(Spotter.Description.newInstance(), asked)).isEqualTo(description);
   }

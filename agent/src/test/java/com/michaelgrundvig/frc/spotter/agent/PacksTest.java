@@ -173,7 +173,7 @@ class PacksTest {
         .hasSize(4)
         .anyMatch(
             p ->
-                p.startsWith(Packs.INSTALLED + "/broken/pack.yaml: ")
+                p.startsWith(Packs.INSTALLED + "/broken/pack.yaml:3: ")
                     && p.endsWith(" (the pack is ignored)"))
         .contains(
             Packs.INSTALLED + "/empty: has no pack.yaml, ignored",
@@ -182,6 +182,21 @@ class PacksTest {
             Packs.INSTALLED
                 + "/wrong/pack.yaml:1: pack other is in a folder named wrong: a pack's folder is"
                 + " its name (the pack is ignored)");
+  }
+
+  @Test
+  void aDuplicateNameIgnoresTheWholePackAndProblemsSayWhy() {
+    fixture.pack(
+        "vision",
+        "pack: vision\ncollectors:\n"
+            + "  - {id: web, run: [a], every: 1s, fields: {up: {type: boolean}}}\n"
+            + "  - {id: web, run: [b], every: 1s, fields: {up: {type: boolean}}}\n");
+    Packs.Loaded loaded = Packs.load(fixture.host, true);
+    assertThat(loaded.packs()).isEmpty();
+    assertThat(loaded.problems())
+        .containsExactly(
+            Packs.INSTALLED
+                + "/vision/pack.yaml:4: collector web is declared twice (the pack is ignored)");
   }
 
   @Test

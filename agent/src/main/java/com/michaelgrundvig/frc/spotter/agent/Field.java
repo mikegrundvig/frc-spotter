@@ -6,7 +6,7 @@ import com.michaelgrundvig.frc.spotter.protocol.Spotter;
  * A field as a pack declares it: a value a collector fills, or a part of an action's response. The
  * agent passes its limits through and never evaluates them.
  *
- * @param name its name in the pack: a value's id is {@code pack.name}
+ * @param name its name in its collector or response: a value's id is {@code pack.collector.name}
  * @param label what a display calls it; empty when the pack gives none
  * @param type its type
  * @param unit its unit, for a number; empty when none
@@ -29,7 +29,9 @@ record Field(
         name, "", type, "", Spotter.Limit.newInstance(), Spotter.Limit.newInstance(), "");
   }
 
-  /** Its declaration, under an id: a value's {@code pack.field}, a response field's name. */
+  /**
+   * Its declaration, under an id: a value's {@code pack.collector.field}, a response field's name.
+   */
   Spotter.FieldDeclaration declaration(String id) {
     Spotter.FieldDeclaration declaration =
         Spotter.FieldDeclaration.newInstance()

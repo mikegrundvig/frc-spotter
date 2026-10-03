@@ -47,7 +47,7 @@ class StreamContainerTest {
       Spotter.Description description = stream.next(Duration.ofSeconds(5)).event().getDescribed();
       int ticker = -1;
       for (int i = 0; i < description.getValues().length(); i++) {
-        if (description.getValues().get(i).getId().equals("standin.second")) {
+        if (description.getValues().get(i).getId().equals("standin.ticker.second")) {
           ticker = i;
         }
       }

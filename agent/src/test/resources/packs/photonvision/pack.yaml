@@ -9,7 +9,7 @@ collectors:
     fields:
       running: {label: PhotonVision's service, type: text, fail: {notEquals: active}}
   - id: web
-    http: {get: "http://localhost:5800/api/status"}
+    http: {get: "http://localhost:5800/"}           # its web UI: any 200 means it answers
     every: 5s
     fields:
       status: {label: PhotonVision answers, type: number, fail: {notEquals: 200, missing: true}}
@@ -17,7 +17,7 @@ collectors:
     run: [sha256sum, /opt/photonvision/photonvision_config/photon.sqlite]
     every: 10s
     fields:
-      settings-hash: {label: Settings fingerprint, type: text}
+      hash: {label: Settings fingerprint, type: text}
 logs:
   - id: log
     label: PhotonVision's log

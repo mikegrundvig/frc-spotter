@@ -12,7 +12,7 @@ collectors:
     run: [systemctl, is-active, broken.service]
     every: 1s
     fields:
-      broken: {type: text}
+      state: {type: text}
       exit: {type: number, fail: {notEquals: 0}}
   - id: web
     http: {get: "http://localhost:5800/api/status.json"}
@@ -25,7 +25,7 @@ collectors:
     file: /proc/uptime
     every: 1s
     fields:
-      uptime: {label: Up for, type: number, unit: s}
+      seconds: {label: Up for, type: number, unit: s}
   - id: answer
     run: [./answer]
     every: 1s
@@ -36,18 +36,18 @@ collectors:
     run: [id, -un]
     every: 1s
     fields:
-      user: {type: text}
+      name: {type: text}
   - id: slow
     run: [sleep, "30"]
     every: 2s
     timeout: 1s
     fields:
-      slow: {type: text}
+      text: {type: text}
   - id: gone
     file: /sys/bus/usb/devices/7-1/product
     every: 1s
     fields:
-      front-camera: {type: text, fail: {missing: true}}
+      product: {type: text, fail: {missing: true}}
   - id: ticker
     run: [date, +%s]
     every: 250ms

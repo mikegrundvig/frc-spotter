@@ -112,7 +112,7 @@ class PushContainerTest {
       // Its program kept executable, running as the agent's user.
       String greeting = "";
       for (int i = 0; i < 50 && greeting.isEmpty(); i++) {
-        Spotter.FieldValue value = client.valuesById().get("team.greeting");
+        Spotter.FieldValue value = client.valuesById().get("team.greet.greeting");
         greeting = value == null ? "" : value.getText();
         Thread.sleep(100);
       }

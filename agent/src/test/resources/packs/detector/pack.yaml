@@ -14,7 +14,7 @@ collectors:
     file: /sys/bus/usb/devices/7-1/product  # gone when it's unplugged
     every: 2s
     fields:
-      front-camera: {label: Front camera, type: text, fail: {missing: true}}
+      product: {label: Front camera, type: text, fail: {missing: true}}
 logs:
   - id: log
     label: Detector's log

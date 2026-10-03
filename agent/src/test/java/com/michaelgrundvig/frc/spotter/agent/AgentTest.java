@@ -104,7 +104,7 @@ class AgentTest {
               "vision 1.0.0 /etc/frc-spotter/packs/vision false");
       assertThat(description.getValues())
           .extracting(Spotter.FieldDeclaration::getId)
-          .containsExactly("vision.running", "vision.fps", "vision.camera");
+          .containsExactly("vision.service.running", "vision.health.fps", "vision.health.camera");
       Spotter.FieldDeclaration fps = description.getValues().get(1);
       assertThat(fps.getLabel()).isEqualTo("Frame rate");
       assertThat(fps.getType()).isEqualTo(Spotter.FieldType.FIELD_TYPE_NUMBER);
