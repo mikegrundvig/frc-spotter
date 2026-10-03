@@ -35,7 +35,14 @@ KillMode=mixed
 Nice=10
 AllowedCPUs=0-3
 MemoryMax=200M
-TasksMax=64
+# Its tasks: the JVM's threads and every process its packs run, and theirs, together. Measured in the
+# container tests: 32 with the stand-in pack's collectors running, 42 at most with the catalog's
+# (the JVM's own threads are most of them). On top of that, at worst: a thread for each of 32
+# connections, three for each command running (its own, and one for each of its output and its
+# standard error: four collectors, two actions, two logs), the processes of each, and a leftover's
+# readers. 256 holds all that and an action that starts a threaded program (OpenCV starts one per
+# core), while a fork bomb in a pack still can't take the board.
+TasksMax=256
 UMask=0077
 # It writes nothing but its own /tmp, its actions' runs (/run/frc-spotter, kept across its restarts,
 # gone at a reboot), and pushed packs (/var/lib/frc-spotter, made by its tmpfiles.d entry; on a

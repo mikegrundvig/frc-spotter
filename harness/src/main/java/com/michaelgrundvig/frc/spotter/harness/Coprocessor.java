@@ -250,6 +250,26 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
     return new long[] {Long.parseLong(current) >> 20, Long.parseLong(peak) >> 20};
   }
 
+  /**
+   * The agent's unit's tasks (its JVM's threads, and every process its packs run, and theirs): now,
+   * and at most since it started, as its cgroup counts them; -1 where the count isn't kept.
+   */
+  public long[] agentTasks() {
+    String now =
+        run("systemctl", "show", "frc-spotter", "--property=TasksCurrent", "--value").strip();
+    String peak =
+        run(
+                "sh",
+                "-c",
+                "cat /sys/fs/cgroup/system.slice/frc-spotter.service/pids.peak 2>/dev/null"
+                    + " || echo -1")
+            .strip();
+    return new long[] {
+      now.matches("\\d+") ? Long.parseLong(now) : -1,
+      peak.matches("\\d+") ? Long.parseLong(peak) : -1
+    };
+  }
+
   /** The agent's own memory: its unit's cgroup, in MiB, now. */
   public long agentMemoryMb() {
     String value =

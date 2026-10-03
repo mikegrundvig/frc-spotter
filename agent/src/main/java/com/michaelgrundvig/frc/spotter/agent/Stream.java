@@ -55,6 +55,7 @@ final class Stream implements Events.Subscriber {
   private long dirtySince;
   private boolean behind;
   private long lastSent;
+  private volatile long sendingSince;
 
   Stream(Agent agent, Duration heartbeat, Sink sink) {
     this(agent, heartbeat, COMPLETE_NANOS, sink);
@@ -180,8 +181,22 @@ final class Stream implements Events.Subscriber {
   }
 
   private void send(Spotter.Event event) throws IOException {
-    sink.send(event);
+    sendingSince = System.nanoTime() | 1;
+    try {
+      sink.send(event);
+    } finally {
+      sendingSince = 0;
+    }
     lastSent = System.nanoTime();
+  }
+
+  /**
+   * How long its write under way has been stalled, in nanoseconds: a reader that stopped reading
+   * leaves it waiting; 0 when none is under way.
+   */
+  long stalledNanos(long now) {
+    long since = sendingSince;
+    return since == 0 ? 0 : now - since;
   }
 
   /**

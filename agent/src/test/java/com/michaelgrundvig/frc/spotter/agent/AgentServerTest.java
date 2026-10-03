@@ -189,4 +189,110 @@ class AgentServerTest {
     fixture.host.log("one\n<2>two");
     assertThat(fixture.log).contains("one\\n<2>two");
   }
+
+  /** A stream asked for by hand, its socket's receive buffer small: nothing read but its status. */
+  private static Socket stream(int port, boolean readStatus) throws Exception {
+    Socket socket = new Socket();
+    socket.setReceiveBufferSize(4096);
+    socket.connect(new InetSocketAddress("127.0.0.1", port));
+    socket
+        .getOutputStream()
+        .write(
+            ("GET "
+                    + Protocol.STREAM
+                    + "?heartbeat=50ms HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: "
+                    + Protocol.JSON
+                    + "\r\n\r\n")
+                .getBytes(StandardCharsets.US_ASCII));
+    socket.getOutputStream().flush();
+    return socket;
+  }
+
+  /** A response's status line, read by hand. */
+  private static String status(Socket socket) throws Exception {
+    StringBuilder line = new StringBuilder();
+    int c;
+    while ((c = socket.getInputStream().read()) != -1 && c != '\n') {
+      line.append((char) c);
+    }
+    return line.toString().strip();
+  }
+
+  /** Waits up to 10 s for a condition. */
+  private static void await(java.util.function.BooleanSupplier condition) throws Exception {
+    for (int i = 0; i < 500 && !condition.getAsBoolean(); i++) {
+      Thread.sleep(20);
+    }
+    assertThat(condition.getAsBoolean()).isTrue();
+  }
+
+  @Test
+  void othersHaveTwoStreamsAtMostAndTheControllersAreReserved() throws Exception {
+    // Here the controller is 10.12.34.2, so this test's streams, from 127.0.0.1, are others'.
+    try (Socket one = stream(server.port(), true)) {
+      assertThat(status(one)).isEqualTo("HTTP/1.1 200 OK");
+      try (Socket two = stream(server.port(), true)) {
+        assertThat(status(two)).isEqualTo("HTTP/1.1 200 OK");
+        try (Socket three = stream(server.port(), true)) {
+          assertThat(status(three)).isEqualTo("HTTP/1.1 503 Service Unavailable");
+        }
+      }
+    }
+  }
+
+  @Test
+  void theControllersNewStreamClosesItsOldestPastTwo() throws Exception {
+    AgentServer controllers =
+        new AgentServer(fixture.agent("127.0.0.1"), new InetSocketAddress("127.0.0.1", 0));
+    try (Socket one = stream(controllers.port(), true)) {
+      assertThat(status(one)).isEqualTo("HTTP/1.1 200 OK");
+      await(() -> controllers.streams() == 1);
+      Socket two = stream(controllers.port(), true);
+      assertThat(status(two)).isEqualTo("HTTP/1.1 200 OK");
+      await(() -> controllers.streams() == 2);
+      try (Socket three = stream(controllers.port(), true)) {
+        assertThat(status(three)).isEqualTo("HTTP/1.1 200 OK");
+        // The oldest is closed: read to its end.
+        one.setSoTimeout(10_000);
+        while (one.getInputStream().read() != -1) {
+          // what it had sent before it closed
+        }
+        await(() -> controllers.streams() == 2);
+      }
+      two.close();
+    } finally {
+      controllers.close();
+    }
+  }
+
+  @Test
+  void aStreamWhoseReaderStopsReadingIsClosedOnceItsWritesStall() throws Exception {
+    Agent agent = fixture.agent();
+    AgentServer stalling =
+        new AgentServer(
+            agent, new InetSocketAddress("127.0.0.1", 0), java.time.Duration.ofMillis(300));
+    try (Socket reader = stream(stalling.port(), false)) {
+      await(() -> stalling.streams() == 1);
+      // Changes of a 60 KiB text, faster than anyone reads them: the socket's buffers fill.
+      String text = "x".repeat(60 * 1024);
+      for (int i = 0; i < 400 && stalling.streams() == 1; i++) {
+        agent.store().set(0, List.of(Spotter.FieldValue.newInstance().setText(text + i)));
+        Thread.sleep(5);
+      }
+      await(() -> stalling.streams() == 0);
+    } finally {
+      stalling.close();
+    }
+  }
+
+  @Test
+  void anAddressHasAtMostItsRequestsUnderWay() {
+    for (int i = 0; i < AgentServer.PER_ADDRESS; i++) {
+      assertThat(server.enter("10.12.34.99")).isTrue();
+    }
+    assertThat(server.enter("10.12.34.99")).isFalse();
+    assertThat(server.enter("10.12.34.98")).isTrue();
+    server.leave("10.12.34.99");
+    assertThat(server.enter("10.12.34.99")).isTrue();
+  }
 }

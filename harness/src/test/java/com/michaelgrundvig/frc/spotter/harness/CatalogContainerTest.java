@@ -59,6 +59,10 @@ class CatalogContainerTest {
 
   @AfterAll
   void stop() {
+    long[] tasks = coprocessor.agentTasks();
+    System.out.printf(
+        "Catalog container: the agent's unit, its packs running, %d tasks now, %d at most%n",
+        tasks[0], tasks[1]);
     coprocessor.close();
     network.close();
   }

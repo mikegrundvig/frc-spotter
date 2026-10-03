@@ -42,9 +42,11 @@ class AgentContainerTest {
   void stop() {
     if (coprocessor != null) {
       long[] memory = coprocessor.memoryMb();
+      long[] tasks = coprocessor.agentTasks();
       System.out.printf(
-          "Agent container: %d MiB now, %d MiB at most; the agent's unit %d MiB%n",
-          memory[0], memory[1], coprocessor.agentMemoryMb());
+          "Agent container: %d MiB now, %d MiB at most; the agent's unit %d MiB, %d tasks now, %d"
+              + " at most%n",
+          memory[0], memory[1], coprocessor.agentMemoryMb(), tasks[0], tasks[1]);
       coprocessor.stop();
     }
     if (network != null) {
