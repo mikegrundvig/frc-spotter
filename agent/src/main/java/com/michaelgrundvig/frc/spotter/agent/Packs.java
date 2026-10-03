@@ -15,9 +15,11 @@ import java.util.TreeMap;
  *
  * <p>An installed pack is trusted by its file, as {@code sshd} trusts its configuration: one whose
  * {@code pack.yaml} isn't root's, or that its group or anyone else may write, is ignored. So is a
- * collector, log or action whose program, named by path, anyone but root could change: otherwise
- * "root owns the YAML" would protect nothing. A pushed pack is trusted because only the robot
- * controller may push. Everything ignored is in the description's problems, with why.
+ * collector, log or action whose program anyone but root could change, when it names it by path:
+ * its program (absolute, or the pack's own {@code ./name}), or an argument that's the pack's own
+ * file ({@code [python3, ./check.py]}). Otherwise "root owns the YAML" would protect nothing. A
+ * pushed pack is trusted because only the robot controller may push. Everything ignored is in the
+ * description's problems, with why.
  */
 final class Packs {
   /** Where the packs installed with the board are, each a folder. */
@@ -171,19 +173,21 @@ final class Packs {
   private static boolean runs(
       Host host, Pack pack, Command command, String what, List<String> problems)
       throws IOException {
-    if (!(command instanceof Command.Run) || !((Command.Run) command).byPath()) {
+    if (!(command instanceof Command.Run)) {
       return true;
     }
-    String program = ((Command.Run) command).programPath(pack.folder());
-    if (!host.exists(program)) {
-      return true;
+    for (String program : ((Command.Run) command).programsByPath(pack.folder())) {
+      if (!host.exists(program)) {
+        continue;
+      }
+      String untrusted = untrusted(host.owner(program));
+      if (!untrusted.isEmpty()) {
+        problems.add(
+            program + ": " + untrusted + ", so " + pack.name() + "'s " + what + " isn't run");
+        return false;
+      }
     }
-    String untrusted = untrusted(host.owner(program));
-    if (untrusted.isEmpty()) {
-      return true;
-    }
-    problems.add(program + ": " + untrusted + ", so " + pack.name() + "'s " + what + " isn't run");
-    return false;
+    return true;
   }
 
   /** Why a file isn't to be trusted; empty when root alone may change it. */

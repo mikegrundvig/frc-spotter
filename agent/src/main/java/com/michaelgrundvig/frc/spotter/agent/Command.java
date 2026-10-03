@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -33,6 +34,25 @@ sealed interface Command permits Command.Run, Command.Http, Command.Read {
     /** Where its program is, on the coprocessor: in the pack's folder, or as written. */
     String programPath(String folder) {
       return program().startsWith("./") ? folder + "/" + program().substring(2) : program();
+    }
+
+    /**
+     * The programs it names by path, on the coprocessor, which only root may change if an installed
+     * pack is to run it: its program when named by a path, and any argument that's a file of the
+     * pack's own ({@code [python3, ./check.py]}). An absolute path past the program is left alone:
+     * it's usually data, such as a file to hash.
+     */
+    List<String> programsByPath(String folder) {
+      List<String> named = new ArrayList<>();
+      if (byPath()) {
+        named.add(programPath(folder));
+      }
+      for (String argument : argv.subList(1, argv.size())) {
+        if (argument.startsWith("./")) {
+          named.add(folder + "/" + argument.substring(2));
+        }
+      }
+      return named;
     }
   }
 

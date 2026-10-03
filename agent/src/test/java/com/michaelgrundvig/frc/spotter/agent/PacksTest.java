@@ -119,6 +119,41 @@ class PacksTest {
   }
 
   @Test
+  void aPacksOwnFileGivenToAnInterpreterIsCheckedToo() {
+    String folder =
+        fixture.pack(
+            "team",
+            """
+            pack: team
+            collectors:
+              - id: check
+                run: [python3, ./check.py, /opt/team/data.db]
+                every: 1s
+                fields:
+                  ok: {type: boolean}
+              - id: hash
+                run: [sha256sum, /opt/team/data.db]
+                every: 1s
+                fields:
+                  hash: {type: text}
+            """);
+    fixture.write(folder + "/check.py", "print('true')\n");
+    fixture.owners.put(folder + "/check.py", new Host.Owner(1000, 0644));
+    // An absolute path past the program is data, such as a file to hash: not checked.
+    fixture.write("/opt/team/data.db", "data");
+    fixture.owners.put("/opt/team/data.db", new Host.Owner(1000, 0664));
+    Packs.Loaded loaded = Packs.load(fixture.host, true);
+    assertThat(loaded.packs().get(0).collectors())
+        .extracting(Pack.Collector::id)
+        .containsExactly("hash");
+    assertThat(loaded.problems())
+        .containsExactly(
+            folder
+                + "/check.py: isn't root's (its owner is user 1000), so team's collector check"
+                + " isn't run");
+  }
+
+  @Test
   void aProgramThatIsntThereIsLeftToFailWhenRun() {
     fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
     Packs.Loaded loaded = Packs.load(fixture.host, true);
