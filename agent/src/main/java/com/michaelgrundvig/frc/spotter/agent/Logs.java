@@ -98,10 +98,19 @@ final class Logs {
   private record Source(String folder, Pack.Log log) {}
 
   private final Commands commands;
+  private final Duration timeout;
   private final Map<String, Source> logs = new LinkedHashMap<>();
   private final Semaphore turns = new Semaphore(AT_ONCE);
 
   Logs(Commands commands, List<Pack> packs) {
+    this(commands, packs, TIMEOUT);
+  }
+
+  /**
+   * @param timeout how long a log's command may take: {@link #TIMEOUT}, or a test's
+   */
+  Logs(Commands commands, List<Pack> packs, Duration timeout) {
+    this.timeout = timeout;
     this.commands = commands;
     for (Pack pack : packs) {
       for (Pack.Log log : pack.logs()) {
@@ -125,7 +134,7 @@ final class Logs {
           commands.run(
               source.folder(),
               source.log().run(),
-              TIMEOUT,
+              timeout,
               new Commands.Options(
                   null, paging.environment(), MAX_OUTPUT, 0, line -> {}, Duration.ZERO),
               new Commands.Cancellation());

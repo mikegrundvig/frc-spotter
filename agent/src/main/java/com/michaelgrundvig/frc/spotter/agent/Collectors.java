@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.spotter.agent;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -15,7 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * so collectors never crowd out the software they watch: at most {@link #RUNNING} run at once (the
  * rest wait their turn, in order), each within its timeout, and a collector still running when it's
  * due again skips that turn rather than queueing behind itself, so a slow one never delays the
- * others.
+ * others. A collector whose command is stopped at its timeout and won't go (a child stuck in the
+ * kernel, say) frees its turn, and its values are unavailable ("timed out after 5s; its command is
+ * still running"); it isn't run again until its command has ended.
  */
 final class Collectors implements AutoCloseable {
   /** How many collectors run at once. */
@@ -132,10 +135,12 @@ final class Collectors implements AutoCloseable {
     try {
       running.execute(
           () -> {
+            CompletableFuture<Void> ended = Commands.Result.ENDED;
             try {
-              run(at);
+              ended = run(at);
             } finally {
-              state.busy.set(false);
+              // Busy until its command has ended, which may outlast its run.
+              ended.whenComplete((done, failure) -> state.busy.set(false));
             }
           });
     } catch (RuntimeException e) {
@@ -150,15 +155,20 @@ final class Collectors implements AutoCloseable {
     }
   }
 
-  /** Runs one collector once, and keeps what it filled. */
-  void run(int at) {
+  /**
+   * Runs one collector once, and keeps what it filled: done once its command has ended, which is
+   * now, but for a command stopped that won't go.
+   */
+  CompletableFuture<Void> run(int at) {
     Slot slot = slots.get(at);
     Pack.Collector collector = slot.collector();
     List<Spotter.FieldValue> values;
     String failure;
+    CompletableFuture<Void> ended = Commands.Result.ENDED;
     try {
       Commands.Result result =
           commands.run(slot.pack().folder(), collector.command(), collector.timeout(), MAX_OUTPUT);
+      ended = result.ended();
       values = Fill.fill(collector.fields(), result, MAX_OUTPUT);
       failure = Fill.reason(result, MAX_OUTPUT);
     } catch (RuntimeException | StackOverflowError e) {
@@ -167,6 +177,7 @@ final class Collectors implements AutoCloseable {
     }
     store.set(slot.first(), values);
     note(at, failure);
+    return ended;
   }
 
   /**

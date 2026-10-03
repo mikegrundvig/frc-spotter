@@ -228,6 +228,17 @@ An action runs on request, optionally with input, and returns a response (its fi
 (SIGKILL) 5 s later; a timeout stops it the same way. What it says on standard error as it stops is
 kept in its log.
 
+**Every command runs in a process group of its own** (`setsid`, util-linux's, as Debian has it), so
+stopping it signals the whole group: what it started, and what those left running in the
+background once their parent had exited. Its output and standard error are read on threads of
+their own, and the agent waits on the process and its deadline, never on the end of a pipe: a
+command is done when its process exits. Anything it left running that still holds its output a
+moment later (`./detector &` without a redirect, say) is stopped, its group with it; start a
+long-running program as a systemd service, or with its output redirected, to keep it. A command
+stopped that won't go (a process stuck in the kernel on a wedged camera, say) is answered all the
+same: a run finishes `timedOut` ("timed out after 5s; its command is still running") and frees its
+slot; a collector's values say the same, and it isn't run again until that command has ended.
+
 **What's kept:** each run in `/run/frc-spotter/runs/<run>/` (its state, its log, its output), until
 its action runs again, or the runs kept pass 64 MiB, the oldest dropped first. `/run` survives an
 agent restart (a push's included) but not a reboot: a finished run stays fetchable after the agent

@@ -51,6 +51,9 @@ class RunsTest {
           run: [printf, "PK zip bytes"]
           response:
             output: {type: file, name: settings.zip}
+        - id: lingering
+          run: [sh, -c, "sleep 30 &"]
+          timeout: 300ms
         - id: deep
           run: [./deep]
           response:
@@ -345,6 +348,16 @@ class RunsTest {
     assertThat(report.getJson()).startsWith("{\"report\": [[[");
     // And the action may run again: its slot is free.
     assertThat(finished(runs.start("team.deep", null).getRun()).getRunning()).isFalse();
+  }
+
+  @Test
+  void anActionThatLeavesAChildHoldingItsOutputFinishesAndFreesItsSlot() throws Exception {
+    long started = System.nanoTime();
+    Spotter.RunState state = finished(runs.start("team.lingering", null).getRun());
+    // It exits at once; what it left holding its output is stopped, politely, and goes.
+    assertThat((System.nanoTime() - started) / 1e9).isLessThan(3);
+    assertThat(state.getResult().getOutcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+    assertThat(finished(runs.start("team.lingering", null).getRun()).getRunning()).isFalse();
   }
 
   @Test

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -234,6 +235,19 @@ class LogsTest {
     Logs gone = new Logs(commands, Packs.load(fixture.host, true).packs());
     assertThat(catchThrowableOfType(Logs.Refused.class, () -> gone.page("gone.log", paging())))
         .hasMessage("log gone.log's command: no such file: " + folder + "/missing");
+  }
+
+  @Test
+  void aCommandThatLeavesAChildHoldingItsOutputIsntWaitedFor() throws Exception {
+    String folder =
+        fixture.pack("lingering", "pack: lingering\nlogs:\n  - id: log\n    run: [./log]\n");
+    fixture.script(folder + "/log", "sleep 30 &");
+    Logs logs = new Logs(commands, Packs.load(fixture.host, true).packs(), Duration.ofMillis(300));
+    long started = System.nanoTime();
+    // It exits at once; what it left holding its output is stopped, and never holds the page up.
+    Spotter.LogPage page = logs.page("lingering.log", paging());
+    assertThat((System.nanoTime() - started) / 1e9).isLessThan(3);
+    assertThat(page.getEntries()).isEmpty();
   }
 
   @Test
