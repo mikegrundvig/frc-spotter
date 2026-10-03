@@ -3,10 +3,10 @@
 // pack's own tests use too, and Spotter's own container tests (src/test, @ContainerTest, tagged
 // "container"): the agent installed from its .deb in a plain Debian 13 container under systemd, with
 // no Java of its own, its root read-only and /data writable as on a board; the -all.jar on a stock
-// Java 17. The tests play the robot with a minimal test client of protocol 2 (the robot's manager is
-// coming). They need Docker or Podman running Linux containers, and skip themselves without (as on a
-// Windows laptop); in CI on Linux they must run. `test -Pquick` leaves them out unless --tests names
-// them.
+// Java 17. The tests play the robot with a minimal test client of protocol 2, and with the robot's
+// manager itself, end to end. They need Docker or Podman running Linux containers, and skip
+// themselves without (as on a Windows laptop); in CI on Linux they must run. `test -Pquick` leaves
+// them out unless --tests names them.
 
 plugins {
     id "java-library"
@@ -56,6 +56,8 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     testImplementation libs.assertj.core
+    // The robot's manager, end to end against the agent in its container.
+    testImplementation project(":manager")
 }
 
 tasks.named("test") {
