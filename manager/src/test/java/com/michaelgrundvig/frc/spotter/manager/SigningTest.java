@@ -10,40 +10,42 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Signed writes, against a real agent that requires them: the manager signs each over its stream's
- * challenge with the robot's key, which tests generate at runtime (no key is ever committed).
- * Without a key, reading still works, writes are refused, and an alert says why.
+ * challenge with the robot's key pair, which tests make as they run (no key is ever committed).
+ * Without the pair, reading still works, writes are refused, and an alert says why.
  */
 class SigningTest {
   @TempDir Path dir;
   LocalAgent agent;
-  Signer team;
+  KeyPair team;
   Path key;
   @Nullable Manager manager;
 
   @BeforeEach
   void aBoardThatRequiresSignatures() throws Exception {
-    team = Signer.generate();
-    key = dir.resolve("spotter.key");
-    team.write(key);
+    team = Keys.pair();
+    Files.createDirectories(dir.resolve("controller"));
+    key = Keys.write(team, dir.resolve("controller"));
     agent = new LocalAgent(dir.resolve("board"), "vision-front");
     agent
         .pack("team", ActionsTest.PACK)
         .script("team", "hello", ActionsTest.HELLO)
         .script("team", "wait", ActionsTest.WAIT)
         .script("team", "pager", ActionsTest.PAGER)
-        .config("{\"trustedKeys\": [\"" + team.publicKey() + "\"]}")
+        .config("{\"trustedKeys\": [\"" + Keys.trusted(team) + "\"]}")
         .start();
   }
 
@@ -55,18 +57,18 @@ class SigningTest {
     agent.close();
   }
 
-  private Board connected(Path keyFile) throws InterruptedException {
+  private Board connected(Settings settings) throws InterruptedException {
     Manager started =
-        new Manager(
-            Boards.robot(),
-            List.of(agent.address()),
-            Settings.DEFAULTS.withKey(keyFile),
-            Recorder.NONE);
+        new Manager(Boards.robot(), List.of(agent.address()), settings, Recorder.NONE);
     manager = started;
     started.start();
     Board board = started.boards().get(0);
     await(started, "described", () -> board.description().getRequiresSignatures());
     return board;
+  }
+
+  private Board connected(Path keyFile) throws InterruptedException {
+    return connected(Settings.DEFAULTS.withKey(keyFile));
   }
 
   @Test
@@ -81,7 +83,16 @@ class SigningTest {
     }
     wait.cancel().get(10, TimeUnit.SECONDS);
     assertThat(ActionsTest.done(wait).outcome()).isEqualTo(Spotter.Outcome.OUTCOME_CANCELLED);
-    assertThat(java.util.Objects.requireNonNull(manager).alerts()).isEmpty();
+    assertThat(Objects.requireNonNull(manager).alerts()).isEmpty();
+  }
+
+  @Test
+  void aPublicKeyElsewhereIsGivenItsPath() throws Exception {
+    Path elsewhere = dir.resolve("team.pub");
+    Files.move(dir.resolve("controller/spotter.pub"), elsewhere);
+    Board board = connected(Settings.DEFAULTS.withKey(key).withPublicKey(elsewhere));
+    assertThat(ActionsTest.done(board.run("team.hello", "Ada")).outcome())
+        .isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
   }
 
   @Test
@@ -109,17 +120,19 @@ class SigningTest {
   }
 
   @Test
-  void withoutAKeyReadingWorksWritesAreRefusedAndAnAlertSaysWhy() throws Exception {
+  void withoutTheKeyPairReadingWorksWritesAreRefusedAndAnAlertSaysWhy() throws Exception {
     Path none = dir.resolve("none.key");
     Board board = connected(none);
-    Manager started = java.util.Objects.requireNonNull(manager);
+    Manager started = Objects.requireNonNull(manager);
     assertThat(started.alerts())
         .containsExactly(
             new Alert(
                 Level.WARNING,
                 "",
-                "no Spotter key on this controller ("
+                "no Spotter key pair on this controller ("
                     + none
+                    + ", "
+                    + dir.resolve("spotter.pub")
                     + "): boards that require signatures will refuse its actions and pushes"));
     assertThat(board.log("team.log", LogQuery.latest(1)).get(10, TimeUnit.SECONDS).getEntries())
         .hasSize(1);
@@ -130,9 +143,19 @@ class SigningTest {
   }
 
   @Test
-  void aKeyTheBoardDoesntTrustIsRefused() throws Exception {
-    Path other = dir.resolve("other.key");
-    Signer.generate().write(other);
+  void aMissingPublicKeyIsAsAMissingPair() throws Exception {
+    Files.delete(dir.resolve("controller/spotter.pub"));
+    connected(key);
+    Manager started = Objects.requireNonNull(manager);
+    assertThat(started.alerts()).hasSize(1);
+    assertThat(started.alerts().get(0).text())
+        .startsWith("no Spotter key pair on this controller (" + key + ", ");
+  }
+
+  @Test
+  void aPairTheBoardDoesntTrustIsRefused() throws Exception {
+    Files.createDirectories(dir.resolve("other"));
+    Path other = Keys.write(Keys.pair(), dir.resolve("other"));
     Board board = connected(other);
     Run refused = ActionsTest.done(board.run("team.hello", "Ada"));
     assertThat(refused.why())
@@ -141,31 +164,60 @@ class SigningTest {
   }
 
   @Test
-  void aKeyThatCantBeReadIsSaid() throws Exception {
-    Path garbled = dir.resolve("garbled.key");
+  void aPairThatCantBeReadOrDoesntMatchIsSaid() throws Exception {
+    Path garbled = dir.resolve("garbled");
+    Files.createDirectories(garbled);
     Files.writeString(
-        garbled, "-----BEGIN PRIVATE KEY-----\nnot a key\n-----END PRIVATE KEY-----\n");
-    connected(garbled);
-    Manager started = java.util.Objects.requireNonNull(manager);
+        garbled.resolve("spotter.key"),
+        "-----BEGIN PRIVATE KEY-----\nnot a key\n-----END PRIVATE KEY-----\n");
+    Files.copy(dir.resolve("controller/spotter.pub"), garbled.resolve("spotter.pub"));
+    connected(garbled.resolve("spotter.key"));
+    Manager started = Objects.requireNonNull(manager);
     assertThat(started.alerts()).hasSize(1);
     assertThat(started.alerts().get(0).text())
-        .startsWith(
-            "the Spotter key " + garbled + " can't be read (it isn't an Ed25519 private key")
+        .startsWith("the Spotter key pair can't be read (")
         .endsWith("): boards that require signatures will refuse its actions and pushes");
+
+    // Another key's public key: no pair.
+    Files.createDirectories(dir.resolve("mixed"));
+    Path mixed = Keys.write(team, dir.resolve("mixed"));
+    Files.writeString(
+        dir.resolve("mixed/spotter.pub"),
+        Keys.pem("PUBLIC KEY", Keys.pair().getPublic().getEncoded()));
+    assertThatThrownBy(() -> Signer.read(mixed, dir.resolve("mixed/spotter.pub")))
+        .hasMessage(dir.resolve("mixed/spotter.pub") + " isn't the public key of " + mixed);
+    // A public key where the private key goes: not PEM of that kind.
+    assertThatThrownBy(() -> Signer.read(dir.resolve("mixed/spotter.pub"), mixed))
+        .hasMessage(dir.resolve("mixed/spotter.pub") + " isn't a private key in PEM");
   }
 
   @Test
-  void aKeyOpensslMadeIsReadAndItsPublicKeyIsOpensslsToo() throws Exception {
+  void aPairIsReadAsTheBoardListsItsPublicKey() throws Exception {
+    Signer read = Signer.read(key, dir.resolve("controller/spotter.pub"));
+    assertThat(read.publicKey()).isEqualTo(Keys.trusted(team)).startsWith("MCowBQYDK2VwAyEA");
+    assertThat(read.id())
+        .isEqualTo(
+            HexFormat.of()
+                .formatHex(Signer.sha256(team.getPublic().getEncoded()))
+                .substring(0, 16));
+    assertThatThrownBy(() -> Signer.read(dir.resolve("absent.key"), dir.resolve("absent.pub")))
+        .isInstanceOf(NoSuchFileException.class);
+  }
+
+  @Test
+  void aPairOpensslMadeIsRead() throws Exception {
     // As docs/robot.md says to make one; skipped where openssl isn't installed.
-    org.junit.jupiter.api.Assumptions.assumeTrue(
+    Assumptions.assumeTrue(
         Files.isExecutable(Path.of("/usr/bin/openssl")), "openssl isn't installed");
     Path made = dir.resolve("openssl.key");
+    Path pub = dir.resolve("openssl.pub");
     run("openssl", "genpkey", "-algorithm", "ed25519", "-out", made.toString());
+    run("openssl", "pkey", "-in", made.toString(), "-pubout", "-out", pub.toString());
     String expected =
         Base64.getEncoder()
             .encodeToString(
                 run("openssl", "pkey", "-in", made.toString(), "-pubout", "-outform", "DER"));
-    assertThat(Signer.read(made).publicKey()).isEqualTo(expected);
+    assertThat(Signer.read(made, pub).publicKey()).isEqualTo(expected);
   }
 
   private static byte[] run(String... command) throws Exception {
@@ -173,28 +225,5 @@ class SigningTest {
     byte[] out = process.getInputStream().readAllBytes();
     assertThat(process.waitFor()).as(String.join(" ", command)).isZero();
     return out;
-  }
-
-  @Test
-  void aKeysPublicKeyIsWorkedOutFromItAsTheBoardListsIt() throws Exception {
-    KeyPair pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-    String expected = Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
-    assertThat(Signer.publicKey(pair.getPrivate())).isEqualTo(expected);
-    assertThat(expected).startsWith("MCowBQYDK2VwAyEA");
-
-    // As openssl writes it: PEM, read back to the same key.
-    Path file = dir.resolve("written.key");
-    team.write(file);
-    assertThat(Files.readString(file)).startsWith("-----BEGIN PRIVATE KEY-----\n");
-    Signer read = Signer.read(file);
-    assertThat(read.publicKey()).isEqualTo(team.publicKey());
-    assertThat(read.id()).isEqualTo(team.id()).hasSize(16).matches("[0-9a-f]{16}");
-    // Its base64 alone works too.
-    Path bare = dir.resolve("bare.key");
-    Files.writeString(
-        bare, Files.readString(file).replaceAll("-----[A-Z ]+-----", "").replace("\n", ""));
-    assertThat(Signer.read(bare).publicKey()).isEqualTo(team.publicKey());
-    assertThatThrownBy(() -> Signer.read(dir.resolve("absent.key")))
-        .isInstanceOf(NoSuchFileException.class);
   }
 }

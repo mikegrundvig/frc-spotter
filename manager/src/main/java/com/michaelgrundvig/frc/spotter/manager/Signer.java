@@ -7,24 +7,28 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.PrivateKey;
-import java.security.SecureRandom;
+import java.security.PublicKey;
 import java.security.Signature;
-import java.security.interfaces.EdECPrivateKey;
-import java.security.spec.NamedParameterSpec;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.util.Arrays;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Locale;
 
 /**
- * The robot's signing key, for boards that require signed writes (docs/agent.md, "Signed writes"):
- * an Ed25519 private key, PKCS#8, in PEM ({@code -----BEGIN PRIVATE KEY-----}, as {@code openssl
- * genpkey -algorithm ed25519} writes it) or as its base64 alone. Its public key, which a board
- * lists in its {@code agent.json} and whose id each signature names, is worked out from it.
+ * The robot's signing key pair, for boards that require signed writes (docs/agent.md, "Signed
+ * writes"), as openssl makes it (docs/robot.md, "Signing"):
+ *
+ * <pre>
+ * openssl genpkey -algorithm ed25519 -out spotter.key
+ * openssl pkey -in spotter.key -pubout -out spotter.pub
+ * </pre>
+ *
+ * The private key is PKCS#8 in PEM, the public key X.509 in PEM, each read with Java's own key
+ * specs. The public key's X.509 encoding, in base64, is what a board lists in its {@code
+ * agent.json}, and its id is what each signature names.
  *
  * <p>A write signs the UTF-8 bytes of the stream connection's challenge, the counter, the method,
  * the path, and the lowercase hex SHA-256 of the body, joined by {@code \n}, and says {@code
@@ -35,72 +39,67 @@ final class Signer {
   private final String publicKey;
   private final String id;
 
-  private Signer(PrivateKey key, String publicKey) {
+  private Signer(PrivateKey key, PublicKey publicKey) {
     this.key = key;
-    this.publicKey = publicKey;
-    this.id = keyId(publicKey);
+    this.publicKey = Base64.getEncoder().encodeToString(publicKey.getEncoded());
+    this.id = HexFormat.of().formatHex(sha256(publicKey.getEncoded())).substring(0, 16);
   }
 
   /**
-   * The key in a file.
+   * The key pair in two files: the private key, and its public key.
    *
-   * @throws NoSuchFileException when there's no file
-   * @throws IOException when it can't be read, or isn't an Ed25519 private key
+   * @throws NoSuchFileException when either isn't there
+   * @throws IOException when either can't be read, isn't an Ed25519 key in PEM, or the public key
+   *     isn't the private key's
    */
-  static Signer read(Path file) throws IOException {
-    String text = Files.readString(file, StandardCharsets.US_ASCII);
-    String base64 = text.replaceAll("-----(BEGIN|END) PRIVATE KEY-----", "").replaceAll("\\s", "");
+  static Signer read(Path privateFile, Path publicFile) throws IOException {
+    PrivateKey key;
+    PublicKey publicKey;
     try {
-      PrivateKey key =
-          KeyFactory.getInstance("Ed25519")
-              .generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(base64)));
-      return new Signer(key, publicKey(key));
-    } catch (GeneralSecurityException | IllegalArgumentException e) {
-      throw new IOException("it isn't an Ed25519 private key, PKCS#8 in PEM: " + e.getMessage(), e);
-    }
-  }
-
-  /** A new key, at random: for tests, which generate throwaway keys and commit none. */
-  static Signer generate() {
-    try {
-      KeyPair pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-      return new Signer(
-          pair.getPrivate(), Base64.getEncoder().encodeToString(pair.getPublic().getEncoded()));
+      KeyFactory keys = KeyFactory.getInstance("Ed25519");
+      key = keys.generatePrivate(new PKCS8EncodedKeySpec(pem(privateFile, "PRIVATE KEY")));
+      publicKey = keys.generatePublic(new X509EncodedKeySpec(pem(publicFile, "PUBLIC KEY")));
     } catch (GeneralSecurityException e) {
-      throw new IllegalStateException("every Java since 15 has Ed25519", e);
+      throw new IOException("it isn't an Ed25519 key pair, as openssl writes one: " + e, e);
+    }
+    if (!pair(key, publicKey)) {
+      throw new IOException(publicFile + " isn't the public key of " + privateFile);
+    }
+    return new Signer(key, publicKey);
+  }
+
+  /** A PEM file's bytes: what's between its {@code -----BEGIN <kind>-----} and its end. */
+  private static byte[] pem(Path file, String kind) throws IOException {
+    String text = Files.readString(file, StandardCharsets.US_ASCII);
+    String begin = "-----BEGIN " + kind + "-----";
+    String end = "-----END " + kind + "-----";
+    int from = text.indexOf(begin);
+    int to = text.indexOf(end);
+    if (from < 0 || to < from) {
+      throw new IOException(file + " isn't a " + kind.toLowerCase(Locale.ROOT) + " in PEM");
+    }
+    try {
+      return Base64.getMimeDecoder().decode(text.substring(from + begin.length(), to));
+    } catch (IllegalArgumentException e) {
+      throw new IOException(file + " isn't base64 between its PEM lines: " + e.getMessage(), e);
     }
   }
 
-  /** Writes the private key to a file, PKCS#8 in PEM: for tests. */
-  void write(Path file) throws IOException {
-    String base64 = Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(key.getEncoded());
-    Files.writeString(
-        file, "-----BEGIN PRIVATE KEY-----\n" + base64 + "\n-----END PRIVATE KEY-----\n");
-  }
-
-  /**
-   * An Ed25519 private key's public key, X.509 in base64, as {@code agent.json} lists it. Java has
-   * no call for it, so it's worked out as the key's own generation does: Ed25519's private key is
-   * 32 random bytes, and a generator given those bytes as its randomness makes that key's pair.
-   */
-  static String publicKey(PrivateKey key) throws GeneralSecurityException {
-    byte[] seed =
-        ((EdECPrivateKey) key)
-            .getBytes()
-            .orElseThrow(() -> new GeneralSecurityException("the key's bytes can't be read"));
-    KeyPairGenerator generator = KeyPairGenerator.getInstance("Ed25519");
-    generator.initialize(NamedParameterSpec.ED25519, new Seed(seed));
-    KeyPair pair = generator.generateKeyPair();
-    byte[] made = ((EdECPrivateKey) pair.getPrivate()).getBytes().orElse(new byte[0]);
-    if (!Arrays.equals(made, seed)) {
-      throw new GeneralSecurityException("this Java's Ed25519 can't work out a public key");
+  /** Whether a public key is a private key's: what one signs, the other verifies. */
+  private static boolean pair(PrivateKey key, PublicKey publicKey) {
+    try {
+      byte[] message = "spotter".getBytes(StandardCharsets.UTF_8);
+      Signature signer = Signature.getInstance("Ed25519");
+      signer.initSign(key);
+      signer.update(message);
+      byte[] signature = signer.sign();
+      Signature verifier = Signature.getInstance("Ed25519");
+      verifier.initVerify(publicKey);
+      verifier.update(message);
+      return verifier.verify(signature);
+    } catch (GeneralSecurityException e) {
+      return false;
     }
-    return Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
-  }
-
-  /** A key's id: the first 16 hex characters of the SHA-256 of its X.509 encoding. */
-  static String keyId(String publicKey) {
-    return HexFormat.of().formatHex(sha256(Base64.getDecoder().decode(publicKey))).substring(0, 16);
   }
 
   /** Its public key, X.509 in base64: what a board's {@code agent.json} lists. */
@@ -108,7 +107,7 @@ final class Signer {
     return publicKey;
   }
 
-  /** Its id, as each signature names it. */
+  /** Its id, as each signature names it: the first 16 hex of the public key's SHA-256. */
   String id() {
     return id;
   }
@@ -140,24 +139,6 @@ final class Signer {
       return MessageDigest.getInstance("SHA-256").digest(bytes);
     } catch (GeneralSecurityException e) {
       throw new IllegalStateException("every Java has SHA-256", e);
-    }
-  }
-
-  /** Randomness that's a key's own bytes, once. */
-  private static final class Seed extends SecureRandom {
-    private static final long serialVersionUID = 1L;
-    private final byte[] seed;
-
-    Seed(byte[] seed) {
-      this.seed = seed.clone();
-    }
-
-    @Override
-    public void nextBytes(byte[] bytes) {
-      if (bytes.length != seed.length) {
-        throw new IllegalStateException("asked for " + bytes.length + " bytes, not a key's 32");
-      }
-      System.arraycopy(seed, 0, bytes, 0, seed.length);
     }
   }
 }

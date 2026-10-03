@@ -82,9 +82,9 @@ public final class Manager implements AutoCloseable {
     Signer key = null;
     String problem = "";
     try {
-      key = Signer.read(settings.key());
+      key = Signer.read(settings.key(), settings.publicKeyFile());
     } catch (NoSuchFileException e) {
-      // No key: reading works, and boards that require signatures say so.
+      // No key pair, or half of one: reading works, and boards that require signatures say so.
     } catch (IOException e) {
       problem = Link.why(e);
     }
@@ -211,8 +211,12 @@ public final class Manager implements AutoCloseable {
               Level.WARNING,
               "",
               (keyProblem.isEmpty()
-                      ? "no Spotter key on this controller (" + settings.key() + ")"
-                      : "the Spotter key " + settings.key() + " can't be read (" + keyProblem + ")")
+                      ? "no Spotter key pair on this controller ("
+                          + settings.key()
+                          + ", "
+                          + settings.publicKeyFile()
+                          + ")"
+                      : "the Spotter key pair can't be read (" + keyProblem + ")")
                   + ": boards that require signatures will refuse its actions and pushes"));
     }
     if (settled && !settings.limits().isEmpty()) {

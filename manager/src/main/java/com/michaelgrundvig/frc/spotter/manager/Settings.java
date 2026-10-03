@@ -29,6 +29,8 @@ import java.util.Optional;
  *     to have (default none: nothing is pushed)
  * @param key the private key that signs writes, for boards that require signatures (default {@code
  *     /home/systemcore/spotter.key}); without it, reading still works
+ * @param publicKey its public key (default: {@code spotter.pub} beside the private key, as
+ *     docs/robot.md's openssl commands make them; see {@link #publicKeyFile})
  */
 public record Settings(
     Duration heartbeat,
@@ -38,7 +40,8 @@ public record Settings(
     boolean refuseWhileEnabled,
     boolean pushAutomatically,
     Optional<Path> packs,
-    Path key) {
+    Path key,
+    Optional<Path> publicKey) {
   /** Where the private key is unless robot code says: on the robot controller, outside Git. */
   public static final Path KEY = Path.of("/home/systemcore/spotter.key");
 
@@ -52,7 +55,8 @@ public record Settings(
           true,
           true,
           Optional.empty(),
-          KEY);
+          KEY,
+          Optional.empty());
 
   public Settings {
     if (heartbeat.isNegative() || heartbeat.isZero()) {
@@ -74,19 +78,43 @@ public record Settings(
   /** These settings with another heartbeat interval. */
   public Settings withHeartbeat(Duration heartbeat) {
     return new Settings(
-        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        publicKey);
   }
 
   /** These settings with another missing threshold. */
   public Settings withMissing(Duration missing) {
     return new Settings(
-        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        publicKey);
   }
 
   /** These settings with another longest backoff. */
   public Settings withBackoff(Duration backoff) {
     return new Settings(
-        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        publicKey);
   }
 
   /** These settings with one field's limits overridden, by its id. */
@@ -94,19 +122,43 @@ public record Settings(
     Map<String, Limits> all = new HashMap<>(limits);
     all.put(id, override);
     return new Settings(
-        heartbeat, missing, backoff, all, refuseWhileEnabled, pushAutomatically, packs, key);
+        heartbeat,
+        missing,
+        backoff,
+        all,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        publicKey);
   }
 
   /** These settings, refusing actions while enabled or on the field, or not. */
   public Settings withRefuseWhileEnabled(boolean refuseWhileEnabled) {
     return new Settings(
-        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        publicKey);
   }
 
   /** These settings, pushing the team's packs automatically off the field, or not. */
   public Settings withPushAutomatically(boolean pushAutomatically) {
     return new Settings(
-        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        publicKey);
   }
 
   /** These settings with the team's packs: a folder of pack folders. */
@@ -119,12 +171,40 @@ public record Settings(
         refuseWhileEnabled,
         pushAutomatically,
         Optional.of(folder),
-        key);
+        key,
+        publicKey);
   }
 
-  /** These settings with the private key elsewhere. */
+  /** These settings with the private key elsewhere: its public key beside it, unless given. */
   public Settings withKey(Path key) {
     return new Settings(
-        heartbeat, missing, backoff, limits, refuseWhileEnabled, pushAutomatically, packs, key);
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        publicKey);
+  }
+
+  /** These settings with the public key elsewhere than beside the private key. */
+  public Settings withPublicKey(Path publicKey) {
+    return new Settings(
+        heartbeat,
+        missing,
+        backoff,
+        limits,
+        refuseWhileEnabled,
+        pushAutomatically,
+        packs,
+        key,
+        Optional.of(publicKey));
+  }
+
+  /** Where the public key is: as given, else {@code spotter.pub} beside the private key. */
+  public Path publicKeyFile() {
+    return publicKey.orElseGet(() -> key.resolveSibling("spotter.pub"));
   }
 }

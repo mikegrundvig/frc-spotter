@@ -78,14 +78,20 @@ class ManagerContainerTest {
     network.close();
   }
 
-  /** The robot's key, as the robot controller keeps it: PKCS#8, in PEM. */
+  /**
+   * The robot's key pair, as the robot controller keeps it, as openssl writes it: the private key
+   * PKCS#8 in PEM, {@code spotter.key}; its public key X.509 in PEM beside it, {@code spotter.pub}.
+   */
   private Path key(Path folder) throws Exception {
+    Files.writeString(folder.resolve("spotter.pub"), pem("PUBLIC KEY", team.getPublic()));
     Path file = folder.resolve("spotter.key");
-    String pem =
-        Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(team.getPrivate().getEncoded());
-    Files.writeString(
-        file, "-----BEGIN PRIVATE KEY-----\n" + pem + "\n-----END PRIVATE KEY-----\n");
+    Files.writeString(file, pem("PRIVATE KEY", team.getPrivate()));
     return file;
+  }
+
+  private static String pem(String kind, java.security.Key key) {
+    String base64 = Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(key.getEncoded());
+    return "-----BEGIN " + kind + "-----\n" + base64 + "\n-----END " + kind + "-----\n";
   }
 
   /** A disabled robot, off the field, on this computer's clock. */
@@ -157,8 +163,10 @@ class ManagerContainerTest {
               new Alert(
                   Level.WARNING,
                   "",
-                  "no Spotter key on this controller ("
+                  "no Spotter key pair on this controller ("
                       + none
+                      + ", "
+                      + dir.resolve("spotter.pub")
                       + "): boards that require signatures will refuse its actions and pushes"));
       assertThat(board.values()).isNotEmpty();
       Run refused = board.run("standin.hello", "Ada").whenDone().get(30, TimeUnit.SECONDS);

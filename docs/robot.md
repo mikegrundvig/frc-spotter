@@ -53,7 +53,8 @@ Each has a default (`Settings.DEFAULTS`); robot code changes those it needs with
 | `refuseWhileEnabled` | on | Refuse an action while the robot is enabled or the field is attached, unless the action says `whileEnabled: true` |
 | `pushAutomatically` | on | Push the team's packs to a board whose packs differ, while the robot is disabled and off the field |
 | `packs` | none | The team's packs: a folder of pack folders |
-| `key` | `/home/systemcore/spotter.key` | The private key that signs writes, for boards that require signatures |
+| `key` | `/home/systemcore/spotter.key` | The private key that signs writes, for boards that require signatures (*Signing*) |
+| `publicKey` | `spotter.pub` beside the key | Its public key, whose id each signature names |
 
 ## Each board
 
@@ -119,7 +120,7 @@ until one changes. Robot code maps them onto its own, WPILib's `Alert` say: `FAI
 | A missing board | failing | `vision-front is missing: Connection refused` |
 | A board on another major version of the protocol | failing | `vision-front: it speaks Spotter protocol 3.0, the robot 2.0` |
 | Packs that differ and won't be pushed now | warning | `vision-front's packs differ from the robot's: they'll be pushed off the field` |
-| No key, while a board requires signatures | warning | `no Spotter key on this controller (/home/systemcore/spotter.key): boards that require signatures will refuse its actions and pushes` |
+| No key pair, while a board requires signatures | warning | `no Spotter key pair on this controller (/home/systemcore/spotter.key, /home/systemcore/spotter.pub): boards that require signatures will refuse its actions and pushes` |
 | A limit override that matches nothing | warning | `Spotter's limits for vision.health.fsp match no value or response field on any board` |
 
 The last two are about robot code's own setup, and name no board. A missing board's last values
@@ -184,12 +185,15 @@ Given the team's packs (`Settings.withPacks(folder)`: a folder of pack folders, 
 directory so they live in Git with the robot code), the manager makes sure every board has them, so
 a spare board just works.
 
-1. It hashes them as it's made (`PackHash`, as the agent does), and connects with the hash.
+1. It reads them as it's made into the bundle it pushes: a `PackBundle` (`spotter.proto`), each
+   file's path in the folder, whether it's executable (`Files.isExecutable`), and its bytes,
+   exactly what the pack hash covers. It connects with the bundle's hash (`PackHash`, as the agent
+   hashes what it writes).
 2. A board whose packs match starts its stream as usual: nothing is pushed, and nothing restarts.
 3. A board whose packs differ answers `409`. A push is signed over a stream's challenge, so the
-   manager opens the stream without the hash, and pushes the bundle (a zip of the folder, each file
-   marked executable or not, as the hash counts it) over it. The agent unpacks it, swaps it in, and
-   exits; systemd starts it again; the manager reconnects with the hash, which now matches.
+   manager opens the stream without the hash, and pushes the bundle over it, in protobuf. The agent
+   writes its files (`755` or `644`), swaps them in, and exits; systemd starts it again; the
+   manager reconnects with the hash, which now matches.
 4. **Never automatically on the field:** only while the robot is disabled and the field isn't
    attached. Otherwise the board runs what it has, and a warning says its packs will be pushed off
    the field; they are, once it's off.
@@ -203,6 +207,11 @@ returns a `CompletableFuture` that completes once the board has taken the packs.
 **A board can refuse pushes** (`{"acceptPushes": false}` in its `agent.json`): its description says
 so, and a mismatch is a warning. A forced push to it fails, with its reason.
 
+**Small packs only.** A push is for configuration and scripts: a bundle is at most 16 MiB and 4,096
+files, sent as it is (no compression), within the agent's size cap. A pack with large data, such as
+one shipping a model file, is installed with the board's image or by whatever installs Spotter,
+never pushed from the robot.
+
 A push restarts the agent, so the board may show missing for a second or two. That's at startup,
 once per board, before anything depends on the board's values.
 
@@ -212,19 +221,28 @@ Off unless a board requires it: a board that lists trusted keys in its `agent.js
 (an action, a cancel, a push) only when it's signed by one of them (`docs/agent.md`, *Signed
 writes*). Reading stays open.
 
-- **The private key** lives on the robot controller, outside the deploy folder and out of Git:
-  `/home/systemcore/spotter.key` unless `Settings.withKey` says otherwise. It's an Ed25519 private
-  key, PKCS#8 in PEM, as `openssl genpkey -algorithm ed25519 -out spotter.key` writes it. A
-  replacement controller needs it too.
-- **The public key** is what each board's `agent.json` lists in `trustedKeys`:
-  `openssl pkey -in spotter.key -pubout -outform DER | base64 -w0` prints it
+- **The key pair** is made once, with openssl, on the robot controller:
+
+  ```sh
+  openssl genpkey -algorithm ed25519 -out spotter.key
+  openssl pkey -in spotter.key -pubout -out spotter.pub
+  ```
+
+  `spotter.key` is the private key (PKCS#8 in PEM), `spotter.pub` its public key (X.509 in PEM).
+  The manager reads both with Java's own key specs, and derives nothing: the key id each signature
+  names comes from `spotter.pub`.
+- **Where they live:** on the robot controller, outside the deploy folder and out of Git:
+  `/home/systemcore/spotter.key` unless `Settings.withKey` says otherwise, and `spotter.pub`
+  beside it unless `Settings.withPublicKey` does. A replacement controller needs both.
+- **What each board trusts:** its `agent.json` lists the public key in `trustedKeys`, as the base64
+  of its X.509 encoding, which is the text between `spotter.pub`'s PEM lines on one line
   (`MCowBQYDK2VwAyEA…`). It's safe anywhere.
-- **The manager signs every write** when it has the key: over the board's current stream
+- **The manager signs every write** when it has the pair: over the board's current stream
   connection's challenge, with a counter that rises with each write, one write at a time per board.
   A board that doesn't require signatures ignores them.
-- **Without the key,** reading works; writes to a board that requires signatures are refused
-  (`REFUSED`, with the board's reason), and a warning says there's no key. A key that can't be read
-  is a warning too.
+- **Without the pair,** or half of it, reading works; writes to a board that requires signatures are
+  refused (`REFUSED`, with the board's reason), and a warning says there's no key pair. A pair that
+  can't be read, or whose public key isn't the private key's, is a warning too.
 
 ## Tests
 
