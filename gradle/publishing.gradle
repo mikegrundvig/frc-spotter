@@ -1,11 +1,11 @@
-// Publishing a library the robot program uses (api, client) to Spotter's Maven repository: the
-// static one on the gh-pages branch, served by GitHub Pages at
-// https://mikegrundvig.github.io/frc-spotter/maven. A project applies this with ext.mavenArtifact
-// and ext.mavenDescription set. The release workflow checks out gh-pages and publishes into it
+// Publishing a library the robot program uses (spotter-protocol, spotter-manager) to Spotter's Maven
+// repository: the static one on the gh-pages branch, served by GitHub Pages at
+// https://mikegrundvig.github.io/frc-spotter/maven, as com.michaelgrundvig.frc:<project>. A project
+// applies this with ext.mavenDescription set. The release workflow checks out gh-pages and publishes into it
 // (-PpagesRepository=<its maven folder>); Gradle reads the maven-metadata.xml already there, so a
 // new version is added and the old ones kept. Each file gets its .md5, .sha1, .sha256, and .sha512.
 //
-//   ./gradlew publishAllPublicationsToPagesRepository -PagentVersion=0.3.0 -PpagesRepository=DIR
+//   ./gradlew publishAllPublicationsToPagesRepository -PagentVersion=0.4.0 -PpagesRepository=DIR
 
 apply plugin: "maven-publish"
 
@@ -18,10 +18,10 @@ publishing {
     publications {
         maven(MavenPublication) {
             from components.java
-            groupId = "com.michaelgrundvig.frc"
-            artifactId = project.ext.mavenArtifact
+            groupId = project.group
+            artifactId = project.name
             pom {
-                name = project.ext.mavenArtifact
+                name = project.name
                 description = project.ext.mavenDescription
                 url = "https://github.com/mikegrundvig/frc-spotter"
                 licenses {

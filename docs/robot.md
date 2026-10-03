@@ -1,9 +1,9 @@
 # The coprocessors, from the robot
 
-The robot program's side of Spotter is its **manager**: `:manager`, published as
+The robot program's side of Spotter is its **manager**: `:spotter-manager`, published as
 `com.michaelgrundvig.frc:spotter-manager` in Spotter's Maven repository
 (`https://mikegrundvig.github.io/frc-spotter/maven`). It's plain Java 17 with nothing but
-`:protocol` (`spotter-protocol`, and QuickBuffers' runtime, which WPILib already ships): no WPILib,
+`:spotter-protocol` (and QuickBuffers' runtime, which WPILib already ships): no WPILib,
 no AdvantageKit. Robot code wires in what's robot-specific.
 
 It keeps each coprocessor agent's stream open on a thread of its own, judges each value against its

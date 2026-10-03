@@ -40,13 +40,13 @@ configurations {
 }
 
 dependencies {
-    agentJar project(path: ":agent", configuration: "agentJarRelease")
-    agentPackage project(path: ":agent", configuration: "agentPackage")
+    agentJar project(path: ":spotter-agent", configuration: "agentJarRelease")
+    agentPackage project(path: ":spotter-agent", configuration: "agentPackage")
 
     errorprone libs.errorprone.core
     errorprone libs.nullaway
 
-    api project(":protocol")
+    api project(":spotter-protocol")
     api platform(libs.testcontainers.bom)
     api libs.testcontainers.core
     api libs.testcontainers.toxiproxy
@@ -57,7 +57,7 @@ dependencies {
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     testImplementation libs.assertj.core
     // The robot's manager, end to end against the agent in its container.
-    testImplementation project(":manager")
+    testImplementation project(":spotter-manager")
 }
 
 tasks.named("test") {

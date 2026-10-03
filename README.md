@@ -41,12 +41,12 @@ by default.
 
 ## The robot's side
 
-The robot program's manager, `:manager` (`com.michaelgrundvig.frc:spotter-manager` in Spotter's Maven
-repository at `https://mikegrundvig.github.io/frc-spotter/maven`), keeps each agent's stream open on
-a thread of its own, judges each value against its limits (or robot code's), and gives the robot
+The robot program's manager, `:spotter-manager` (`com.michaelgrundvig.frc:spotter-manager` in
+Spotter's Maven repository at `https://mikegrundvig.github.io/frc-spotter/maven`), keeps each
+agent's stream open on a thread of its own, judges each value against its limits (or robot code's), and gives the robot
 loop each board's state and the current alerts as data, without waiting on the network or making
 garbage. It pages a board's logs, runs its actions, pushes the team's packs (off the field), and
-signs its writes for boards that require it. It needs nothing but `:protocol` (`spotter-protocol`):
+signs its writes for boards that require it. It needs nothing but `:spotter-protocol`:
 the generated messages, and the pack hash both sides compute. `docs/robot.md` has it all. 0.3's
 client, and the `spotter-api` and `spotter-client` artifacts, are gone with protocol 1.
 
@@ -72,8 +72,8 @@ tmpfiles entry, and install script. `SHA256SUMS` has their checksums. Image buil
 
 `./gradlew ci` runs every check: formatting, static analysis, the tests (with the container tests,
 when Docker or Podman is there), and coverage. Java 25 is downloaded if it's missing; the code is
-compiled for Java 17, so the agent also runs on a board's own Java. `./gradlew :agent:agentRelease`
-builds the agent's packages for the computer it runs on.
+compiled for Java 17, so the agent also runs on a board's own Java.
+`./gradlew :spotter-agent:agentRelease` builds the agent's packages for the computer it runs on.
 
 ## License
 

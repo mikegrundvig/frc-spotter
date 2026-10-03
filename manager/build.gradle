@@ -22,16 +22,12 @@ tasks.withType(JavaCompile).configureEach {
     options.release = 17
 }
 
-base {
-    archivesName = "spotter-manager"
-}
-
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    api project(":protocol")
+    api project(":spotter-protocol")
 
     errorprone libs.errorprone.core
     errorprone libs.nullaway
@@ -42,7 +38,7 @@ dependencies {
     testImplementation libs.assertj.core
     testImplementation libs.archunit
     // The real agent, in the test's own process on a local port, with packs the test writes.
-    testImplementation testFixtures(project(":agent"))
+    testImplementation testFixtures(project(":spotter-agent"))
 }
 
 tasks.named("test") {
@@ -53,6 +49,5 @@ ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
 apply from: rootProject.file("gradle/quality.gradle")
 
 // Published as com.michaelgrundvig.frc:spotter-manager (gradle/publishing.gradle).
-ext.mavenArtifact = "spotter-manager"
 ext.mavenDescription = "Spotter's manager, for an FRC robot program: each coprocessor agent's stream kept open off the robot loop, its values judged against their limits, alerts as data, a snapshot to read each loop."
 apply from: rootProject.file("gradle/publishing.gradle")

@@ -10,11 +10,12 @@ plugins {
     alias(libs.plugins.protobuf) apply false
 }
 
-// Every project's coordinates, so another build (a robot program's, or a pack's tests, with
-// includeBuild) can use its protocol or harness by them: com.michaelgrundvig.frc.spotter:<project>.
-// The version is the agent's (-PagentVersion, as a release sets it).
+// Every project's coordinates, com.michaelgrundvig.frc:<project> (settings.gradle names each
+// spotter-<name>), as published: so another build (a robot program's, or a pack's tests) that
+// includes this one with includeBuild gets these projects in place of the published artifacts. The
+// version is the agent's (-PagentVersion, as a release sets it).
 allprojects {
-    group = "com.michaelgrundvig.frc.spotter"
+    group = "com.michaelgrundvig.frc"
     version = (findProperty("agentVersion") ?: "0.1.0").toString()
 }
 
