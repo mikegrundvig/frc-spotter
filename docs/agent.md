@@ -102,6 +102,10 @@ its length as a varint (protobuf's delimited form). At most four are open at onc
   writes (*Signed writes*).
 - **Reconnecting** starts with the description, every value and the runs, so nothing needs
   replaying.
+- **Each event is at most 1 MiB** (`Protocol.MAX_EVENT`), which the manager holds the agent to:
+  values past it go as several `values` events, one after another; the runs listed on connect are
+  every running one and the newest finished, as many as fit (one left out is still kept, and
+  fetched by its id); and a board describes no more than fits (*Packs*, *Bounds*).
 
 ### Who may do what
 
@@ -215,7 +219,10 @@ An action runs on request, optionally with input, and returns a response (its fi
 - one run of each action at a time;
 - at most two actions at once;
 - each within its timeout (60 s unless the pack says, at most 1 h);
-- 1 MiB kept of its standard output and of its standard error.
+- 1 MiB kept of its standard output and of its standard error;
+- its response, as its events and its state carry it, at most 256 KiB (`Protocol.MAX_RESPONSE`):
+  past that, its largest fields are unavailable, saying so ("too large to send: 900 KiB"). Its
+  output stays whole in its folder: declare the whole output `type: file` to download it.
 
 **Cancelling** a run stops it politely (SIGTERM to it and everything it started), then forcibly
 (SIGKILL) 5 s later; a timeout stops it the same way. What it says on standard error as it stops is

@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.spotter.agent;
 
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -366,7 +367,39 @@ final class Runs implements AutoCloseable {
     for (int i = 0; i < fields.size(); i++) {
       finished.addResponse(values.get(i).setName(fields.get(i).name()));
     }
-    return state.clone().setRunning(false).setResult(finished);
+    return state.clone().setRunning(false).setResult(bounded(finished));
+  }
+
+  /**
+   * A result within {@link Protocol#MAX_RESPONSE}, as a stream's event carries it: its largest
+   * fields made unavailable, saying why, until it fits. Its output stays whole in the run's folder,
+   * where a {@code file} field downloads it.
+   */
+  static Spotter.RunResult bounded(Spotter.RunResult result) {
+    while (result.getSerializedSize() > Protocol.MAX_RESPONSE) {
+      Spotter.FieldValue largest = null;
+      for (Spotter.FieldValue each : result.getMutableResponse()) {
+        if (largest == null || each.getSerializedSize() > largest.getSerializedSize()) {
+          largest = each;
+        }
+      }
+      if (largest == null || largest.getSerializedSize() < 1024) {
+        break;
+      }
+      int size = largest.getSerializedSize();
+      String name = largest.getName();
+      largest
+          .clear()
+          .setName(name)
+          .setUnavailable(
+              "too large to send: "
+                  + size / 1024
+                  + " KiB, more than the "
+                  + Protocol.MAX_RESPONSE / 1024
+                  + " KiB a run's response may be (declare the whole output type: file to"
+                  + " download it)");
+    }
+    return result;
   }
 
   /** Where a run's file fields are fetched. */

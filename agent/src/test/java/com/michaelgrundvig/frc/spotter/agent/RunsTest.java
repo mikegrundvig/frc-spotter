@@ -306,4 +306,24 @@ class RunsTest {
     assertThat(runs.action("core.reboot").orElseThrow().action().command())
         .isEqualTo(new Command.Run(List.of("systemctl", "reboot")));
   }
+
+  @Test
+  void aResponsePastWhatItMayBeHasItsLargestFieldsUnavailableSayingWhy() {
+    Spotter.RunResult result =
+        Spotter.RunResult.newInstance().setOutcome(Spotter.Outcome.OUTCOME_COMPLETED);
+    result.addResponse(Spotter.FieldValue.newInstance().setName("exit").setNumber(0));
+    result.addResponse(
+        Spotter.FieldValue.newInstance().setName("output").setText("z".repeat(900 * 1024)));
+    result.addResponse(Spotter.FieldValue.newInstance().setName("summary").setText("fine"));
+    Spotter.RunResult bounded = Runs.bounded(result);
+    assertThat(bounded.getSerializedSize())
+        .isLessThanOrEqualTo(com.michaelgrundvig.frc.spotter.protocol.Protocol.MAX_RESPONSE);
+    assertThat(bounded.getResponse().get(0).getNumber()).isZero();
+    assertThat(bounded.getResponse().get(1).getName()).isEqualTo("output");
+    assertThat(bounded.getResponse().get(1).getUnavailable())
+        .isEqualTo(
+            "too large to send: 900 KiB, more than the 256 KiB a run's response may be (declare"
+                + " the whole output type: file to download it)");
+    assertThat(bounded.getResponse().get(2).getText()).isEqualTo("fine");
+  }
 }
