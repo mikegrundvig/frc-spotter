@@ -2,7 +2,8 @@
 // protoc and QuickBuffers' generator for every platform a build may run on, so their checksums are
 // recorded too (CI builds on x86 and ARM Linux, people on Windows and macOS). No build applies it.
 //
-//   ./gradlew --write-verification-metadata sha256 --init-script gradle/every-platform.gradle \
+//   ./gradlew -g "$(mktemp -d)" --write-verification-metadata sha256 \
+//     --init-script gradle/every-platform.gradle \
 //     ci :spotter-agent:agentRelease :spotter-tools:allJar :spotter-protocol:resolveEveryPlatform
 allprojects {
     if (path == ":spotter-protocol") {

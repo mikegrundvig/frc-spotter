@@ -89,11 +89,13 @@ compiled for Java 17, so the agent also runs on a board's own Java.
 Every dependency, plugin and tool Gradle downloads is checked against its SHA-256 in
 `gradle/verification-metadata.xml`, so one that changes on a server fails the build. After changing
 a version in `gradle/libs.versions.toml`, write the file again from a build that resolves everything
-(`gradle/every-platform.gradle` adds protoc and QuickBuffers' generator for each platform), and read
-the diff:
+(`gradle/every-platform.gradle` adds protoc and QuickBuffers' generator for each platform), with an
+empty Gradle home (`-g`): with a warm cache, Gradle leaves out some metadata files that a cold one,
+as CI's, fetches. Then read the diff:
 
 ```sh
-./gradlew --write-verification-metadata sha256 --init-script gradle/every-platform.gradle \
+./gradlew -g "$(mktemp -d)" --write-verification-metadata sha256 \
+  --init-script gradle/every-platform.gradle \
   ci :spotter-agent:agentRelease :spotter-tools:allJar :spotter-protocol:resolveEveryPlatform
 ```
 
