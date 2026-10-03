@@ -298,7 +298,9 @@ final class Runs implements AutoCloseable {
               run.cancellation);
       Files.write(folder.resolve("output"), result.output());
       state = finished(run.state, result, declared.action().response(), run.run);
-    } catch (IOException | RuntimeException e) {
+    } catch (Throwable e) {
+      // Whatever it meets, a stack overflow on a deeply nested output included, the run finishes
+      // and its slot is free again.
       host.log("Run " + run.run + " of " + run.action + " failed: " + e);
       state =
           finished(

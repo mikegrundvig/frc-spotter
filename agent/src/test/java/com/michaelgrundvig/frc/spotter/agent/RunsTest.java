@@ -51,6 +51,10 @@ class RunsTest {
           run: [printf, "PK zip bytes"]
           response:
             output: {type: file, name: settings.zip}
+        - id: deep
+          run: [./deep]
+          response:
+            report: {type: json}
       """;
 
   @BeforeEach
@@ -63,6 +67,10 @@ class RunsTest {
             + "echo 'step one' >&2\n"
             + "echo '{\"level\": \"warning\", \"message\": \"careful\"}' >&2\n"
             + "echo \"{\\\"answer\\\": 42, \\\"report\\\": {\\\"given\\\": \\\"$given\\\"}}\"");
+    // JSON nested 100,000 deep: what overflowed the stack of a run's thread, and left it running.
+    fixture.script(
+        folder + "/deep",
+        "printf '{\"report\": '; head -c 100000 /dev/zero | tr '\\0' '['; printf '}\\n'");
     commands = new Commands(fixture.host);
     runs = runs(Runs.MAX_KEPT);
   }
@@ -325,5 +333,25 @@ class RunsTest {
             "too large to send: 900 KiB, more than the 256 KiB a run's response may be (declare"
                 + " the whole output type: file to download it)");
     assertThat(bounded.getResponse().get(2).getText()).isEqualTo("fine");
+  }
+
+  @Test
+  void anOutputNestedDeeperThanJsonIsReadIsntJsonAndTheRunFinishes() throws Exception {
+    Spotter.RunState state = finished(runs.start("team.deep", null).getRun());
+    assertThat(state.getResult().getOutcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+    Spotter.FieldValue report = state.getResult().getResponse().get(4);
+    assertThat(report.getName()).isEqualTo("report");
+    // Not read as JSON: the output is its one field's value, as it is.
+    assertThat(report.getJson()).startsWith("{\"report\": [[[");
+    // And the action may run again: its slot is free.
+    assertThat(finished(runs.start("team.deep", null).getRun()).getRunning()).isFalse();
+  }
+
+  @Test
+  void jsonsDepthIsCountedOutsideItsStrings() {
+    assertThat(JsonText.tooDeep("{\"a\": " + "[".repeat(64) + "]".repeat(64) + "}")).isTrue();
+    assertThat(JsonText.tooDeep("{\"a\": " + "[".repeat(63) + "]".repeat(63) + "}")).isFalse();
+    assertThat(JsonText.tooDeep("{\"a\": \"" + "[".repeat(100) + "\\\"[\"}")).isFalse();
+    assertThat(JsonText.asObject("{\"a\": " + "[".repeat(65) + "]".repeat(65) + "}")).isEmpty();
   }
 }
