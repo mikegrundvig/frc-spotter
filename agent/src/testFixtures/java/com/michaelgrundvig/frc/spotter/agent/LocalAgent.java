@@ -19,8 +19,9 @@ import org.jspecify.annotations.Nullable;
  * takes writes from 127.0.0.1, the test playing the robot controller. Its files count as root's,
  * written by root alone, as an installer leaves them, so its installed packs are trusted.
  *
- * <p>Stopping it and starting it again is an agent restart, on the same port: what a push does, and
- * systemd. For other projects' tests (the manager's); the agent's own use {@code Fixture}.
+ * <p>Stopping it and starting it again is an agent restart, on the same port. When the agent ends
+ * itself (after a push), it's started again at once, as systemd starts it. For other projects'
+ * tests (the manager's); the agent's own use {@code Fixture}.
  */
 public final class LocalAgent implements AutoCloseable {
   /** The agent's version, as its description says it. */
@@ -33,6 +34,7 @@ public final class LocalAgent implements AutoCloseable {
   private int port;
   private @Nullable Agent agent;
   private @Nullable AgentServer server;
+  private boolean closed;
 
   /** A board named {@code hostname}, in a folder, with nothing configured and no packs. */
   public LocalAgent(Path dir, String hostname) {
@@ -96,13 +98,35 @@ public final class LocalAgent implements AutoCloseable {
     if (server != null) {
       throw new IllegalStateException("the agent is already running");
     }
-    Agent started =
-        new Agent(host, Configuration.read(host), VERSION, "127.0.0.1", exits::incrementAndGet);
+    Agent started = new Agent(host, Configuration.read(host), VERSION, "127.0.0.1", this::exited);
     server = new AgentServer(started, new InetSocketAddress("127.0.0.1", port));
     port = server.port();
     agent = started;
     started.start();
     return this;
+  }
+
+  /** The agent ended itself, after a push: systemd starts it again. */
+  private void exited() {
+    exits.incrementAndGet();
+    Thread restart =
+        new Thread(
+            () -> {
+              synchronized (this) {
+                if (closed) {
+                  return;
+                }
+                stop();
+                try {
+                  start();
+                } catch (IOException e) {
+                  log.add("Couldn't start again: " + e);
+                }
+              }
+            },
+            "local-agent-restart");
+    restart.setDaemon(true);
+    restart.start();
   }
 
   /** Stops the agent, its collectors, and every connection to it. */
@@ -146,6 +170,11 @@ public final class LocalAgent implements AutoCloseable {
     return running().description();
   }
 
+  /** The folder its pushed packs are in, {@code /var/lib/frc-spotter/packs}. */
+  public Path pushedPacks() {
+    return path(Packs.PUSHED);
+  }
+
   /** How often it ended for systemd to start it again: after each push. */
   public int exits() {
     return exits.get();
@@ -164,8 +193,10 @@ public final class LocalAgent implements AutoCloseable {
     return running;
   }
 
+  /** Stops it for good: it isn't started again, even if it ended itself. */
   @Override
-  public void close() {
+  public synchronized void close() {
+    closed = true;
     stop();
   }
 }
