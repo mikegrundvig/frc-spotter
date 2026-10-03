@@ -45,7 +45,7 @@ class LastGoodTest {
 
   @Test
   void aStartAfterOneThatDidntStayUpSetsItsPushedPacksAsideAndStillTakesPushes() throws Exception {
-    // The first start loads them, and never stays up: a crash, or a reboot.
+    // The first start loads them, and never stays up: it crashes, or is killed out of memory.
     fixture.configuration();
     Configuration second = fixture.configuration();
     assertThat(second.packs().packs()).isEmpty();
@@ -102,5 +102,36 @@ class LastGoodTest {
       // Not yet: a minute from now, on the JDK's own timer, which a test doesn't wait for.
       assertThat(marked()).isTrue();
     }
+  }
+
+  @Test
+  void aCleanStopIsntAStartThatDidntStayUp() throws Exception {
+    fixture.configuration();
+    // Restarted for a change, a moment later: systemd stops it, and its hook says so.
+    LastGood.stopped(fixture.host);
+    assertThat(fixture.configuration().packs().packs()).hasSize(1);
+    LastGood.stopped(fixture.host);
+    assertThat(fixture.configuration().packs().packs()).hasSize(1);
+  }
+
+  @Test
+  void aBootCountsOnlyTheSecondInARowWhoseStartDidntStayUp() throws Exception {
+    fixture.configuration();
+    // Switched off within the minute, as a robot often is: the next boot loads them.
+    newBoot("2");
+    assertThat(fixture.configuration().packs().packs()).hasSize(1);
+    // And again, within the minute: two boots in a row, as a pack that reboots the board makes.
+    newBoot("3");
+    Configuration third = fixture.configuration();
+    assertThat(third.packs().packs()).isEmpty();
+    assertThat(third.problems()).containsExactly(LastGood.setAside());
+    // A boot that stays up starts afresh.
+    LastGood.healthy(fixture.host);
+    newBoot("4");
+    assertThat(fixture.configuration().packs().packs()).hasSize(1);
+  }
+
+  private void newBoot(String id) {
+    fixture.write(IdentitySource.BOOT_ID, "3c1e6a2e-0000-4000-8000-00000000000" + id + "\n");
   }
 }

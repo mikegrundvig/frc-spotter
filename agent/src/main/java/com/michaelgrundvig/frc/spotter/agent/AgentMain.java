@@ -36,6 +36,10 @@ public final class AgentMain {
             Path.of(options.getOrDefault("root", "/")), message -> System.err.println(message));
     // After a push the agent ends, and systemd starts it again to read the new packs.
     try (AgentServer server = serve(host, List.of(args), version(), () -> System.exit(0))) {
+      // Stopped cleanly (systemctl stop or restart, a shutdown, its own exit after a push): its
+      // last good start doesn't count this one as one that didn't stay up.
+      Runtime.getRuntime()
+          .addShutdownHook(new Thread(() -> LastGood.stopped(host), "spotter-stopped"));
       System.err.println("Coprocessor agent serving protocol 2 on port " + server.port());
       new CountDownLatch(1).await();
     }

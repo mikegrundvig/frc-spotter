@@ -130,11 +130,12 @@ public final class LocalAgent implements AutoCloseable {
     restart.start();
   }
 
-  /** Stops the agent, its collectors, and every connection to it. */
+  /** Stops the agent, cleanly, as systemd does: its collectors, and every connection to it. */
   public synchronized void stop() {
     AgentServer running = server;
     if (running != null) {
       running.close();
+      LastGood.stopped(host);
     }
     server = null;
     agent = null;

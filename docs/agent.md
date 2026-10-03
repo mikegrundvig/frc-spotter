@@ -469,14 +469,16 @@ Whatever reading one pack meets, a stack overflow included, the others load and 
 The robot's manager holds a board to the same numbers.
 
 **The last good start.** Before it loads pushed packs, the agent leaves a marker,
-`/var/lib/frc-spotter/starting`, and takes it away once it has been up 60 s. A start that finds the
-marker still there knows the last start with those packs didn't stay up (they crashed it as it
-loaded them, or rebooted the board): it sets them aside for that start, and serves, takes pushes,
-and says why in `problems`. Once that start has been up 60 s it takes the marker away, so the next
-start tries the pushed packs again; a push takes it away too. Their hash is still what's on the
-board's disk, so the same packs aren't pushed again in a loop. A board powered off within a minute
-of starting counts as a start that didn't stay up, so its next start runs without its pushed packs,
-and says so.
+`/var/lib/frc-spotter/starting`, and takes it away once it has been up 60 s, or when a push brings
+new packs. A start that finds the marker still there, from a start that didn't stay up, sets the
+pushed packs aside for itself: it serves, takes pushes, and says why in `problems`. Once that start
+has been up 60 s it takes the marker away, so the next start tries the pushed packs again. Their
+hash is still what's on the board's disk, so the same packs aren't pushed again in a loop. What
+counts as a start that didn't stay up is chosen so ordinary use doesn't: in the same boot, one that
+ended without the agent stopping cleanly (it crashed, or was killed out of memory), as a restart for
+a change stops it cleanly and its marker says so; across boots, only the second boot in a row
+(robots are switched off within a minute often enough, and a pack that reboots the board does it
+every boot).
 
 `agent/src/test/resources/packs/` has the design's example packs, copied as it writes them
 (`debian`, `photonvision`, `raspberry-pi`, `detector`), which the unit tests read. The catalog of
