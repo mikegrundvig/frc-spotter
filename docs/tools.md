@@ -4,8 +4,8 @@ The agent's jar is also Spotter's command line, for a pack's author and a board'
 runs on Windows, macOS and Linux, on Java 17 or newer, with no Gradle in it:
 
 ```sh
-java -jar frc-spotter-0.4.0-all.jar check <folder>...   # packs, read as the agent reads them
-java -jar frc-spotter-0.4.0-all.jar status <board>      # a board's problems, values, identity, packs
+java -jar frc-spotter-0.4.1-all.jar check <folder>...   # packs, read as the agent reads them
+java -jar frc-spotter-0.4.1-all.jar status <board>      # a board's problems, values, identity, packs
 ```
 
 On a board with the package installed, its launcher runs the same commands on the package's own
@@ -46,7 +46,7 @@ It also prints notes, which are no problem: a collector's field that's its comma
 check (root's, written by root alone), which means something only on a board, and says so.
 
 ```
-$ java -jar frc-spotter-0.4.0-all.jar check src/main/deploy/spotter-packs
+$ java -jar frc-spotter-0.4.1-all.jar check src/main/deploy/spotter-packs
 src/main/deploy/spotter-packs/detector/pack.yaml:8: unknown key "evry" in a collector; known: every, fields, file, http, id, run, timeout
 src/main/deploy/spotter-packs/detector/pack.yaml:5: ./health has neither an execute bit nor a #! first line, so it won't run once pushed: chmod +x it, start it with #!, or run: [sh, ./health]
 note: the trust check (root's, and written by root alone) is skipped: it means something only on a board
@@ -61,8 +61,8 @@ unless given): its problems first, then each value as `id  value unit  (label)` 
 packs. A board not reached within the wait is said in plain words, and exits `1`:
 
 ```
-$ java -jar frc-spotter-0.4.0-all.jar status 10.12.34.11
-vision-front (10.12.34.11): agent 0.4.0, protocol 2.0
+$ java -jar frc-spotter-0.4.1-all.jar status 10.12.34.11
+vision-front (10.12.34.11): agent 0.4.1, protocol 2.0
 Problems: none
 Values: 20
   debian.cpu.busiest        41 %  (Busiest core)
@@ -77,7 +77,7 @@ Packs: 2
   debian 1.0.0  installed  /etc/frc-spotter/packs/debian
   detector 0.2.0  pushed  /var/lib/frc-spotter/packs/detector
 
-$ java -jar frc-spotter-0.4.0-all.jar status vision-frnt
+$ java -jar frc-spotter-0.4.1-all.jar status vision-frnt
 vision-frnt: not reached: its name doesn't resolve (vision-frnt) (waited 5.0 s)
 ```
 
@@ -102,7 +102,7 @@ configurations {
 
 dependencies {
     // The agent's runnable jar, which is Spotter's command line.
-    spotter "com.michaelgrundvig.frc:spotter-agent:0.4.0"
+    spotter "com.michaelgrundvig.frc:spotter-agent:0.4.1"
 }
 
 // ./gradlew spotterCheck: the robot's packs, as a board's agent reads them. Part of check, so a
