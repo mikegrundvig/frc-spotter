@@ -1,7 +1,7 @@
 # Every build and test version in one place.
 
 [versions]
-spotless = "8.6.0"
+spotless = "8.10.4"
 errorprone-plugin = "5.1.1"
 errorprone = "2.50.0"
 nullaway = "0.14.2"
