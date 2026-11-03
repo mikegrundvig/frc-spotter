@@ -1,0 +1,10 @@
+# A unit that fails as it starts, for the unit probe's failure.
+[Unit]
+Description=A unit that fails
+
+[Service]
+Type=oneshot
+ExecStart=/bin/false
+
+[Install]
+WantedBy=multi-user.target

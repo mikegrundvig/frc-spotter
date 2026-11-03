@@ -1,0 +1,17 @@
+Package: frc-spotter
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: The robot's team <nobody@localhost>
+Depends: systemd, init-system-helpers, polkitd | policykit-1
+Conflicts: frc-coprocessor-agent
+Replaces: frc-coprocessor-agent
+Section: misc
+Priority: optional
+Installed-Size: @SIZE@
+Description: an FRC robot's coprocessor agent, for the robot's manager
+ A small web service an FRC robot's coprocessor runs, speaking Spotter's
+ protocol 2 to the robot program's manager. It runs what its packs declare
+ (values collected on a schedule, logs, actions) and measures nothing itself;
+ with no packs it reports which computer it is and offers power-off and
+ reboot. Packs are folders in /etc/frc-spotter/packs/, or pushed by the robot.
+ It bundles its own Java runtime.

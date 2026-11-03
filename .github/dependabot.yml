@@ -1,0 +1,19 @@
+# Weekly pull requests for newer build tools, test libraries and CI actions. What WPILib supplies or
+# pins (WPILib itself, the protobuf and QuickBuffers versions, the JSON library) and Gradle itself are
+# updated deliberately, per WPILib release.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "org.wpilib*"
+      - dependency-name: "com.google.protobuf*"
+      - dependency-name: "us.hebi.quickbuf*"
+      - dependency-name: "io.avaje*"
+      - dependency-name: "gradle-wrapper"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

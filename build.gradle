@@ -1,0 +1,53 @@
+// Spotter: the robot's manager (with the protocol both sides speak) and each coprocessor's agent.
+// The supporting build rules live in gradle/ (quality.gradle: formatting, static analysis,
+// coverage, the ci task; publishing.gradle: the Maven repository).
+//
+//   ./gradlew ci        every check CI runs; run it before pushing
+
+plugins {
+    alias(libs.plugins.spotless) apply false
+    alias(libs.plugins.errorprone) apply false
+    alias(libs.plugins.protobuf) apply false
+}
+
+// Both projects' coordinates, com.michaelgrundvig.frc:<project> (settings.gradle names each
+// spotter-<name>), as published: so another build (a robot program's, or a pack's tests) that
+// includes this one with includeBuild gets these projects in place of the published artifacts. The
+// version is the agent's (-PagentVersion, as a release sets it).
+allprojects {
+    group = "com.michaelgrundvig.frc"
+    version = (findProperty("agentVersion") ?: "0.1.0").toString()
+}
+
+// Everything CI checks: each project's ci.
+tasks.register("ci") {
+    group = "verification"
+    description = "Run every check CI runs: formatting, the gated build and tests, coverage."
+    dependsOn subprojects.collect { it.path + ":ci" }
+}
+
+// --tests names tests wherever they are (gradle/quality.gradle); if no project ran a test at all,
+// the build fails, so a misspelled name can't pass quietly.
+def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
+if (testsNamed) {
+    def results = objects.fileCollection()
+    gradle.taskGraph.whenReady { graph ->
+        graph.allTasks.findAll { it instanceof Test }.each {
+            results.from(it.reports.junitXml.outputLocation.get().asFile)
+        }
+    }
+    def asked = gradle.startParameter.taskRequests.collectMany { request ->
+        def args = request.args
+        (0..<args.size()).findAll { args[it] == "--tests" && it + 1 < args.size() }.collect { args[it + 1] }
+    }.join(", ")
+    tasks.register("testsMatched") {
+        group = "verification"
+        description = "Fail if --tests matched no test in any project."
+        doLast {
+            def ran = results.asFileTree.matching { include "TEST-*.xml" }.files
+            if (ran.isEmpty()) {
+                throw new GradleException("No test in any project matched --tests ${asked}")
+            }
+        }
+    }
+}

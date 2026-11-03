@@ -1,0 +1,31 @@
+#!/bin/sh
+# The hottest thermal zone, and the thermal margin: how far any zone is below its nearest trip
+# point, in °C: {"hottest": 61.2, "margin": 23.8}. Negative once a zone is past one.
+#
+# From /sys/class/thermal, as the running kernel has its zones and trip points (a vendor kernel's
+# may differ from the mainline's). Only the trips that act on heat count: passive (the kernel slows
+# the CPU), hot and critical (it shuts down); active ones (a fan's steps) don't. A zone that won't
+# read is left out. A computer with no zones (a virtual machine) says nothing; one whose zones have
+# no such trips says no margin.
+set -u
+for zone in /sys/class/thermal/thermal_zone*; do
+  temp=$(cat "$zone/temp" 2>/dev/null) || continue
+  echo "zone $temp"
+  for trip in "$zone"/trip_point_*_temp; do
+    [ -e "$trip" ] || continue
+    type=$(cat "${trip%_temp}_type" 2>/dev/null) || continue
+    at=$(cat "$trip" 2>/dev/null) || continue
+    echo "trip $type $at $temp"
+  done
+done | awk '
+  $1 == "zone" { zones++; if (zones == 1 || $2 > hottest) hottest = $2 }
+  $1 == "trip" && ($2 == "passive" || $2 == "hot" || $2 == "critical") && $3 > 0 {
+    left = $3 - $4
+    if (trips == 0 || left < margin) margin = left
+    trips++
+  }
+  END {
+    if (zones == 0) { print "{}"; exit }
+    if (trips == 0) printf "{\"hottest\": %.1f}\n", hottest / 1000
+    else printf "{\"hottest\": %.1f, \"margin\": %.1f}\n", hottest / 1000, margin / 1000
+  }'

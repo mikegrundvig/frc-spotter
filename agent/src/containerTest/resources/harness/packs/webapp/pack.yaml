@@ -1,0 +1,46 @@
+# The catalog container's test-only pack, for what no catalog pack has: a program with a web API
+# on 5800 (the stand-in ./webapp, in /opt/stand-ins), whether its service runs and it answers, its
+# settings' fingerprint, and its service's log by the debian pack's journal; and actions that
+# restart it, download its settings as a file, and send it a file in a form.
+pack: webapp
+version: 1.0.0
+collectors:
+  - id: service
+    run: [systemctl, is-active, webapp.service]
+    every: 2s
+    fields:
+      running: {label: Its service, type: text, fail: {notEquals: active}}
+  - id: web
+    http: {get: "http://localhost:5800/"}
+    every: 5s
+    fields:
+      status: {label: It answers, type: number, fail: {notEquals: 200, missing: true}}
+  - id: settings
+    run: [sha256sum, /opt/webapp/settings.db]
+    every: 10s
+    fields:
+      hash: {label: Settings fingerprint, type: text}
+logs:
+  - id: log
+    label: Its log
+    run: [/etc/frc-spotter/packs/debian/journal, --unit=webapp.service]
+    map: {time: {from: __REALTIME_TIMESTAMP, unit: us}, level: PRIORITY, source: SYSLOG_IDENTIFIER, message: MESSAGE, cursor: __CURSOR}
+actions:
+  - id: restart
+    label: Restart it
+    http: {post: "http://localhost:5800/api/restart"}
+    response:
+      status: {type: number, fail: {notEquals: 204}}
+  - id: export
+    label: Download settings
+    http: {get: "http://localhost:5800/api/settings.zip"}
+    response:
+      status: {type: number, fail: {notEquals: 200}}
+      body: {type: file, name: webapp-settings.zip}
+  - id: layout
+    label: Send a layout
+    http: {post: "http://localhost:5800/api/layout", form: {field: data, filename: layout.json}}
+    input: file
+    response:
+      status: {type: number, fail: {notEquals: 200}}
+      body: {type: text}

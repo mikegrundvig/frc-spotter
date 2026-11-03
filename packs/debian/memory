@@ -1,0 +1,9 @@
+#!/bin/sh
+# Memory available, as a share of all of it, as the kernel estimates what can be had without
+# swapping (MemAvailable, /proc/meminfo): {"available": 41.7}.
+set -u
+awk '
+  $1 == "MemTotal:" { total = $2 }
+  $1 == "MemAvailable:" { available = $2; seen = 1 }
+  END { if (total > 0 && seen) printf "{\"available\": %.1f}\n", 100 * available / total; else print "{}" }
+' /proc/meminfo

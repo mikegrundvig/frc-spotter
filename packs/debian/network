@@ -1,0 +1,59 @@
+#!/bin/sh
+# One network interface's link, from /sys/class/net: whether it has a link, the speed it
+# negotiated in Mb/s, and how often the link dropped since boot: {"up": true, "speed": 1000,
+# "drops": 0}. Its argument names the interface; with none, it's the one the board reaches the
+# robot's network on: the first with a route to a 10.x network, else the default route's, else eth0
+# (from /proc/net/route, so it needs no tools: the interface is eth0 on some boards, end0 or
+# enP4p65s0 on others).
+#
+# A loose plug at the radio drops the link on every hit; a damaged cable negotiates 100 Mb/s.
+#
+# Drops are counted from the kernel's carrier_up_count: each time the link came up after its first
+# is a drop it recovered from, and one that's down now after being up is one more. (Its down count
+# can't be read as drops: drivers differ in whether the link's start counts a down.) An interface
+# that isn't there has no link. A link that's down, or a virtual one, has no speed to say.
+set -u
+# /proc/net/route: each route's interface, then its destination as little-endian hex, so a 10.x
+# network's ends in 0A; a default route's is 00000000.
+robot() {
+  awk 'NR > 1 && substr($2, 7, 2) == "0A" { print $1; exit }' /proc/net/route 2>/dev/null
+}
+default() {
+  awk 'NR > 1 && $2 == "00000000" { print $1; exit }' /proc/net/route 2>/dev/null
+}
+name=${1:-}
+[ -n "$name" ] || name=$(robot)
+[ -n "$name" ] || name=$(default)
+[ -n "$name" ] || name=eth0
+link=/sys/class/net/$name
+if [ ! -d "$link" ]; then
+  echo "no network interface $name" >&2
+  echo '{"up": false}'
+  exit 0
+fi
+carrier=$(cat "$link/carrier" 2>/dev/null) || carrier=0
+up=false
+[ "$carrier" = 1 ] && up=true
+
+out="\"up\": $up"
+speed=$(cat "$link/speed" 2>/dev/null) || speed=-1
+case $speed in
+  '' | -* | *[!0-9]*) ;;
+  0) ;;
+  *) out="$out, \"speed\": $speed" ;;
+esac
+
+ups=$(cat "$link/carrier_up_count" 2>/dev/null) || ups=
+case $ups in
+  '' | *[!0-9]*) ;;
+  *)
+    if [ "$ups" -eq 0 ]; then
+      drops=0
+    else
+      drops=$((ups - 1))
+      [ "$up" = false ] && drops=$((drops + 1))
+    fi
+    out="$out, \"drops\": $drops"
+    ;;
+esac
+echo "{$out}"

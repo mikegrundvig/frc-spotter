@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pages twenty numbered entries by SPOTTER_*, as a log's command does: its cursor is the number.
+from=${SPOTTER_FROM}; cursor=${SPOTTER_CURSOR:-0}; limit=${SPOTTER_LIMIT}; total=20
+case $from in
+  latest) first=$((total - limit + 1)); last=$total ;;
+  before) first=$((cursor - limit)); last=$((cursor - 1)) ;;
+  after) first=$((cursor + 1)); last=$((cursor + limit)) ;;
+esac
+[ "$first" -lt 1 ] && first=1
+[ "$last" -gt "$total" ] && last=$total
+n=$first
+while [ "$n" -le "$last" ]; do
+  level=info; [ $((n % 5)) -eq 0 ] && level=error
+  printf '{"time": "2026-10-02T12:00:%02dZ", "level": "%s", "source": "%s/%s", "message": "entry %d", "cursor": "%d"}\n' \
+    "$n" "$level" "$from" "$SPOTTER_LEVEL" "$n" "$n"
+  n=$((n + 1))
+done

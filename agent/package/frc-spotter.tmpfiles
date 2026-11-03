@@ -1,0 +1,3 @@
+# The coprocessor agent's pushed packs (systemd-tmpfiles): /var/lib/frc-spotter, its account's, where
+# the robot's packs are unpacked and swapped in. Made at boot, and by its package as it's installed.
+d /var/lib/frc-spotter 0755 frc-spotter frc-spotter -

@@ -1,0 +1,55 @@
+#!/bin/sh
+# The NVMe drive's health, for the debian pack's drive collector: its wear (the share of its rated
+# endurance used, which can pass 100) and its unsafe shutdowns (power lost without a clean
+# shutdown), from nvme-cli's SMART log, written to /run/frc-spotter-debian/drive.json:
+# {"wear": 3, "unsafe-shutdowns": 23}.
+#
+# Reading a drive's SMART log takes root, which the agent hasn't: its installer runs this as root,
+# each minute, from frc-spotter-debian-drive.timer (README.md). Its argument names the drive
+# (/dev/nvme0 unless it says). Without the drive, or without nvme-cli, it leaves no file, and the
+# collector says the file isn't there. The file is written whole, then renamed, so the agent never
+# reads half of one.
+set -u
+device=${1:-/dev/nvme0}
+dir=/run/frc-spotter-debian
+file=$dir/drive.json
+if [ ! -e "$device" ]; then
+  rm -f "$file"
+  exit 0
+fi
+if ! command -v nvme >/dev/null 2>&1; then
+  rm -f "$file"
+  echo "<4>frc-spotter-debian-drive: nvme-cli isn't installed, so $device's health isn't read" >&2
+  exit 0
+fi
+if ! log=$(nvme smart-log "$device" --output-format=json 2>/dev/null); then
+  rm -f "$file"
+  echo "<4>frc-spotter-debian-drive: nvme smart-log $device failed" >&2
+  exit 1
+fi
+
+# A key's number in nvme-cli's JSON, however it's spaced, quoted or not (nvme-cli 2 writes its
+# 128-bit counters as strings): the first of the names that's there.
+number() {
+  for key in "$@"; do
+    found=$(printf '%s' "$log" | tr -d '\n' |
+      grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"\{0,1\}[0-9][0-9]*" | head -n 1 | grep -o '[0-9]*$')
+    if [ -n "$found" ]; then
+      echo "$found"
+      return
+    fi
+  done
+}
+wear=$(number percent_used percentage_used)
+unsafe=$(number unsafe_shutdowns)
+out=
+[ -n "$wear" ] && out="\"wear\": $wear"
+if [ -n "$unsafe" ]; then
+  [ -n "$out" ] && out="$out, "
+  out="$out\"unsafe-shutdowns\": $unsafe"
+fi
+
+mkdir -p "$dir"
+printf '{%s}\n' "$out" > "$file.part"
+chmod 0644 "$file.part"
+mv -f "$file.part" "$file"

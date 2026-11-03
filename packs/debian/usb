@@ -1,0 +1,31 @@
+#!/bin/sh
+# The USB devices plugged in now, each by its port and its product, and how often a device was
+# unplugged since boot: {"devices": "7-1 HD Pro Webcam C920; 8-1 Arducam", "disconnects": 0}.
+#
+# Devices are /sys/bus/usb/devices' (root hubs and interfaces left out), in port order: a port is
+# its bus, then each port along the way (7-1.2). A device that names no product is called by its
+# vendor and product ids. Disconnects are the kernel's "USB disconnect" lines in this boot's
+# journal, which reading takes the systemd-journal group (the agent's package gives it); without
+# them, it says nothing of disconnects.
+set -u
+devices=$(for device in /sys/bus/usb/devices/*; do
+  port=${device##*/}
+  case $port in
+    *:* | usb*) continue ;;
+    [0-9]*-[0-9]*) ;;
+    *) continue ;;
+  esac
+  product=$(cat "$device/product" 2>/dev/null) ||
+    product="$(cat "$device/idVendor" 2>/dev/null):$(cat "$device/idProduct" 2>/dev/null)"
+  printf '%s %s\n' "$port" "$product"
+done | sort -t- -k1,1n -k2,2V | awk 'NR > 1 { printf "; " } { printf "%s", $0 }')
+[ -n "$devices" ] || devices=none
+# The product names come from the devices: quotes and backslashes kept JSON's.
+devices=$(printf '%s' "$devices" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+if kernel=$(journalctl -k -b -q --no-pager -o cat 2>/dev/null); then
+  disconnects=$(printf '%s\n' "$kernel" | grep -c 'USB disconnect')
+  printf '{"devices": "%s", "disconnects": %s}\n' "$devices" "$disconnects"
+else
+  printf '{"devices": "%s"}\n' "$devices"
+fi

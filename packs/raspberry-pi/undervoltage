@@ -1,0 +1,29 @@
+#!/bin/sh
+# A Raspberry Pi's under-voltage episodes since boot, from the kernel's log of this boot: how many,
+# and as a status, the latest one's time in seconds after boot:
+# {"episodes": 2, "summary": {"level": "failing", "message": "2 since boot, latest 1234.6 s"}}.
+#
+# Its hwmon driver (drivers/hwmon/raspberrypi-hwmon.c, rpi-6.12.y) asks the firmware every 2 s,
+# clearing its sticky bits each time, so no single reading says "since boot"; but it logs
+# "Undervoltage detected!" each time an episode begins, so the kernel's log holds every one. Reading
+# it takes the systemd-journal group, which the agent's package gives it. Any episode fails: a
+# brownout resets USB cameras and can corrupt the SD card.
+set -u
+if ! kernel=$(journalctl -k -b -q --no-pager -o short-monotonic 2>/dev/null); then
+  echo "journalctl -k -b failed: the kernel's log of this boot can't be read" >&2
+  exit 2
+fi
+printf '%s\n' "$kernel" | awk '
+  /Undervoltage detected!/ {
+    episodes++
+    at = $0
+    sub(/^\[ */, "", at)
+    sub(/\].*/, "", at)
+  }
+  END {
+    if (episodes == 0) {
+      print "{\"episodes\": 0, \"summary\": {\"level\": \"ok\", \"message\": \"none since boot\"}}"
+    } else {
+      printf "{\"episodes\": %d, \"summary\": {\"level\": \"failing\", \"message\": \"%d since boot, latest %.1f s\"}}\n", episodes, episodes, at
+    }
+  }'

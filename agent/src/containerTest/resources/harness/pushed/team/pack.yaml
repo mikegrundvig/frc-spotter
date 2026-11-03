@@ -1,0 +1,9 @@
+# A team's own pack, as the robot pushes it from its deploy folder: its program beside it.
+pack: team
+version: 0.2.0
+collectors:
+  - id: greet
+    run: [./greet]
+    every: 1s
+    fields:
+      greeting: {type: text}

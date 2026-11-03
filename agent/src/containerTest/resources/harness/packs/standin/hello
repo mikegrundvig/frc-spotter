@@ -1,0 +1,6 @@
+#!/bin/sh
+# Greets whoever its input names: steps on standard error, the result as JSON on standard output.
+read -r name
+echo "greeting $name" >&2
+echo '{"level": "warning", "message": "almost done"}' >&2
+printf '{"greeting": "hello, %s"}\n' "$name"
