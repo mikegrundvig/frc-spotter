@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.michaelgrundvig.frc</groupId>
+  <artifactId>spotter-agent</artifactId>
+  <version>0.4.1</version>
+  <name>spotter-agent</name>
+  <description>Spotter's agent, for an FRC robot's coprocessors, and Spotter's command line: check a folder of packs as the agent reads them, and read a board's status. Runnable: java -jar.</description>
+  <url>https://github.com/mikegrundvig/frc-spotter</url>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://github.com/mikegrundvig/frc-spotter/blob/main/LICENSE</url>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <name>Michael Grundvig</name>
+      <url>https://github.com/mikegrundvig</url>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/mikegrundvig/frc-spotter.git</connection>
+    <url>https://github.com/mikegrundvig/frc-spotter</url>
+  </scm>
+</project>
