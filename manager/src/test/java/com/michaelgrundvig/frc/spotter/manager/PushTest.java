@@ -3,7 +3,6 @@ package com.michaelgrundvig.frc.spotter.manager;
 import static com.michaelgrundvig.frc.spotter.manager.Boards.await;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.michaelgrundvig.frc.spotter.agent.LocalAgent;
 import com.michaelgrundvig.frc.spotter.manager.stream.Link;
@@ -196,7 +195,7 @@ class PushTest {
     Path lib = agent.path("/var/lib/frc-spotter");
     Files.createDirectories(lib);
     Files.setPosixFilePermissions(lib, PosixFilePermissions.fromString("r-xr-xr-x"));
-    assumeFalse(Files.isWritable(lib));
+    Needs.that(!Files.isWritable(lib), "a folder it can't write: a user that isn't root");
     agent.start();
     Manager manager = manage(Settings.DEFAULTS);
     Board board = manager.boards().get(0);
@@ -270,7 +269,9 @@ class PushTest {
     Files.setPosixFilePermissions(
         unreadable.resolve("team/pack.yaml"), PosixFilePermissions.fromString("---------"));
     // Root reads anything: nothing to see there.
-    assumeFalse(Files.isReadable(unreadable.resolve("team/pack.yaml")));
+    Needs.that(
+        !Files.isReadable(unreadable.resolve("team/pack.yaml")),
+        "a file it can't read: a user that isn't root");
     Manager started =
         new Manager(
             Boards.robot(),

@@ -87,14 +87,23 @@ class CollectorsTest {
   @Test
   void aCollectorWhoseCommandWontGoIsUnavailableAndIsntRunAgainUntilItHas() throws Exception {
     Fixture fixture = new Fixture(dir);
-    Pack pack = pack("p", Map.of("stuck", Duration.ofMillis(100)));
-    ValueStore store = new ValueStore(1);
+    // Beside it, due as often, one that counts its turns: the schedule's turns, seen as they come.
+    Map<String, Duration> every = new java.util.LinkedHashMap<>();
+    every.put("stuck", Duration.ofMillis(100));
+    every.put("ticks", Duration.ofMillis(100));
+    Pack pack = pack("p", every);
+    ValueStore store = new ValueStore(2);
     AtomicInteger ran = new AtomicInteger();
+    java.util.concurrent.CountDownLatch turns = new java.util.concurrent.CountDownLatch(6);
     java.util.concurrent.CompletableFuture<Void> ended =
         new java.util.concurrent.CompletableFuture<>();
     // As Commands answers a command it stopped that won't go: stuck in the kernel, say.
-    Runner stuck =
+    Runner runner =
         (folder, command, timeout, max) -> {
+          if (((Command.Run) command).program().equals("ticks")) {
+            turns.countDown();
+            return printed("1");
+          }
           ran.incrementAndGet();
           return new Commands.Result(
               Command.Kind.RUN,
@@ -106,12 +115,10 @@ class CollectorsTest {
               "",
               ended);
         };
-    try (Collectors collectors = new Collectors(fixture.host, List.of(pack), stuck, store)) {
+    try (Collectors collectors = new Collectors(fixture.host, List.of(pack), runner, store)) {
       collectors.start();
-      for (int i = 0; i < 100 && ran.get() == 0; i++) {
-        Thread.sleep(20);
-      }
-      Thread.sleep(500);
+      // Six turns of the other, which starts half a second after it: it was due ten times or so.
+      assertThat(turns.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
       // Due every 100 ms, it isn't run again while its command is still running.
       assertThat(ran.get()).isEqualTo(1);
       assertThat(store.get(0).getUnavailable())

@@ -18,7 +18,6 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -209,9 +208,8 @@ class SigningTest {
 
   @Test
   void aPairOpensslMadeIsRead() throws Exception {
-    // As docs/robot.md says to make one; skipped where openssl isn't installed.
-    Assumptions.assumeTrue(
-        Files.isExecutable(Path.of("/usr/bin/openssl")), "openssl isn't installed");
+    // As docs/robot.md says to make one; skipped where openssl isn't installed, but never in CI.
+    Needs.that(Files.isExecutable(Path.of("/usr/bin/openssl")), "openssl");
     Path made = dir.resolve("openssl.key");
     Path pub = dir.resolve("openssl.pub");
     run("openssl", "genpkey", "-algorithm", "ed25519", "-out", made.toString());
