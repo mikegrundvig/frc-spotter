@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.agent.Agent;
 import com.michaelgrundvig.frc.spotter.agent.Fixture;
+import com.michaelgrundvig.frc.spotter.manager.CatalogPacks;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -81,35 +82,59 @@ class CatalogTest {
   }
 
   @Test
-  void debianHasItsValuesAndItsJournal() {
+  void debianHasItsValuesAndItsJournalByTheNamesTheManagerShips() {
     Spotter.Description description = described("debian");
     assertThat(ids(description))
         .containsExactly(
-            "debian.cpu.busiest",
-            "debian.cpu.capped",
-            "debian.thermal.hottest",
-            "debian.thermal.margin",
-            "debian.memory.available",
-            "debian.disk.root-free",
-            "debian.network.up",
-            "debian.network.speed",
-            "debian.network.drops",
-            "debian.usb.devices",
-            "debian.usb.disconnects",
-            "debian.clock.synced",
-            "debian.clock.offset",
-            "debian.drive.wear",
-            "debian.drive.unsafe-shutdowns",
-            "debian.uptime.seconds");
+            CatalogPacks.Debian.CPU_BUSIEST,
+            CatalogPacks.Debian.CPU_CAPPED,
+            CatalogPacks.Debian.THERMAL_HOTTEST,
+            CatalogPacks.Debian.THERMAL_MARGIN,
+            CatalogPacks.Debian.MEMORY_AVAILABLE,
+            CatalogPacks.Debian.DISK_ROOT_FREE,
+            CatalogPacks.Debian.NETWORK_UP,
+            CatalogPacks.Debian.NETWORK_SPEED,
+            CatalogPacks.Debian.NETWORK_DROPS,
+            CatalogPacks.Debian.USB_DEVICES,
+            CatalogPacks.Debian.USB_DISCONNECTS,
+            CatalogPacks.Debian.CLOCK_SYNCED,
+            CatalogPacks.Debian.CLOCK_OFFSET,
+            CatalogPacks.Debian.DRIVE_WEAR,
+            CatalogPacks.Debian.DRIVE_UNSAFE_SHUTDOWNS,
+            CatalogPacks.Debian.UPTIME_SECONDS);
     assertThat(description.getLogs())
         .extracting(Spotter.LogDeclaration::getId)
-        .contains("debian.journal");
+        .containsExactly(CatalogPacks.Debian.JOURNAL);
   }
 
   @Test
-  void raspberryPiHasItsPower() {
+  void raspberryPiHasItsPowerByTheNamesTheManagerShips() {
     assertThat(ids(described("raspberry-pi")))
-        .containsExactly("raspberry-pi.power.episodes", "raspberry-pi.power.summary");
+        .containsExactly(
+            CatalogPacks.RaspberryPi.POWER_EPISODES, CatalogPacks.RaspberryPi.POWER_SUMMARY);
+  }
+
+  @Test
+  void everyNameTheManagerShipsIsOneItsPackHas() throws Exception {
+    // Each row: the pack, and the manager's names for it.
+    record Row(String pack, Class<?> names) {}
+    for (Row row :
+        List.of(
+            new Row("debian", CatalogPacks.Debian.class),
+            new Row("raspberry-pi", CatalogPacks.RaspberryPi.class))) {
+      fixture = new Fixture(dir.resolve(row.pack()));
+      Spotter.Description description = described(row.pack());
+      List<String> has = new ArrayList<>(ids(description));
+      for (Spotter.LogDeclaration log : description.getLogs()) {
+        has.add(log.getId());
+      }
+      List<String> shipped = new ArrayList<>();
+      for (java.lang.reflect.Field name : row.names().getFields()) {
+        shipped.add((String) name.get(null));
+      }
+      assertThat(shipped).as(row.pack()).isNotEmpty();
+      assertThat(has).as(row.pack()).containsExactlyInAnyOrderElementsOf(shipped);
+    }
   }
 
   @Test

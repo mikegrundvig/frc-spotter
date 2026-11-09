@@ -100,6 +100,8 @@ made from.
   packs don't declare it), it's `UNAVAILABLE`, its `number()` NaN, and its reason says so
   (`vision-front has no value detector.health.fps`). Decide on `level()`, not on `number()`. A
   value the board stops declaring goes unavailable the same way, and comes back if it does.
+  The catalog's packs' values and logs are named in `CatalogPacks`, so robot code reads them by a
+  name Spotter owns, never a string of its own: `board.value(CatalogPacks.Debian.CPU_BUSIEST)`.
 - **`changes()`:** the change notice, a count that rises whenever the description or a value
   changes; a value's `changed()` is the count when it last did. A loop that keeps the count it last
   saw knows what changed.
