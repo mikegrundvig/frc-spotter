@@ -153,6 +153,101 @@ class CommandsTest {
   }
 
   @Test
+  void whatTakesItsStandardErrorFailingNeitherStopsItNorIsAskedAgain() {
+    java.util.concurrent.atomic.AtomicInteger asked =
+        new java.util.concurrent.atomic.AtomicInteger();
+    // As a run's log that can't be written fails: every line it's handed.
+    Commands.Options failing =
+        new Commands.Options(
+            null,
+            java.util.Map.of(),
+            1024,
+            64 * 1024,
+            line -> {
+              asked.incrementAndGet();
+              throw new java.io.UncheckedIOException(new java.io.IOException("no space left"));
+            },
+            Duration.ZERO);
+    // A line, a pause for it to be taken, then more: written to a pipe nobody reads, they'd kill
+    // it.
+    Commands.Result result =
+        commands.run(
+            folder,
+            new Command.Run(
+                List.of(
+                    "sh",
+                    "-c",
+                    "echo first >&2; sleep 0.2; i=0; while [ $i -lt 100 ]; do echo more >&2;"
+                        + " i=$((i+1)); done; echo done")),
+            Duration.ofSeconds(5),
+            failing,
+            new Commands.Cancellation());
+    assertThat(result.completed()).isTrue();
+    assertThat(result.code()).isZero();
+    assertThat(result.text()).isEqualTo("done\n");
+    assertThat(result.errors()).isEqualTo("first");
+    assertThat(asked.get()).isEqualTo(1);
+  }
+
+  @Test
+  void whatLeftItsGroupHoldingItsOutputLeavesNoReaderBehind() throws Exception {
+    Path pid = dir.resolve("session");
+    // The sleep starts a session of its own: outside the command's group, and no descendant of it
+    // once sh has exited, it holds the command's output open.
+    Commands.Result result =
+        commands.run(
+            folder,
+            new Command.Run(
+                List.of(
+                    "sh",
+                    "-c",
+                    "setsid sh -c 'echo $$ > " + pid + "; exec sleep 30' & echo left; sleep 0.2")),
+            Duration.ofSeconds(30),
+            1024);
+    try {
+      assertThat(result.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COMPLETED);
+      assertThat(result.text()).isEqualTo("left\n");
+      assertThat(commands.reading()).isZero();
+    } finally {
+      new ProcessBuilder("/bin/sh", "-c", "kill -s KILL $(cat " + pid + ") 2>/dev/null")
+          .start()
+          .waitFor();
+    }
+  }
+
+  @Test
+  void aCommandWithNoRoomToReadItsOutputCouldNotStart() throws Exception {
+    Commands two = new Commands(fixture.host, 2);
+    Commands.Cancellation first = new Commands.Cancellation();
+    java.util.concurrent.CompletableFuture<Commands.Result> running =
+        java.util.concurrent.CompletableFuture.supplyAsync(
+            () ->
+                two.run(
+                    folder,
+                    new Command.Run(List.of("sleep", "30")),
+                    Duration.ofSeconds(30),
+                    Commands.Options.collector(1024),
+                    first));
+    try {
+      for (int i = 0; i < 250 && two.reading() < 2; i++) {
+        Thread.sleep(20);
+      }
+      assertThat(two.reading()).isEqualTo(2);
+      Commands.Result refused = two.run(folder, new Command.Run(List.of("true")), SECOND, 1024);
+      assertThat(refused.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COULD_NOT_START);
+      assertThat(refused.message())
+          .isEqualTo(
+              "no room to read its output: 2 readers are busy, held by what commands left running");
+    } finally {
+      first.cancel();
+      running.get(10, java.util.concurrent.TimeUnit.SECONDS);
+      two.close();
+    }
+    // Once the first has ended, its room is given back.
+    assertThat(two.reading()).isZero();
+  }
+
+  @Test
   void aProgramThatIsntOnThePathCouldNotStart() {
     Commands.Result missing = run("no-such-program-anywhere");
     assertThat(missing.outcome()).isEqualTo(Spotter.Outcome.OUTCOME_COULD_NOT_START);

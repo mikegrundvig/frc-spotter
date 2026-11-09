@@ -30,13 +30,16 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -70,6 +73,14 @@ public final class Commands implements Runner, AutoCloseable {
    */
   static final long LEFT_MILLIS = 500;
 
+  /**
+   * The most threads reading commands' output at once: two for each command, and at most eight
+   * commands run at once (four collectors, two actions, two logs), so twice what they need. Past
+   * it, readers held by what commands left running, a command isn't started, rather than the agent
+   * running out of threads.
+   */
+  static final int MAX_READERS = 32;
+
   /** The errno in why a program couldn't start. */
   private static final Pattern ERRNO = Pattern.compile("error(?:=|: )([0-9]+)");
 
@@ -81,6 +92,12 @@ public final class Commands implements Runner, AutoCloseable {
   /** Reads commands' standard output and standard error, a thread each while they run. */
   private final ExecutorService readers = Executors.newCachedThreadPool(daemon("spotter-output"));
 
+  /** Room for readers: a command takes two before it starts, and each gives its back as it ends. */
+  private final Semaphore readerRoom;
+
+  /** The most readers this runs at once. */
+  private final int maxReaders;
+
   /**
    * setsid (util-linux's), which runs a command as the leader of a process group of its own; null
    * where there's none, and a command's descendants are all that's stopped.
@@ -88,8 +105,20 @@ public final class Commands implements Runner, AutoCloseable {
   private final @Nullable String setsid;
 
   public Commands(Host host) {
+    this(host, MAX_READERS);
+  }
+
+  /** With room for only so many readers: for tests. */
+  Commands(Host host, int maxReaders) {
     this.host = host;
     this.setsid = Files.isExecutable(Path.of(SETSID)) ? SETSID : null;
+    this.maxReaders = maxReaders;
+    this.readerRoom = new Semaphore(maxReaders);
+  }
+
+  /** How many readers are reading now: for tests. */
+  int reading() {
+    return maxReaders - readerRoom.availablePermits();
   }
 
   /** Where setsid is, on Debian and its kind. */
@@ -274,6 +303,14 @@ public final class Commands implements Runner, AutoCloseable {
           Spotter.Outcome.OUTCOME_COULD_NOT_START,
           notExecutable(program, run.program()));
     }
+    if (!readerRoom.tryAcquire(2)) {
+      return Result.failed(
+          Command.Kind.RUN,
+          Spotter.Outcome.OUTCOME_COULD_NOT_START,
+          "no room to read its output: "
+              + maxReaders
+              + " readers are busy, held by what commands left running");
+    }
     argv.set(0, found.toString());
     if (setsid != null) {
       // Its own process group, of which it's the leader: a timeout or a cancel signals all of it,
@@ -291,11 +328,13 @@ public final class Commands implements Runner, AutoCloseable {
       builder.environment().putAll(options.environment());
       process = builder.start();
     } catch (IOException e) {
+      readerRoom.release(2);
       return Result.failed(
           Command.Kind.RUN,
           Spotter.Outcome.OUTCOME_COULD_NOT_START,
           why(e, program, run.program()));
     } catch (IllegalArgumentException e) {
+      readerRoom.release(2);
       // The JDK refuses a variable a process can't be given (a NUL in it, say): never quoted, as
       // a log's paging is anyone's.
       return Result.failed(
@@ -303,14 +342,14 @@ public final class Commands implements Runner, AutoCloseable {
           Spotter.Outcome.OUTCOME_COULD_NOT_START,
           "its environment can't be given to a process: a value has a character none takes");
     }
+    // Its pipes, by name, while it's running: what holds them once it has exited is found by them.
+    Set<String> pipes = PipeHolders.of(process.pid());
     // Its output and its standard error, each read on a thread of its own: the wait below is on
     // the process and its deadline, never on the end of a pipe that what it left may hold open.
     Output out = new Output(options.maxOutput());
-    CompletableFuture<Void> outRead =
-        CompletableFuture.runAsync(() -> out.read(process.getInputStream()), readers);
+    CompletableFuture<Void> outRead = reader(() -> out.read(process.getInputStream()));
     Errors errs = new Errors(options);
-    CompletableFuture<Void> errRead =
-        CompletableFuture.runAsync(() -> errs.read(process.getErrorStream()), readers);
+    CompletableFuture<Void> errRead = reader(() -> errs.read(process.getErrorStream()));
     CompletableFuture<Void> read = CompletableFuture.allOf(outRead, errRead);
     // Gone: it has exited, and nothing holds its output. (Its exit is asked of the process itself:
     // the JDK completes onExit only once it has drained the pipes a reader may be blocked on.)
@@ -349,7 +388,12 @@ public final class Commands implements Runner, AutoCloseable {
       // open, which is stopped, its whole group, so neither it nor a reader is left behind.
       if (!process.isAlive() && !await(read, LEFT_MILLIS)) {
         stop(process, Duration.ofMillis(LEFT_MILLIS), gone);
-        await(read, 2 * LEFT_MILLIS);
+        if (!await(read, 2 * LEFT_MILLIS)) {
+          // Still held, by something outside its group (a program that started a session of its
+          // own): it's found by its pipes and killed, so no reader is left blocked on them.
+          PipeHolders.kill(pipes);
+          await(read, 2 * LEFT_MILLIS);
+        }
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -484,6 +528,28 @@ public final class Commands implements Runner, AutoCloseable {
     }
   }
 
+  /**
+   * Reads on a thread of the readers', in the room taken for it before its command started, which
+   * it gives back as it ends.
+   */
+  private CompletableFuture<Void> reader(Runnable read) {
+    try {
+      return CompletableFuture.runAsync(
+          () -> {
+            try {
+              read.run();
+            } finally {
+              readerRoom.release();
+            }
+          },
+          readers);
+    } catch (RejectedExecutionException e) {
+      // The agent is closing: nothing is read.
+      readerRoom.release();
+      return CompletableFuture.completedFuture(null);
+    }
+  }
+
   /** Waits for something to be done, at most so long: whether it is. */
   private static boolean await(CompletableFuture<?> done, long millis) throws InterruptedException {
     try {
@@ -555,8 +621,8 @@ public final class Commands implements Runner, AutoCloseable {
   /**
    * A command's standard error, read until it closes, so the process never blocks writing it: each
    * line handed over (at most {@code maxErrors} bytes of them, each cut to {@link #MAX_LINE}) until
-   * the command's run is {@link #done}, and the first that isn't blank kept, cut to {@link
-   * #MAX_ERRORS} characters, to say why it failed.
+   * the command's run is {@link #done} or what takes them fails, and the first that isn't blank
+   * kept, cut to {@link #MAX_ERRORS} characters, to say why it failed.
    */
   private static final class Errors {
     private final Options options;
@@ -609,9 +675,17 @@ public final class Commands implements Runner, AutoCloseable {
         String stripped = text.strip();
         first = stripped.length() <= MAX_ERRORS ? stripped : stripped.substring(0, MAX_ERRORS);
       }
-      if (handing && handed + text.length() + newline <= options.maxErrors()) {
-        handed += text.length() + newline;
+      if (!handing || handed + text.length() + newline > options.maxErrors()) {
+        return;
+      }
+      handed += text.length() + newline;
+      try {
         options.errors().accept(text);
+      } catch (RuntimeException e) {
+        // What takes the lines failed (its run's log couldn't be written, say): no more are handed
+        // over, and the pipe is still read to its end, so the command neither blocks nor dies
+        // writing to it.
+        handing = false;
       }
     }
   }
