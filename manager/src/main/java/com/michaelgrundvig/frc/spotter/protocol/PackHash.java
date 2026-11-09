@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
@@ -22,7 +23,8 @@ import us.hebi.quickbuf.RepeatedByte;
  * whether a board has the robot's packs: of what the packs contain. Each file's path (relative to
  * the folder, with {@code /}), its permissions, its length and its bytes, in the order of their
  * paths, through SHA-256, as lowercase hex. Copying the packs gives the same hash, file times can't
- * change it, and a half-written or altered folder doesn't match.
+ * change it, and a half-written or altered folder doesn't match. A link in the folder is no file of
+ * its packs': it's left out, never followed.
  *
  * <p>Permissions are one of two, {@value #EXECUTABLE} or {@value #PLAIN}, as the agent writes a
  * pushed pack's files: so a umask on either side can't make two copies of the same packs differ. A
@@ -125,10 +127,11 @@ public final class PackHash {
       return paths;
     }
     // The folder itself may be a link (the agent swaps its pushed packs in by one): what it's a
-    // link to is walked.
+    // link to is walked. A link in it is never followed: what it leads to, perhaps outside the
+    // folder, isn't one of the packs' files.
     Path real = folder.toRealPath();
     try (Stream<Path> walk = Files.walk(real)) {
-      walk.filter(Files::isRegularFile)
+      walk.filter(file -> Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS))
           .forEach(file -> paths.add(real.relativize(file).toString().replace('\\', '/')));
     }
     paths.sort(null);

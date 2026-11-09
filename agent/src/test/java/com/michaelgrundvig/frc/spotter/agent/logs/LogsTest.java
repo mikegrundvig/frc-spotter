@@ -236,7 +236,9 @@ class LogsTest {
                     Logs.Refused.class, () -> logs("true").page("team.nothing", paging()))
                 .status)
         .isEqualTo(404);
-    String folder = fixture.pack("gone", "pack: gone\nlogs:\n  - id: log\n    run: [./missing]\n");
+    // A pushed pack, which isn't checked as it's loaded: its program missing as it's run.
+    String folder =
+        fixture.pushed("gone", "pack: gone\nlogs:\n  - id: log\n    run: [./missing]\n");
     Logs gone = new Logs(commands, Packs.load(fixture.host, true).packs());
     assertThat(catchThrowableOfType(Logs.Refused.class, () -> gone.page("gone.log", paging())))
         .hasMessage("log gone.log's command: no such file: " + folder + "/missing");

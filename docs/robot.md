@@ -304,7 +304,7 @@ new BoardDefinition("spare")            // none: packs pushed to it before are t
 What a board gets is what its own line says, whatever other boards name. A board that names none
 is pushed none, so a board moved off a pack loses it; the packs installed on it are its own either
 way. Only pack folders are pushed (a folder with a `pack.yaml` at its top), so a `README.md` in
-the packs folder goes nowhere. Each board gets its own bundle and its own hash, so each is pushed
+the packs folder goes nowhere, and neither does a link in it: it's never followed. Each board gets its own bundle and its own hash, so each is pushed
 only when its own set changes. A name that isn't a pack in the folder is a warning, and so are
 packs named with no packs folder, a folder that isn't there, and a board's set past what a push
 may carry (4,096 files, 16 MiB): nothing is pushed to that board.

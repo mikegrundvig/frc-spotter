@@ -371,12 +371,14 @@ source of truth); that's the rule, not a problem, and the description's `packs` 
 pushed.
 
 **Trust.** An installed pack is trusted by its file, as `sshd` trusts its configuration: one whose
-`pack.yaml` isn't root's, or that its group or anyone else may write, is ignored. The agent also
-checks every program a pack names by path: its program when that's absolute or the pack's own
-(`./name`), and any argument that's a file of the pack's own (`[python3, ./check.py]`). If anyone
-but root could change one, that collector, log or action isn't run. An absolute path past the
-program is left alone, as it's usually data (a file to hash). A program that isn't there is left to
-fail when it's run. A pushed pack is trusted because only the controller may push.
+`pack.yaml` isn't root's, or that its group or anyone else may write, is ignored, and so is one in
+a folder that isn't, any folder on its way from `/`. The agent also checks every program a pack
+names by path: its program when that's absolute or the pack's own (`./name`), and any argument
+that's a file of the pack's own (`[python3, ./check.py]`). If anyone but root could change one, or
+a folder it's in (where it leads, too, when it's a link), that collector, log or action isn't run.
+An absolute path past the program is left alone, as it's usually data (a file to hash). A program
+that isn't there isn't run either, as what comes to be there later was never checked. A pushed
+pack is trusted because only the controller may push.
 
 **`problems`** lists everything ignored, and why: a pack that isn't root's, isn't a folder, has no
 `pack.yaml`, or can't be read (each mistake with its file and line), an untrusted program, an

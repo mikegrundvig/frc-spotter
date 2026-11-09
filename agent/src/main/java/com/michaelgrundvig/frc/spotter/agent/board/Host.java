@@ -217,6 +217,21 @@ public final class Host {
     return Files.isDirectory(path(absolute));
   }
 
+  /**
+   * A path's real one, as on the coprocessor ({@code /usr/bin/python3.13} for {@code
+   * /usr/bin/python3}): its links followed.
+   *
+   * @throws IOException when it isn't there, or its links lead outside the root
+   */
+  public String realPath(String absolute) throws IOException {
+    Path real = path(absolute).toRealPath();
+    Path top = root.toRealPath();
+    if (!real.startsWith(top)) {
+      throw new IOException(absolute + " leads outside " + root);
+    }
+    return "/" + top.relativize(real).toString().replace('\\', '/');
+  }
+
   /** Who owns a path, and who may write it, its links followed. */
   public Owner owner(String absolute) throws IOException {
     return owners.of(absolute);

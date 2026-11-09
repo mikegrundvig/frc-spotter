@@ -77,6 +77,20 @@ class PackHashTest {
   }
 
   @Test
+  void aLinkInTheFolderIsLeftOutNeverFollowed() throws Exception {
+    Path packs = packs("deploy");
+    String without = PackHash.of(packs);
+    write(dir.resolve("secret"), "not a pack's\n", "rw-r--r--");
+    Files.createSymbolicLink(packs.resolve("vision/secret"), dir.resolve("secret"));
+    Files.createSymbolicLink(packs.resolve("elsewhere"), dir);
+    assertThat(PackHash.of(packs)).isEqualTo(without);
+    Spotter.PackBundle bundle = PackHash.bundle(packs);
+    assertThat(bundle.getFiles())
+        .extracting(Spotter.PackFile::getPath)
+        .containsExactly("debian/cpu", "debian/pack.yaml", "vision/pack.yaml");
+  }
+
+  @Test
   void noFilesHashToNothing() throws IOException {
     assertThat(PackHash.of(dir.resolve("missing"))).isEmpty();
     Files.createDirectories(dir.resolve("empty/debian"));

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.agent.Agent;
 import com.michaelgrundvig.frc.spotter.agent.Fixture;
+import com.michaelgrundvig.frc.spotter.agent.packs.Packs;
 import com.michaelgrundvig.frc.spotter.agent.values.ValueStore;
 import com.michaelgrundvig.frc.spotter.protocol.Spotter;
 import java.io.IOException;
@@ -38,6 +39,8 @@ class StreamTest {
   @BeforeEach
   void anAgent() throws Exception {
     fixture = new Fixture(dir);
+    // Its program is there, so it's trusted; the tests set its values themselves.
+    fixture.script(Packs.INSTALLED + "/vision/health", "true");
     fixture.pack(
         "vision",
         """

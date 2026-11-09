@@ -5,9 +5,11 @@ import com.michaelgrundvig.frc.spotter.protocol.PackHash;
 import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -17,12 +19,13 @@ import java.util.TreeMap;
  * robot's repository is the source of truth, and the description's packs say which was pushed.
  *
  * <p>An installed pack is trusted by its file, as {@code sshd} trusts its configuration: one whose
- * {@code pack.yaml} isn't root's, or that its group or anyone else may write, is ignored. So is a
- * collector, log or action whose program anyone but root could change, when it names it by path:
+ * {@code pack.yaml} isn't root's, or that its group or anyone else may write, is ignored, and so is
+ * one in a folder that isn't, any folder on its way from {@code /}. So is a collector, log or
+ * action whose program anyone but root could change, or that isn't there, when it names it by path:
  * its program (absolute, or the pack's own {@code ./name}), or an argument that's the pack's own
- * file ({@code [python3, ./check.py]}). Otherwise "root owns the YAML" would protect nothing. A
- * pushed pack is trusted because only the robot controller may push. Everything ignored is in the
- * description's problems, with why.
+ * file ({@code [python3, ./check.py]}). A program that's a link is checked where it leads, too.
+ * Otherwise "root owns the YAML" would protect nothing. A pushed pack is trusted because only the
+ * robot controller may push. Everything ignored is in the description's problems, with why.
  *
  * <p>Bounded, so a board's description always fits a stream's event: at most {@link #MAX_PACKS}
  * packs, {@link Protocol#MAX_VALUES} values and {@link Protocol#MAX_ACTIONS} actions in all (the
@@ -205,7 +208,7 @@ public final class Packs {
         return Optional.empty();
       }
       if (!pushed) {
-        String untrusted = untrusted(host.owner(file));
+        String untrusted = untrusted(host, file);
         if (!untrusted.isEmpty()) {
           problems.add(file + ": " + untrusted + ", ignored");
           return Optional.empty();
@@ -234,8 +237,8 @@ public final class Packs {
 
   /**
    * An installed pack with only the collectors, logs and actions whose programs root alone may
-   * change: any program it names by path, as it is now. A program that isn't there is left to fail
-   * when it's run.
+   * change: any program it names by path, as it is now. A program that isn't there isn't run: what
+   * comes to be there later was never checked.
    */
   private static Pack trusted(Host host, Pack pack, List<String> problems) throws IOException {
     List<Pack.Collector> collectors = new ArrayList<>();
@@ -264,9 +267,10 @@ public final class Packs {
       throws IOException {
     for (String program : command.programsByPath(pack.folder())) {
       if (!host.exists(program)) {
-        continue;
+        problems.add(program + ": isn't there, so " + pack.name() + "'s " + what + " isn't run");
+        return false;
       }
-      String untrusted = untrusted(host.owner(program));
+      String untrusted = untrusted(host, program);
       if (!untrusted.isEmpty()) {
         problems.add(
             program + ": " + untrusted + ", so " + pack.name() + "'s " + what + " isn't run");
@@ -274,6 +278,39 @@ public final class Packs {
       }
     }
     return true;
+  }
+
+  /**
+   * Why a file isn't to be trusted; empty when root alone may change it, and every folder on its
+   * way from {@code /}, and on the way to where it leads when it's a link: a folder anyone else may
+   * write lets them put another file in its place.
+   */
+  private static String untrusted(Host host, String file) throws IOException {
+    String untrusted = untrusted(host.owner(file));
+    if (!untrusted.isEmpty()) {
+      return untrusted;
+    }
+    Set<String> folders = new LinkedHashSet<>(folders(file));
+    folders.addAll(folders(host.realPath(file)));
+    for (String folder : folders) {
+      String why = untrusted(host.owner(folder));
+      if (!why.isEmpty()) {
+        return "its folder " + folder + " " + why;
+      }
+    }
+    return "";
+  }
+
+  /** The folders a path is in, from its own up to {@code /}. */
+  private static List<String> folders(String path) {
+    List<String> folders = new ArrayList<>();
+    String folder = path;
+    while (folder.lastIndexOf('/') > 0) {
+      folder = folder.substring(0, folder.lastIndexOf('/'));
+      folders.add(folder);
+    }
+    folders.add("/");
+    return folders;
   }
 
   /** Why a file isn't to be trusted; empty when root alone may change it. */

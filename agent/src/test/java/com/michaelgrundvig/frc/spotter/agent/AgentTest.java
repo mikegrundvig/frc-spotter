@@ -101,7 +101,11 @@ class AgentTest {
 
   @Test
   void itDescribesItsPacksValuesLogsAndActionsByIdAndIndex() {
-    fixture.pack("vision", VISION);
+    String vision = fixture.pack("vision", VISION);
+    // Its programs are there, so they're trusted: what they print is another test's.
+    for (String program : new String[] {"service", "health", "log", "restart"}) {
+      fixture.script(vision + "/" + program, "true");
+    }
     fixture.pushed("detector", "pack: detector\nversion: 0.2.0\n");
     fixture.config("{\"team\": 1234}");
     try (Agent agent = fixture.agent()) {

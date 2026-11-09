@@ -39,6 +39,14 @@ class PacksTest {
     fixture = new Fixture(dir);
   }
 
+  /** The vision pack, installed with its programs, root's alone as an installer leaves them. */
+  private String vision(String version) {
+    String folder = fixture.pack("vision", VISION.formatted("vision", version));
+    fixture.script(folder + "/web", "echo true");
+    fixture.script("/opt/vision/log", "true");
+    return folder;
+  }
+
   @Test
   void aBoardWithNoPacksHasNoneAndNoProblems() {
     Packs.Loaded loaded = Packs.load(fixture.host, true);
@@ -49,7 +57,7 @@ class PacksTest {
 
   @Test
   void installedAndPushedPacksLoadInTheOrderOfTheirNames() throws Exception {
-    fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
+    vision("1.0.0");
     fixture.pushed("detector", "pack: detector\nversion: 0.2.0\n");
     Packs.Loaded loaded = Packs.load(fixture.host, true);
     assertThat(loaded.problems()).isEmpty();
@@ -62,7 +70,7 @@ class PacksTest {
 
   @Test
   void aPushedPackWinsOverAnInstalledOneOfItsNameAsTheRuleSaysWithNoProblem() {
-    fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
+    vision("1.0.0");
     fixture.pushed("vision", VISION.formatted("vision", "2.0.0"));
     Packs.Loaded loaded = Packs.load(fixture.host, true);
     assertThat(loaded.packs()).extracting(Pack::version).containsExactly("2.0.0");
@@ -72,7 +80,7 @@ class PacksTest {
 
   @Test
   void aBoardThatRefusesPushesIgnoresPushedPacks() {
-    fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
+    vision("1.0.0");
     fixture.pushed("vision", VISION.formatted("vision", "2.0.0"));
     Packs.Loaded loaded = Packs.load(fixture.host, false);
     assertThat(loaded.packs()).extracting(Pack::version).containsExactly("1.0.0");
@@ -155,11 +163,61 @@ class PacksTest {
   }
 
   @Test
-  void aProgramThatIsntThereIsLeftToFailWhenRun() {
-    fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
+  void aProgramThatIsntThereIsntRunAsWhatComesThereLaterWasNeverChecked() {
+    String folder = fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
     Packs.Loaded loaded = Packs.load(fixture.host, true);
-    assertThat(loaded.problems()).isEmpty();
-    assertThat(loaded.packs().get(0).collectors()).hasSize(1);
+    Pack vision = loaded.packs().get(0);
+    assertThat(vision.collectors()).isEmpty();
+    assertThat(vision.logs()).isEmpty();
+    assertThat(vision.actions()).extracting(Pack.Action::id).containsExactly("restart");
+    assertThat(loaded.problems())
+        .containsExactly(
+            folder + "/web: isn't there, so vision's collector web isn't run",
+            "/opt/vision/log: isn't there, so vision's log log isn't run");
+  }
+
+  @Test
+  void aFolderOnTheWayToAPackOrItsProgramThatAnyoneButRootCouldChangeIsntTrusted()
+      throws Exception {
+    // Each row: a folder anyone but root could change, its owner, and what the board says of it.
+    record Row(String folder, Host.Owner owner, String says) {}
+    String vision = Packs.INSTALLED + "/vision";
+    for (Row row :
+        List.of(
+            new Row(
+                vision,
+                Host.Owner.root(0775),
+                vision
+                    + "/pack.yaml: its folder "
+                    + vision
+                    + " may be written by its group or others (mode 775), ignored"),
+            new Row(
+                "/etc",
+                new Host.Owner("pi", 0755),
+                vision + "/pack.yaml: its folder /etc isn't root's (its owner is pi), ignored"),
+            new Row(
+                "/opt/vision",
+                new Host.Owner("pi", 0755),
+                "/opt/vision/log: its folder /opt/vision isn't root's (its owner is pi), so"
+                    + " vision's log log isn't run"),
+            // Where a link leads: the program as it really is.
+            new Row(
+                "/srv/team",
+                Host.Owner.root(0777),
+                "/opt/vision/log: its folder /srv/team may be written by its group or others (mode"
+                    + " 777), so vision's log log isn't run"))) {
+      Fixture board = new Fixture(dir.resolve(row.folder().replace('/', '_')));
+      String folder = board.pack("vision", VISION.formatted("vision", "1.0.0"));
+      board.script(folder + "/web", "echo true");
+      board.script("/srv/team/log", "true");
+      java.nio.file.Files.createDirectories(board.path("/opt/vision"));
+      java.nio.file.Files.createSymbolicLink(
+          board.path("/opt/vision/log"), board.path("/srv/team/log"));
+      board.owners.put(row.folder(), row.owner());
+      assertThat(Packs.load(board.host, true).problems())
+          .as(row.folder())
+          .containsExactly(row.says());
+    }
   }
 
   @Test
@@ -270,7 +328,7 @@ class PacksTest {
 
   @Test
   void whateverReadingOnePackMeetsTheOthersLoad() {
-    fixture.pack("vision", VISION.formatted("vision", "1.0.0"));
+    vision("1.0.0");
     fixture.pack("odd", "pack: odd\n");
     Host failing =
         new Host(
