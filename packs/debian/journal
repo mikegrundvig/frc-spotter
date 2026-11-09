@@ -34,18 +34,45 @@ unauth() {
   fi
 }
 
+# journalctl with these arguments, its output through a filter (a function), failing as journalctl
+# failed: POSIX sh has no pipefail, so the pipeline's own status would be the filter's. A journalctl
+# the filter stopped reading once it had its page ends on SIGPIPE (141), which is no failure.
+page() {
+  filter=$1
+  shift
+  { status=$( { { journalctl "$@"; echo $? >&3; } | "$filter" >&4; } 3>&1 ); } 4>&1
+  case $status in
+    0 | 141) ;;
+    *)
+      echo "journalctl failed (exit $status)" >&2
+      exit "$status"
+      ;;
+  esac
+}
+
+# Newest first, as many as asked, then oldest first.
+latest() {
+  unauth | head -n "$limit" | tac
+}
+
+# Back from the cursor's entry, newest first: that entry left out, then oldest first.
+before() {
+  grep -v -F -e "$cursor" | unauth | head -n "$limit" | tac
+}
+
+after() {
+  unauth | head -n "$limit"
+}
+
 case ${SPOTTER_FROM:-latest} in
   latest)
-    # Newest first, as many as asked, then oldest first.
-    journalctl "$@" --reverse | unauth | head -n "$limit" | tac
+    page latest "$@" --reverse
     ;;
   before)
-    # Back from the cursor's entry, newest first: that entry left out, then oldest first.
-    journalctl "$@" --cursor="$cursor" --reverse | grep -v -F -e "$cursor" | unauth |
-      head -n "$limit" | tac
+    page before "$@" --cursor="$cursor" --reverse
     ;;
   after)
-    journalctl "$@" --after-cursor="$cursor" | unauth | head -n "$limit"
+    page after "$@" --after-cursor="$cursor"
     ;;
   *)
     echo "SPOTTER_FROM is latest, before or after, not $SPOTTER_FROM" >&2

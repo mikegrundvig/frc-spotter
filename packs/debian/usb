@@ -7,6 +7,11 @@
 # vendor and product ids. Disconnects are the kernel's "USB disconnect" lines in this boot's
 # journal, which reading takes the systemd-journal group (the agent's package gives it); without
 # them, it says nothing of disconnects.
+#
+# Each run reads only the lines since the last, counting on from where it got to: the count and the
+# journal's cursor are kept in the agent's runtime folder (systemd's $RUNTIME_DIRECTORY,
+# /run/frc-spotter, kept across the agent's restarts and gone at a reboot), with the boot they're
+# of. Where there's no such folder, it reads the whole boot's kernel log each time.
 set -u
 devices=$(for device in /sys/bus/usb/devices/*; do
   port=${device##*/}
@@ -23,9 +28,46 @@ done | sort -t- -k1,1n -k2,2V | awk 'NR > 1 { printf "; " } { printf "%s", $0 }'
 # The product names come from the devices: quotes and backslashes kept JSON's.
 devices=$(printf '%s' "$devices" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-if kernel=$(journalctl -k -b -q --no-pager -o cat 2>/dev/null); then
-  disconnects=$(printf '%s\n' "$kernel" | grep -c 'USB disconnect')
-  printf '{"devices": "%s", "disconnects": %s}\n' "$devices" "$disconnects"
+# This boot's disconnects, or nothing when the journal can't be read.
+disconnects() {
+  state=${RUNTIME_DIRECTORY:-}
+  state=${state%%:*}
+  if [ -z "$state" ]; then
+    kernel=$(journalctl -k -b -q --no-pager -o cat 2>/dev/null) || return 1
+    printf '%s\n' "$kernel" | grep -c 'USB disconnect'
+    return 0
+  fi
+  saved=$state/debian-usb
+  boot=$(cat /proc/sys/kernel/random/boot_id)
+  # Its boot, its count, and the cursor it got to (empty before the first line), a line each.
+  was_boot=$(sed -n 1p "$saved" 2>/dev/null)
+  count=$(sed -n 2p "$saved" 2>/dev/null)
+  cursor=$(sed -n 3p "$saved" 2>/dev/null)
+  case $count in
+    '' | *[!0-9]*) was_boot= ;;
+  esac
+  if [ "$was_boot" != "$boot" ]; then
+    count=0
+    cursor=
+  fi
+  if [ -n "$cursor" ]; then
+    kernel=$(journalctl -k -b -q --no-pager -o cat --show-cursor --after-cursor="$cursor" \
+      2>/dev/null) || return 1
+  else
+    kernel=$(journalctl -k -b -q --no-pager -o cat --show-cursor 2>/dev/null) || return 1
+  fi
+  # The cursor of the last line read, which journalctl gives last; none when there was no line.
+  last=$(printf '%s\n' "$kernel" | sed -n 's/^-- cursor: //p' | tail -n 1)
+  [ -n "$last" ] && cursor=$last
+  new=$(printf '%s\n' "$kernel" | grep -c 'USB disconnect')
+  count=$((count + new))
+  # Written whole, then renamed into place: a run stopped partway leaves the last state as it was.
+  printf '%s\n%s\n%s\n' "$boot" "$count" "$cursor" > "$saved.new" && mv -f "$saved.new" "$saved"
+  echo "$count"
+}
+
+if count=$(disconnects); then
+  printf '{"devices": "%s", "disconnects": %s}\n' "$devices" "$count"
 else
   printf '{"devices": "%s"}\n' "$devices"
 fi

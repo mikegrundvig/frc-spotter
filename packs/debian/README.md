@@ -20,7 +20,7 @@ timer, below.
 | `debian.network.speed` | The speed it negotiated, Mb/s: a damaged cable negotiates 100 | warn below 1000 |
 | `debian.network.drops` | How often its link dropped since boot (from `carrier_up_count`: each time it came up after its first, and one more if it's down now): a loose plug at the radio drops it on every hit | warn above 0 |
 | `debian.usb.devices` | The USB devices plugged in, each by its port and product (`7-1 HD Pro Webcam C920; 8-1 Arducam`), or `none` | |
-| `debian.usb.disconnects` | The kernel's "USB disconnect" lines in this boot's journal | warn above 0 |
+| `debian.usb.disconnects` | The kernel's "USB disconnect" lines in this boot's journal, each run reading only those since the last (its place kept in the agent's `/run/frc-spotter`) | warn above 0 |
 | `debian.clock.synced` | Whether the kernel counts the clock synchronized (`timedatectl`'s `NTPSynchronized`, which chrony and systemd-timesyncd both set) | warn when false |
 | `debian.clock.offset` | How far the clock is behind its time source, s (negative when ahead): chrony's, else systemd-timesyncd's. Unavailable with neither | |
 | `debian.drive.wear` | The NVMe drive's wear: the share of its rated endurance used, % (can pass 100). From the root timer's file | warn above 80, fail above 95 |
@@ -39,8 +39,9 @@ another, name it in `pack.yaml`: `run: [./network, end1]`.
 ## Log
 
 `debian.journal`, the system journal, newest first or paged back and on by its cursor, at a level
-or more severe: `./journal` runs `journalctl -o json` by what the agent asks in `SPOTTER_*`. Reading
-the system journal takes the `systemd-journal` group, which the agent's package gives its user.
+or more severe: `./journal` runs `journalctl -o json` by what the agent asks in `SPOTTER_*`, and
+fails as journalctl fails, so a journal it can't read is an error, not an empty page. Reading the
+system journal takes the `systemd-journal` group, which the agent's package gives its user.
 
 **The auth facilities are left out:** anyone on the robot's network may page a log, and the
 journal's `auth` and `authpriv` lines (logins, sudo, sshd) carry user names, addresses and command
