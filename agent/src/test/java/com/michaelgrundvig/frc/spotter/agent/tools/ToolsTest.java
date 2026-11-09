@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.spotter.agent.LocalAgent;
 import com.michaelgrundvig.frc.spotter.agent.packs.PackCheck;
+import com.michaelgrundvig.frc.spotter.agent.packs.PackReader;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -155,10 +157,12 @@ class ToolsTest {
   }
 
   @Test
-  void durationsAreMillisecondsSecondsOrMinutes() {
-    assertThat(Tools.duration("500ms")).hasMillis(500);
-    assertThat(Tools.duration("5s")).hasSeconds(5);
-    assertThat(Tools.duration("2m")).hasMinutes(2);
-    assertThat(Tools.duration("soon")).isNull();
+  void itsDurationsAreWrittenAsAPacksAre() {
+    // --wait takes what a pack's every and timeout take: one grammar for every duration.
+    assertThat(PackReader.duration("500ms")).hasValue(Duration.ofMillis(500));
+    assertThat(PackReader.duration("1.5s")).hasValue(Duration.ofMillis(1500));
+    assertThat(PackReader.duration("2m")).hasValue(Duration.ofMinutes(2));
+    assertThat(PackReader.duration("1h")).hasValue(Duration.ofHours(1));
+    assertThat(PackReader.duration("soon")).isEmpty();
   }
 }

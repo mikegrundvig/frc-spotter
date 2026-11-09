@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.spotter.agent.tools;
 
 import com.michaelgrundvig.frc.spotter.agent.packs.PackCheck;
+import com.michaelgrundvig.frc.spotter.agent.packs.PackReader;
 import com.michaelgrundvig.frc.spotter.manager.Board;
 import com.michaelgrundvig.frc.spotter.manager.BoardDefinition;
 import com.michaelgrundvig.frc.spotter.manager.Level;
@@ -15,6 +16,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -126,12 +128,12 @@ public final class Tools {
     Duration wait = WAIT;
     for (String arg : args) {
       if (arg.startsWith("--wait=")) {
-        Duration given = duration(arg.substring("--wait=".length()));
-        if (given == null) {
+        Optional<Duration> given = PackReader.duration(arg.substring("--wait=".length()));
+        if (given.isEmpty()) {
           err.println("frc-spotter: --wait is a duration, such as 5s, not " + arg.substring(7));
           return USAGE;
         }
-        wait = given;
+        wait = given.get();
       } else if (address == null) {
         address = arg;
       } else {
@@ -286,23 +288,5 @@ public final class Tools {
       padded.append(' ');
     }
     return padded.toString();
-  }
-
-  /** A duration as {@code 500ms}, {@code 5s} or {@code 1m}; null when it isn't one. */
-  static @Nullable Duration duration(String text) {
-    try {
-      if (text.endsWith("ms")) {
-        return Duration.ofMillis(Long.parseLong(text.substring(0, text.length() - 2)));
-      }
-      if (text.endsWith("s")) {
-        return Duration.ofSeconds(Long.parseLong(text.substring(0, text.length() - 1)));
-      }
-      if (text.endsWith("m")) {
-        return Duration.ofMinutes(Long.parseLong(text.substring(0, text.length() - 1)));
-      }
-    } catch (NumberFormatException e) {
-      // Not a number: not a duration.
-    }
-    return null;
   }
 }

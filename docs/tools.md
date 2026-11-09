@@ -58,7 +58,8 @@ note: the trust check (root's, and written by root alone) is skipped: it means s
 Reads a board with the robot's own manager (its address, `10.12.34.11`, or `host:port`, on 5808
 unless given): its problems first, then each value as `id  value unit  (label)` or
 `unavailable: reason` (and its level, when it's at warning or failing), then its identity and its
-packs. A board not reached within the wait is said in plain words, and exits `1`:
+packs. The wait is written as a pack's durations are (`500ms`, `1.5s`, `2m`). A board not reached
+within the wait is said in plain words, and exits `1`:
 
 ```
 $ java -jar frc-spotter-0.4.1-all.jar status 10.12.34.11

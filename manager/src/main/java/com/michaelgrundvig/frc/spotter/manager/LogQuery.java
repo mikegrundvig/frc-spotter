@@ -46,6 +46,4 @@ public record LogQuery(String from, String cursor, int limit, String level) {
   public LogQuery atLeast(String level) {
     return new LogQuery(from, cursor, limit, level);
   }
-
-  /** As a request's query: {@code ?from=latest&limit=100}. */
 }
