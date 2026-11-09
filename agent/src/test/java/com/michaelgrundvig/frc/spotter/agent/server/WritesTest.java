@@ -330,6 +330,49 @@ class WritesTest {
   }
 
   @Test
+  void aPushWhoseRobotLeftBeforeItsAnswerStillEndsTheAgent() throws Exception {
+    serve("127.0.0.1");
+    // Old bundles to tidy away once the packs are swapped in: time to go before the answer.
+    for (int i = 0; i < 2000; i++) {
+      fixture.write("/var/lib/frc-spotter/pushed/old-" + i + "/pack.yaml", "pack: old\n");
+    }
+    Spotter.PackBundle bundle = Spotter.PackBundle.newInstance();
+    bundle.addFiles(
+        Spotter.PackFile.newInstance()
+            .setPath("vision/pack.yaml")
+            .setContent("pack: vision\n".getBytes(StandardCharsets.UTF_8)));
+    byte[] body = bundle.toByteArray();
+    try (java.net.Socket robot = new java.net.Socket("127.0.0.1", server().port())) {
+      java.io.OutputStream out = robot.getOutputStream();
+      out.write(
+          ("POST "
+                  + Protocol.PACKS
+                  + " HTTP/1.1\r\nHost: 127.0.0.1:"
+                  + server().port()
+                  + "\r\nContent-Type: "
+                  + Protocol.PROTOBUF
+                  + "\r\nContent-Length: "
+                  + body.length
+                  + "\r\n\r\n")
+              .getBytes(StandardCharsets.US_ASCII));
+      out.write(body);
+      out.flush();
+      // Gone once the packs are swapped in, as a robot that's switched off goes: reset, so the
+      // answer can't be sent.
+      Path pushed = fixture.path(Packs.PUSHED);
+      for (int i = 0; i < 10_000 && !Files.isSymbolicLink(pushed); i++) {
+        Thread.sleep(1);
+      }
+      assertThat(Files.isSymbolicLink(pushed)).isTrue();
+      robot.setSoLinger(true, 0);
+    }
+    for (int i = 0; i < 100 && fixture.exits.get() == 0; i++) {
+      Thread.sleep(50);
+    }
+    assertThat(fixture.exits.get()).isEqualTo(1);
+  }
+
+  @Test
   void aBoardRequiringSignaturesTakesSignedWritesOnly() throws Exception {
     SignaturesTest.Signer team = new SignaturesTest.Signer();
     fixture.config("{\"trustedKeys\": [\"" + team.publicKey + "\"]}");

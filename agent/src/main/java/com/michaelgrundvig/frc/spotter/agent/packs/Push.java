@@ -9,6 +9,8 @@ import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -24,6 +26,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import us.hebi.quickbuf.ProtoSource;
 import us.hebi.quickbuf.RepeatedByte;
@@ -57,11 +60,30 @@ public final class Push {
     }
   }
 
+  /** The start of the name packs put there by hand are kept aside under, among the bundles. */
+  static final String BEFORE = "before-";
+
   private final Host host;
-  private final SecureRandom random = new SecureRandom();
+  private final Supplier<String> ids;
 
   public Push(Host host) {
+    this(host, randomIds());
+  }
+
+  /** Naming each bundle by these: for tests. */
+  Push(Host host, Supplier<String> ids) {
     this.host = host;
+    this.ids = ids;
+  }
+
+  /** A bundle's name: 16 random hex digits. */
+  private static Supplier<String> randomIds() {
+    SecureRandom random = new SecureRandom();
+    return () -> {
+      byte[] some = new byte[8];
+      random.nextBytes(some);
+      return HexFormat.of().formatHex(some);
+    };
   }
 
   /** A file to take a bundle into, beside the packs: the request's body, read to its end first. */
@@ -72,40 +94,66 @@ public final class Push {
   }
 
   /**
-   * Puts a bundle's packs in place, in one step.
+   * Puts a bundle's packs in place, in one step. Once it returns they're in place, and nothing
+   * after the swap can fail it: the agent is to restart to read them.
    *
    * @throws Rejected when it isn't a bundle the agent takes
-   * @throws IOException when it can't be written
+   * @throws IOException when it can't be written: the packs are as they were
    */
   public void apply(Path received) throws Rejected, IOException {
     Path bundles = host.path(BUNDLES);
-    byte[] some = new byte[8];
-    random.nextBytes(some);
-    String id = HexFormat.of().formatHex(some);
+    String id = ids.get();
     Path unpacked = bundles.resolve(id);
+    Path packs = host.path(Packs.PUSHED);
+    Path aside = null;
+    String hash;
     try {
-      unpack(received, unpacked);
-      Path packs = host.path(Packs.PUSHED);
+      hash = unpack(received, unpacked);
       if (Files.isDirectory(packs, LinkOption.NOFOLLOW_LINKS)) {
         // Packs put there by hand, before any push: kept aside, as a bundle of their own.
-        Files.move(packs, bundles.resolve("before-" + id));
+        aside = bundles.resolve(BEFORE + id);
+        Files.move(packs, aside);
       }
       Path link = packs.resolveSibling(".packs-" + id);
       Files.createSymbolicLink(
           link, Objects.requireNonNull(packs.getParent(), "a link's folder").relativize(unpacked));
       Files.move(link, packs, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     } catch (Rejected | IOException | RuntimeException e) {
+      if (aside != null) {
+        putBack(aside, packs);
+      }
       delete(unpacked);
       throw e;
     } finally {
-      Files.deleteIfExists(received);
+      deleteQuietly(received);
     }
-    host.log("Packs pushed (" + PackHash.of(unpacked) + "): restarting to read them");
+    host.log("Packs pushed (" + hash + "): restarting to read them");
     LastGood.pushed(host);
     tidy();
   }
 
-  /** Removes the bundles the packs don't point at: older ones, and any left half unpacked. */
+  /** Puts packs kept aside back where they were, as a push that failed leaves them. */
+  private void putBack(Path aside, Path packs) {
+    try {
+      Files.move(aside, packs);
+    } catch (IOException | RuntimeException e) {
+      host.log("Couldn't put the packs back from " + aside + " after a failed push: " + e);
+    }
+  }
+
+  /** Removes a file, saying so in the log when it can't: a push never fails for it. */
+  private void deleteQuietly(Path file) {
+    try {
+      Files.deleteIfExists(file);
+    } catch (IOException e) {
+      host.log("Couldn't remove " + file + ": " + e);
+    }
+  }
+
+  /**
+   * Removes the bundles the packs don't point at: older ones, and any left half unpacked. Packs put
+   * there by hand and kept aside by the first push stay.
+   */
   public void tidy() {
     Path bundles = host.path(BUNDLES);
     Path current = null;
@@ -119,21 +167,25 @@ public final class Push {
     }
     try (DirectoryStream<Path> each = Files.newDirectoryStream(bundles)) {
       for (Path bundle : each) {
+        if (String.valueOf(bundle.getFileName()).startsWith(BEFORE)) {
+          continue;
+        }
         if (current == null || !bundle.toRealPath().equals(current)) {
           delete(bundle);
         }
       }
-    } catch (IOException e) {
-      // Nothing to tidy.
+    } catch (IOException | DirectoryIteratorException e) {
+      // Nothing to tidy, or no more.
     }
   }
 
   /**
    * Writes a bundle's files into a folder: at most {@link #MAX_FILES} of them, holding at most
    * {@link #MAX_BUNDLE} bytes; each path relative, inside the folder, and named once; each file
-   * {@value PackHash#EXECUTABLE} or {@value PackHash#PLAIN}, as the bundle says.
+   * {@value PackHash#EXECUTABLE} or {@value PackHash#PLAIN}, as the bundle says. Its hash, as the
+   * folder written hashes.
    */
-  private static void unpack(Path file, Path into) throws Rejected, IOException {
+  private static String unpack(Path file, Path into) throws Rejected, IOException {
     // Checked before it's parsed (WireCheck), so no length it declares is allocated past its size.
     try (InputStream in = Files.newInputStream(file)) {
       WireCheck.check(WireCheck.PACK_BUNDLE, ProtoSource.newInstance(in), (int) Files.size(file));
@@ -183,6 +235,7 @@ public final class Push {
         Files.setPosixFilePermissions(folder, PosixFilePermissions.fromString("rwxr-xr-x"));
       }
     }
+    return PackHash.of(bundle);
   }
 
   /**
@@ -215,7 +268,7 @@ public final class Push {
       for (Path each : walk.sorted(Comparator.reverseOrder()).toList()) {
         Files.deleteIfExists(each);
       }
-    } catch (IOException e) {
+    } catch (IOException | UncheckedIOException e) {
       host.log("Couldn't remove " + path + ": " + e);
     }
   }

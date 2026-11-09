@@ -616,12 +616,21 @@ public final class AgentServer implements AutoCloseable {
       throw new Refused(500, "the push failed, and the packs are as they were: " + e.getMessage());
     } finally {
       if (bundle != null) {
-        Files.deleteIfExists(bundle);
+        deleteQuietly(bundle);
       }
       pushes.release();
     }
+    // In place: the agent restarts to read them, whatever becomes of the answer (the robot may
+    // have gone before it's sent).
+    restartSoon();
     request.exchange.sendResponseHeaders(202, -1);
     request.exchange.close();
+  }
+
+  /**
+   * Ends the agent a moment from now, once the answer to a push has gone, for systemd to restart.
+   */
+  private void restartSoon() {
     Thread exit =
         new Thread(
             () -> {
@@ -635,6 +644,15 @@ public final class AgentServer implements AutoCloseable {
             "spotter-restart");
     exit.setDaemon(true);
     exit.start();
+  }
+
+  /** Removes a file, saying so in the log when it can't: a request never fails for it. */
+  private void deleteQuietly(Path file) {
+    try {
+      Files.deleteIfExists(file);
+    } catch (IOException e) {
+      agent.log("Couldn't remove " + file + ": " + e);
+    }
   }
 
   private static Logs.Paging paging(Request request) throws Refused {

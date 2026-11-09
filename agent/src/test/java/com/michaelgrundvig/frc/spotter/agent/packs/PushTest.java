@@ -98,11 +98,32 @@ class PushTest {
   }
 
   @Test
-  void packsPutThereByHandAreKeptAsideByTheFirstPush() throws Exception {
+  void packsPutThereByHandAreKeptAsideByTheFirstPushAndStayThroughTidying() throws Exception {
+    Push named = new Push(fixture.host, () -> "1");
     fixture.pushed("old", "pack: old\n");
-    push.apply(sent(packs("robot", "1.0.0")));
+    named.apply(sent(packs("robot", "1.0.0")));
     assertThat(Files.exists(fixture.path(Packs.PUSHED + "/old"))).isFalse();
     assertThat(Files.exists(fixture.path(Packs.PUSHED + "/vision/pack.yaml"))).isTrue();
+    named.tidy();
+    assertThat(Files.readString(fixture.path(Push.BUNDLES + "/before-1/old/pack.yaml")))
+        .isEqualTo("pack: old\n");
+  }
+
+  @Test
+  void packsPutThereByHandAreBackWhereTheyWereWhenTheSwapFails() throws Exception {
+    Push named = new Push(fixture.host, () -> "1");
+    fixture.pushed("old", "pack: old\n");
+    // Where the swap's link is made, something already: making it fails, past the move aside.
+    fixture.write("/var/lib/frc-spotter/.packs-1", "in the way");
+    Path body = sent(packs("robot", "1.0.0"));
+    assertThat(catchThrowableOfType(java.io.IOException.class, () -> named.apply(body)))
+        .isNotNull();
+    Path pushed = fixture.path(Packs.PUSHED);
+    assertThat(Files.isSymbolicLink(pushed)).isFalse();
+    assertThat(Files.readString(pushed.resolve("old/pack.yaml"))).isEqualTo("pack: old\n");
+    assertThat(Files.exists(fixture.path(Push.BUNDLES + "/1"))).isFalse();
+    assertThat(Files.exists(fixture.path(Push.BUNDLES + "/before-1"))).isFalse();
+    assertThat(Files.exists(body)).isFalse();
   }
 
   /** Applies a bundle that must be refused: why. */
