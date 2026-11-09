@@ -10,6 +10,10 @@
 [Unit]
 Description=FRC coprocessor agent
 After=network.target
+# Started again however often it ends: systemd's default gives up after 5 starts in 10 s, and the
+# agent ends itself after every push, so a crash loop or a push loop would leave the board without
+# it until a reboot.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

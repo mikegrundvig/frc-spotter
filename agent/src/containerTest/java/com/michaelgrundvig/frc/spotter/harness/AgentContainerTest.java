@@ -221,6 +221,17 @@ class AgentContainerTest {
   }
 
   @Test
+  void itsStartedAgainHoweverOftenItEnds() {
+    // No start limit: systemd's default would give up on it after 5 starts in 10 s.
+    assertThat(
+            coprocessor
+                .run(
+                    "systemctl", "show", "frc-spotter.service", "--property=StartLimitIntervalUSec")
+                .strip())
+        .isEqualTo("StartLimitIntervalUSec=0");
+  }
+
+  @Test
   void aStopIsCleanNotAFailure() {
     // Java exits 143 on SIGTERM, which the unit counts as success: a stop leaves it inactive, never
     // failed.
