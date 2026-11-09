@@ -322,7 +322,9 @@ may carry (4,096 files, 16 MiB): nothing is pushed to that board.
 3. To a board whose packs differ, the manager pushes the bundle over its stream (a push is signed
    over the stream's challenge), in protobuf. The agent writes its files (`755` or `644`), swaps
    them in, and exits; systemd starts it again; the manager reconnects, and the board describes
-   the hash it now has, which matches.
+   the hash it now has, which matches. The agent exits once the packs are in place, even if the
+   robot went before its answer was sent. A board that took a push and hasn't restarted within five
+   missing thresholds (5 s by default) has failed it: a warning says so, and it's pushed once more.
 4. **Never automatically on the field:** only while the robot is disabled and the field isn't
    attached. Otherwise the board runs what it has, and a warning says its packs will be pushed off
    the field; they are, once it's off.

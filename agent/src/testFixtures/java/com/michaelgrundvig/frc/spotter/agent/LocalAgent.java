@@ -41,6 +41,7 @@ public final class LocalAgent implements AutoCloseable {
   private @Nullable Agent agent;
   private @Nullable AgentServer server;
   private boolean closed;
+  private volatile boolean endsItself = true;
 
   /** A board named {@code hostname}, in a folder, with nothing configured and no packs. */
   public LocalAgent(Path dir, String hostname) {
@@ -113,9 +114,21 @@ public final class LocalAgent implements AutoCloseable {
     return this;
   }
 
+  /**
+   * From now on, the agent doesn't end itself after a push, as one that fails to would: it takes
+   * the packs, answers, and runs on with the old ones.
+   */
+  public LocalAgent wontEndItself() {
+    endsItself = false;
+    return this;
+  }
+
   /** The agent ended itself, after a push: systemd starts it again. */
   private void exited() {
     exits.incrementAndGet();
+    if (!endsItself) {
+      return;
+    }
     Thread restart =
         new Thread(
             () -> {

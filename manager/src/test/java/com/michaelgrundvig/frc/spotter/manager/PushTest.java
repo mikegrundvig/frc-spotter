@@ -16,6 +16,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,9 +78,14 @@ class PushTest {
 
   /** A manager of the board, which is to have these of the team's packs. */
   private Manager manage(Settings settings, String... packs) {
+    return manage(settings, System::nanoTime, packs);
+  }
+
+  /** A manager of the board, on this clock, which is to have these of the team's packs. */
+  private Manager manage(Settings settings, LongSupplier clock, String... packs) {
     Manager started =
         new Manager(
-            new RobotSignals(enabled::get, field::get, System::nanoTime),
+            new RobotSignals(enabled::get, field::get, clock),
             List.of(new BoardDefinition(agent.address(), packs)),
             settings.withPacks(this.packs).withKey(dir.resolve("no.key")),
             new Recorder() {
@@ -204,6 +211,38 @@ class PushTest {
     assertThat(link.pushes()).isEqualTo(tried).isEqualTo(1);
     assertThat(agent.exits()).isZero();
     assertThat(board.connection()).isEqualTo(Connection.CONNECTED);
+  }
+
+  @Test
+  void aBoardThatTookAPushAndDidntRestartHasFailedItAndIsTriedOnceMore() throws Exception {
+    agent.wontEndItself().start();
+    AtomicLong clock = new AtomicLong(1_000_000_000L);
+    Manager manager = manage(Settings.DEFAULTS, clock::get, "team");
+    Link link = manager.link(0);
+    String failed =
+        "vision-front's packs differ from the robot's, and pushing them failed: it took them, and"
+            + " didn't restart to read them within 5000 ms";
+    for (int pushes = 1; pushes <= 2; pushes++) {
+      int taken = pushes;
+      await(manager, "push " + taken + " taken", () -> agent.exits() == taken);
+      assertThat(manager.alerts()).isEmpty();
+      // Past its time to restart, on the robot's clock: the push has failed, saying so.
+      clock.addAndGet(6_000_000_000L);
+      await(manager, "push " + taken + " failed", () -> said(manager, failed));
+    }
+    // Tried once more, and no more: its stream has had heartbeats enough to push a third time.
+    long events = link.events();
+    await(manager, "two more seconds of heartbeats", () -> link.events() >= events + 8);
+    clock.addAndGet(6_000_000_000L);
+    long later = link.events();
+    await(manager, "two more seconds of heartbeats", () -> link.events() >= later + 8);
+    assertThat(link.pushes()).isEqualTo(2);
+    assertThat(agent.exits()).isEqualTo(2);
+    assertThat(said(manager, failed)).isTrue();
+  }
+
+  private static boolean said(Manager manager, String text) {
+    return manager.alerts().stream().anyMatch(alert -> alert.text().equals(text));
   }
 
   @Test

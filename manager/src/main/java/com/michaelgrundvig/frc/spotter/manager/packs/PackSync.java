@@ -16,10 +16,17 @@ import org.jspecify.annotations.Nullable;
  * Keeps a board's pushed packs the robot's: compares the hash the board describes with that of its
  * packs from the robot, and when they differ, pushes them over its stream while the robot is
  * disabled and off the field, once for each set of packs the board has, so a push that fails or
- * doesn't take is never repeated in a loop. Says where they stand as its alert's text, built only
- * when that changes.
+ * doesn't take is never repeated in a loop. A board that took a push restarts to read it; one that
+ * hasn't within {@link #RESTART_MISSINGS} missing thresholds has failed the push, which is tried
+ * once more. Says where they stand as its alert's text, built only when that changes.
  */
 public final class PackSync {
+  /**
+   * How many missing thresholds a board that took a push has to restart (its stream ends, and opens
+   * again), before the push has failed: an agent ends a moment after it answers.
+   */
+  static final int RESTART_MISSINGS = 5;
+
   /** Where the board's packs are, against the robot's. */
   enum State {
     /** The same. */
@@ -52,6 +59,14 @@ public final class PackSync {
   private volatile boolean restarting;
   private volatile @Nullable String triedFrom;
   private volatile @Nullable String pushFailure;
+  private volatile long restartingSince;
+  private final long restartNanos;
+
+  /** The packs a push over which didn't restart the board, to be tried once more. */
+  private volatile @Nullable String retryOver;
+
+  /** The packs a push was tried once more over: never a third time. */
+  private volatile @Nullable String retriedOver;
 
   /**
    * @param packs the board's packs from the robot
@@ -70,6 +85,7 @@ public final class PackSync {
     this.recorder = recorder;
     this.packs = packs;
     this.requests = requests;
+    this.restartNanos = RESTART_MISSINGS * settings.missing().toNanos();
   }
 
   /** Whether the board's packs were the robot's when last checked. */
@@ -106,6 +122,7 @@ public final class PackSync {
    */
   public @Nullable String check(Spotter.Description description) {
     String has = description.getPushedPacks();
+    boolean overdue = restartOverdue();
     State now;
     if (has.equals(packs.hash())) {
       now = State.SAME;
@@ -113,13 +130,17 @@ public final class PackSync {
       now = State.REFUSES;
     } else if (pushing || restarting) {
       now = State.PUSHING;
-    } else if (has.equals(triedFrom)) {
+    } else if (has.equals(triedFrom) && (overdue || !has.equals(retryOver))) {
       now = pushFailure != null ? State.FAILED : State.STILL_DIFFER;
     } else if (!settings.pushAutomatically()) {
       now = State.AUTOMATIC_OFF;
     } else if (robot.enabled().getAsBoolean() || robot.fieldAttached().getAsBoolean()) {
       now = State.WAITING;
     } else {
+      if (has.equals(retryOver)) {
+        retriedOver = has;
+        retryOver = null;
+      }
       push(false);
       now = State.PUSHING;
     }
@@ -147,6 +168,24 @@ public final class PackSync {
   }
 
   /**
+   * Whether a board that took a push has gone past its time to restart: if so, the push has failed,
+   * saying so, and is to be tried once more over the packs it has, unless it was already.
+   */
+  private boolean restartOverdue() {
+    if (!restarting || robot.nanos().getAsLong() - restartingSince <= restartNanos) {
+      return false;
+    }
+    restarting = false;
+    pushFailure =
+        "it took them, and didn't restart to read them within " + restartNanos / 1_000_000 + " ms";
+    String over = triedFrom;
+    if (over != null && !over.equals(retriedOver)) {
+      retryOver = over;
+    }
+    return true;
+  }
+
+  /**
    * Pushes the team's packs to the board, signed over its stream's challenge: automatically, or
    * forced by robot code. Completes once the board has taken them (it then restarts, and the stream
    * reconnects, describing them), or exceptionally, saying why not.
@@ -171,6 +210,7 @@ public final class PackSync {
         () -> {
           requests.client().write("POST", Protocol.PACKS, packs.bundle(), Protocol.PROTOBUF);
           pushFailure = null;
+          restartingSince = robot.nanos().getAsLong();
           restarting = true;
           pushing = false;
           try {
