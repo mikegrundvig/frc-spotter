@@ -332,7 +332,8 @@ may carry (4,096 files, 16 MiB): nothing is pushed to that board.
    the field; they are, once it's off.
 5. **No loops.** An automatic push is tried once for each set of packs the board has: one that
    fails (a full disk, a refusal) or doesn't take is a warning, and isn't tried again until the
-   board's packs change, or robot code forces one.
+   board's packs change, or robot code forces one. The one exception is a push the board took and
+   never restarted for (step 3), which is pushed once more.
 
 **A forced push**, `spotter.push(board)`, pushes now, field or no field: it's robot code's call. It
 returns a `CompletableFuture` that completes once the board has taken the packs.
