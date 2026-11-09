@@ -36,11 +36,8 @@ public final class AgentClient {
   /** How long a request may wait for each read of its answer, once connected. */
   static final int TIMEOUT_MILLIS = 10_000;
 
-  /**
-   * The longest a request may take, from connecting to the end of its answer: a push or an action's
-   * input sends at most 64 MiB, a few seconds on the robot's wired network.
-   */
-  static final long DEADLINE_MILLIS = 30_000;
+  /** The longest a request may take, from connecting to the end of its answer. */
+  static final long DEADLINE_MILLIS = Protocol.REQUEST_SECONDS * 1000L;
 
   /**
    * The most an answer may be, in bytes: a page of a thousand log entries, or a run's file (at most

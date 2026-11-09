@@ -68,7 +68,7 @@ A refusal or a failure answers its status with a `Problem` saying why:
 | `503` | Every write while `agent.json` can't be read; two actions running; two streams open to others than the robot controller; eight requests under way from one address; two logs being paged, or two runs' logs read (with `Retry-After`) |
 
 Each request has a thread of its own, so a client that's slow, or never finishes sending, holds up
-nobody else; a request must arrive within 4 seconds, and 32 connections are open at most. What the
+nobody else; a request must arrive within 30 seconds (the time the manager gives one, so a 16 MiB push over the radio isn't cut off), and 32 connections are open at most. What the
 agent writes to its journal has its control characters escaped and is cut at 2,000 characters, so
 what it quotes can't forge a line; a failure (`500`) is written at most once in 10 seconds.
 

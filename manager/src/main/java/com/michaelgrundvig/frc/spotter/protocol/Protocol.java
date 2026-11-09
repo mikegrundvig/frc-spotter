@@ -89,5 +89,13 @@ public final class Protocol {
   /** The most files a pushed bundle may hold. */
   public static final int MAX_FILES = 4096;
 
+  /**
+   * The longest one request may take, from connecting to the end of its answer, in seconds: a push
+   * or an action's input sends at most 64 MiB, a few seconds on the robot's wired network and more
+   * over its radio. The agent cuts off a request it hasn't wholly read by then, and the manager
+   * drops one it hasn't had its answer to.
+   */
+  public static final int REQUEST_SECONDS = 30;
+
   private Protocol() {}
 }

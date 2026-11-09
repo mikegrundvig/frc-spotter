@@ -31,6 +31,15 @@ class AgentMainTest {
   }
 
   @Test
+  void aRequestHasAsLongToArriveAsTheManagerGivesIt() {
+    // The web server reads the limit in seconds: as long as the manager waits for an answer, so a
+    // 16 MiB push the manager is still sending, over the radio, isn't cut off.
+    assertThat(AgentMain.SERVER_SETTINGS.get("sun.net.httpserver.maxReqTime"))
+        .isEqualTo(Integer.toString(Protocol.REQUEST_SECONDS));
+    assertThat(Protocol.REQUEST_SECONDS).isEqualTo(30);
+  }
+
+  @Test
   void theControllerIsAnAddressNeverAName() throws Exception {
     for (String bad : List.of("robot.local", "10.12.34", "10.12.34.256", "::1", "")) {
       assertThatThrownBy(() -> AgentMain.checkAddress(bad, "--controller"))

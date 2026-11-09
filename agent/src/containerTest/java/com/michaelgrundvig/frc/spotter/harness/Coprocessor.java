@@ -204,7 +204,7 @@ public final class Coprocessor extends GenericContainer<Coprocessor> {
   public String robotAddress() throws IOException {
     try (java.net.Socket socket = new java.net.Socket(agentHost(), agentPort())) {
       // A request begun, never finished: a port forwarder may dial the container only once data
-      // comes, and the agent holds a request that hasn't finished for up to 4 s.
+      // comes, and the agent holds a request that hasn't finished for up to 30 s.
       socket
           .getOutputStream()
           .write(("GET " + Protocol.DESCRIBE + " HTTP/1.1\r\n").getBytes(StandardCharsets.UTF_8));

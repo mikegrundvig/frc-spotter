@@ -5,6 +5,7 @@ import com.michaelgrundvig.frc.spotter.agent.board.Host;
 import com.michaelgrundvig.frc.spotter.agent.packs.LastGood;
 import com.michaelgrundvig.frc.spotter.agent.server.AgentServer;
 import com.michaelgrundvig.frc.spotter.agent.tools.Tools;
+import com.michaelgrundvig.frc.spotter.protocol.Protocol;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
@@ -31,6 +32,17 @@ public final class AgentMain {
   private AgentMain() {}
 
   /**
+   * The web server's bounds: a request must be sent within the protocol's time for one (as long as
+   * the manager gives it, so a push the manager is still sending isn't cut off), 8 idle connections
+   * kept, 32 connections at once.
+   */
+  static final Map<String, String> SERVER_SETTINGS =
+      Map.of(
+          "sun.net.httpserver.maxReqTime", Integer.toString(Protocol.REQUEST_SECONDS),
+          "sun.net.httpserver.maxIdleConnections", "8",
+          "jdk.httpserver.maxConnections", "32");
+
+  /**
    * Runs the agent; see the class. Or, with a command first ({@code check}, {@code status}, {@code
    * help}), Spotter's command line ({@link Tools}), whose exit code is the process's.
    */
@@ -41,11 +53,8 @@ public final class AgentMain {
       System.exit(Tools.run(List.of(args), out, err));
       return;
     }
-    // Bound every request and answer, before the web server reads its settings: 4 s to send a
-    // request, 32 connections at once.
-    System.setProperty("sun.net.httpserver.maxReqTime", "4");
-    System.setProperty("sun.net.httpserver.maxIdleConnections", "8");
-    System.setProperty("jdk.httpserver.maxConnections", "32");
+    // Bound every request and answer, before the web server reads its settings.
+    SERVER_SETTINGS.forEach(System::setProperty);
     Map<String, String> options = options(List.of(args));
     Host host =
         Host.system(
