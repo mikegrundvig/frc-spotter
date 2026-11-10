@@ -257,8 +257,11 @@ stopping it signals the whole group: what it started, and what those left runnin
 background once their parent had exited. Its output and standard error are read on threads of
 their own, and the agent waits on the process and its deadline, never on the end of a pipe: a
 command is done when its process exits. Anything it left running that still holds its output a
-moment later (`./detector &` without a redirect, say) is stopped, its group with it; start a
-long-running program as a systemd service, or with its output redirected, to keep it. A command
+moment later (`./detector &` without a redirect, say) is stopped, its group with it, and so is a
+program that left the group (`setsid`, a daemon's double fork) but still holds that output; start a
+long-running program as a systemd service, or with its output redirected, to keep it. A command's
+standard error is read to its end even when what takes its lines fails (a run's log that can't be
+written): its lines stop being handed over, and the command runs on. A command
 stopped that won't go (a process stuck in the kernel on a wedged camera, say) is answered all the
 same: a run finishes `timedOut` ("timed out after 5s; its command is still running") and frees its
 slot; a collector's values say the same, and it isn't run again until that command has ended.

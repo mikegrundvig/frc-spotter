@@ -123,6 +123,9 @@ public final class PackSync {
   public @Nullable String check(Spotter.Description description) {
     String has = description.getPushedPacks();
     boolean overdue = restartOverdue();
+    // A push was tried over the packs it has: that's said, unless it's to be tried once more (but
+    // not on the check that found its restart overdue, which says so first).
+    boolean tried = has.equals(triedFrom) && (overdue || !has.equals(retryOver));
     State now;
     if (has.equals(packs.hash())) {
       now = State.SAME;
@@ -130,7 +133,7 @@ public final class PackSync {
       now = State.REFUSES;
     } else if (pushing || restarting) {
       now = State.PUSHING;
-    } else if (has.equals(triedFrom) && (overdue || !has.equals(retryOver))) {
+    } else if (tried) {
       now = pushFailure != null ? State.FAILED : State.STILL_DIFFER;
     } else if (!settings.pushAutomatically()) {
       now = State.AUTOMATIC_OFF;
@@ -172,7 +175,10 @@ public final class PackSync {
    * saying so, and is to be tried once more over the packs it has, unless it was already.
    */
   private boolean restartOverdue() {
-    if (!restarting || robot.nanos().getAsLong() - restartingSince <= restartNanos) {
+    if (!restarting) {
+      return false;
+    }
+    if (robot.nanos().getAsLong() - restartingSince <= restartNanos) {
       return false;
     }
     restarting = false;

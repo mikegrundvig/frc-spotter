@@ -75,9 +75,9 @@ public final class Commands implements Runner, AutoCloseable {
 
   /**
    * The most threads reading commands' output at once: two for each command, and at most eight
-   * commands run at once (four collectors, two actions, two logs), so twice what they need. Past
-   * it, readers held by what commands left running, a command isn't started, rather than the agent
-   * running out of threads.
+   * commands run at once (four collectors, two actions, two logs), so twice what they need. With
+   * that many busy (held, say, by what commands left running that couldn't be stopped), a command
+   * isn't started, rather than the agent running out of threads.
    */
   static final int MAX_READERS = 32;
 
