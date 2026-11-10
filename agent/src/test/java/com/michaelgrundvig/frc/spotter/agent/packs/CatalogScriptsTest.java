@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -115,7 +116,7 @@ class CatalogScriptsTest {
   }
 
   /** How many disconnects the usb collector said; null when it said nothing of them. */
-  private Long disconnects(Map<String, String> environment) throws Exception {
+  private @Nullable Long disconnects(Map<String, String> environment) throws Exception {
     Ran ran = run("usb", environment);
     assertThat(ran.code()).isZero();
     Matcher said = Pattern.compile("\"disconnects\": ([0-9]+)").matcher(ran.out());
