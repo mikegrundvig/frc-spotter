@@ -17,7 +17,7 @@ On the coprocessor (64-bit ARM or x86 Linux with systemd: Debian, Ubuntu, Raspbe
 Armbian):
 
 ```sh
-# 1. Install the agent. It brings its own Java, and needs nothing configured.
+# 1. Install the agent. It's one small program, and needs nothing configured.
 curl -fsSLO https://github.com/mikegrundvig/frc-spotter/releases/download/v0.4.2/frc-spotter_0.4.2_arm64.deb
 sudo apt install ./frc-spotter_0.4.2_arm64.deb
 
@@ -43,9 +43,9 @@ sudo systemctl restart frc-spotter
 (installed, root's) or `/var/lib/frc-spotter/packs/` (pushed by the robot). The agent reads them as
 it starts (`sudo systemctl restart frc-spotter` after changing them); an installed pack that anyone
 but root could change, or that names such a program, is ignored, and the description's `problems`
-says why. `docs/agent.md` has the format. The agent's jar is also Spotter's command line
-(`docs/tools.md`): `frc-spotter check` checks a pack on any computer, and `frc-spotter status` reads
-a board. The catalog, `packs/`, has ready-made packs to copy in
+says why. `docs/agent.md` has the format. The agent's program is also Spotter's command line
+(`docs/tools.md`): `frc-spotter check` checks a pack on any Linux computer, and `frc-spotter status`
+reads a board. The catalog, `packs/`, has ready-made packs to copy in
 (`debian` for a board's own health and journal, and `raspberry-pi`); none is installed
 by default.
 
@@ -63,35 +63,49 @@ client, and the `spotter-api` and `spotter-client` artifacts, are gone with prot
 ## Releases
 
 Each [release](https://github.com/mikegrundvig/frc-spotter/releases) has the agent's `.deb` for
-64-bit ARM and x86 Linux, with its own Java runtime; a tarball of the same for systems without
-dpkg; and the `-all.jar` for a board with Java 17 or newer, alone and with its unit, polkit rules,
-tmpfiles entry, and install script. `SHA256SUMS` has their checksums. Image builders install the
+64-bit ARM and x86 Linux, and a tarball of the same files for systems without dpkg, with its
+install script. `SHA256SUMS` has their checksums. Image builders install the
 `.deb` and a team's pack folders like any other package and files, and label their images in
 `/etc/os-release`, which Spotter reports as it is.
 
 ## In this repository
 
-Spotter is two programs, each a Gradle project:
+Spotter is two programs: the manager, a Gradle project, and the agent, a Rust crate:
 
 - `manager/`: the robot program's manager (`docs/robot.md`), and the protocol both sides speak
   (package `...spotter.protocol`: `spotter.proto` and the code the agent shares, such as the pack
   hash). Robot code uses only the manager's top package; under it is the machinery, a package per
   concern: `stream` (following each board), `limits`, `requests`, `actions` (runs) and `packs`
   (pushes);
-- `agent/`: the agent, its systemd unit, polkit rules, and package (`docs/agent.md`); its command
-  line (`docs/tools.md`); and its container tests (`src/containerTest`: the agent's `.deb` under
-  systemd, the manager against it, and the catalog's packs, each board a container). Its code is a
-  package per concern, each building on those before it: `board` (the computer), `packs`,
-  `commands`, `values`, `actions`, `logs`, `server` (the protocol), and `tools` (the command line).
+- `agent/`: the agent, its systemd unit, polkit rules, and package (`docs/agent.md`, `package/`);
+  its command line (`docs/tools.md`); and its tests (`tests/`, the container test of its installed
+  `.deb` among them). Its code is a module per concern, each building on those before it: `board`
+  (the computer), `packs`, `commands`, `values`, `actions`, `logs`, `server` (the protocol), and
+  `tools` (the command line).
 
 And `packs/`, the catalog of packs to copy in (`packs/README.md`).
 
 ## Building
 
-`./gradlew ci` runs every check: formatting, static analysis, the tests (with the container tests,
-when Docker or Podman is there), and coverage. Java 25 is downloaded if it's missing; the code is
-compiled for Java 17, so the agent also runs on a board's own Java.
-`./gradlew :spotter-agent:agentRelease` builds the agent's packages for the computer it runs on.
+The agent, in `agent/` (rustup installs the compiler `rust-toolchain.toml` names):
+
+```sh
+cargo deny --locked check                                   # licences, advisories, sources
+cargo fmt --check && cargo clippy --all-targets --features fixture -- -D warnings
+cargo test --features fixture                               # the tests: the agent run as a test's
+cargo build --release && package/package.sh target/release/frc-spotter 0.5.0 amd64 out
+SPOTTER_DEB=$PWD/out/frc-spotter_0.5.0_amd64.deb cargo test --features fixture --test container
+```
+
+The `fixture` feature builds the agent a test runs, never a board's: `--fixture` counts its files as
+root's and takes values set by the test. The container test needs Docker or rootless Podman, and
+skips without one, saying so (CI sets `SPOTTER_REQUIRE_CONTAINERS=true`, so there it fails
+instead). The package is for the architecture it's built on: build an ARM one on ARM.
+
+`./gradlew ci` runs the manager's checks: formatting, static analysis, the tests, and coverage. Its
+tests run the agent program, which it builds first with cargo (`:spotter-manager:agentForTests`),
+so the agent's compiler must be installed. Java 25 is downloaded if it's missing; the manager is
+compiled for Java 17.
 
 Every dependency, plugin and tool Gradle downloads is checked against its SHA-256 in
 `gradle/verification-metadata.xml`, so one that changes on a server fails the build. After changing
@@ -103,7 +117,7 @@ as CI's, fetches. Then read the diff:
 ```sh
 ./gradlew -g "$(mktemp -d)" --write-verification-metadata sha256 \
   --init-script gradle/every-platform.gradle \
-  ci :spotter-agent:agentRelease :spotter-manager:resolveEveryPlatform
+  ci :spotter-manager:resolveEveryPlatform
 ```
 
 ## License
