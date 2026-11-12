@@ -59,7 +59,7 @@ within the wait is said in plain words, and exits `1`:
 
 ```
 $ frc-spotter status 10.12.34.11
-vision-front (10.12.34.11): agent 0.4.2, protocol 2.0
+vision-front (10.12.34.11): agent 0.5.0, protocol 2.0
 Problems: none
 Values: 20
   debian.cpu.busiest        41 %  (Busiest core)

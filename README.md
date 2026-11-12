@@ -18,8 +18,8 @@ Armbian):
 
 ```sh
 # 1. Install the agent. It's one small program, and needs nothing configured.
-curl -fsSLO https://github.com/mikegrundvig/frc-spotter/releases/download/v0.4.2/frc-spotter_0.4.2_arm64.deb
-sudo apt install ./frc-spotter_0.4.2_arm64.deb
+curl -fsSLO https://github.com/mikegrundvig/frc-spotter/releases/download/v0.5.0/frc-spotter_0.5.0_arm64.deb
+sudo apt install ./frc-spotter_0.5.0_arm64.deb
 
 # 2. Ask it how it is, from the coprocessor or the robot's network.
 curl -H 'Accept: application/json' http://<board>:5808/v2/describe
