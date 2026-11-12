@@ -73,3 +73,20 @@ pub fn whole(value: &Value) -> Option<i64> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_text_reads_objects_only() {
+        for (text, object) in [
+            ("  {\"a\": [1, {\"b\": true}]}\n", true),
+            ("[1]", false),
+            ("{not json}", false),
+            ("{\"a\": 1", false),
+        ] {
+            assert_eq!(as_object(text).is_some(), object, "{text}");
+        }
+    }
+}

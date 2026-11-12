@@ -267,3 +267,98 @@ pub fn files(paths_and_texts: &[(&str, &str)]) -> crate::proto::PackBundle {
             .collect(),
     }
 }
+
+/// A request a test's web page was sent.
+#[derive(Clone, Debug)]
+pub struct Asked {
+    pub method: String,
+    pub path: String,
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// What a test's web page answers: its status and body, after a wait.
+pub struct Page {
+    pub status: u16,
+    pub body: Vec<u8>,
+    pub after: std::time::Duration,
+}
+
+impl Page {
+    pub fn new(status: u16, body: &str) -> Page {
+        Page {
+            status,
+            body: body.as_bytes().to_vec(),
+            after: std::time::Duration::ZERO,
+        }
+    }
+}
+
+/// Serves the board's own web pages, on 127.0.0.1 at a port the system picks, until the test's
+/// runtime ends: each request answered as the handler says. Its port.
+pub async fn web(handler: impl Fn(Asked) -> Page + Send + Sync + 'static) -> u16 {
+    use http_body_util::{BodyExt, Full};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a port");
+    let port = listener.local_addr().expect("its address").port();
+    let handler = Arc::new(handler);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let handler = handler.clone();
+            let service = hyper::service::service_fn(move |request: hyper::Request<_>| {
+                let handler = handler.clone();
+                async move {
+                    let method = request.method().to_string();
+                    let path = request.uri().path().to_string();
+                    let content_type = request
+                        .headers()
+                        .get("content-type")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("")
+                        .to_string();
+                    let body: hyper::body::Incoming = request.into_body();
+                    let body = body.collect().await.map(|b| b.to_bytes().to_vec());
+                    let page = handler(Asked {
+                        method,
+                        path,
+                        content_type,
+                        body: body.unwrap_or_default(),
+                    });
+                    tokio::time::sleep(page.after).await;
+                    let mut response =
+                        hyper::Response::new(Full::new(bytes::Bytes::from(page.body)));
+                    *response.status_mut() =
+                        hyper::StatusCode::from_u16(page.status).expect("a status");
+                    Ok::<_, std::convert::Infallible>(response)
+                }
+            });
+            tokio::spawn(
+                hyper::server::conn::http1::Builder::new()
+                    .serve_connection(hyper_util::rt::TokioIo::new(stream), service),
+            );
+        }
+    });
+    port
+}
+
+/// A port on the board's loopback that nobody serves, kept so as long as what's returned is: bound
+/// (on 127.0.0.1 and ::1), so no other test can take it, but never listening, so a connection to
+/// it is refused.
+pub fn unserved_port() -> (u16, Vec<tokio::net::TcpSocket>) {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    loop {
+        let v4 = tokio::net::TcpSocket::new_v4().expect("a socket");
+        v4.bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+            .expect("a port");
+        let port = v4.local_addr().expect("its address").port();
+        let v6 = tokio::net::TcpSocket::new_v6().expect("a socket");
+        // Taken on ::1 already: another.
+        if v6
+            .bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port))
+            .is_ok()
+        {
+            return (port, vec![v4, v6]);
+        }
+    }
+}
