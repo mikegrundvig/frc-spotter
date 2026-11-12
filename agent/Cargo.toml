@@ -19,7 +19,7 @@ http = "1"
 hyper = { version = "1", features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 log = "0.4"
-nix = { version = "0.30", features = ["fs", "net", "process", "signal", "time", "user"] }
+nix = { version = "0.31", features = ["fs", "net", "process", "signal", "time", "user"] }
 prost = "0.14"
 saphyr-parser = "0.3"
 serde = { version = "1", features = ["derive"] }
