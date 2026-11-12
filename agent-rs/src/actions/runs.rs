@@ -726,3 +726,6 @@ fn write(file: &Path, state: &RunState) -> io::Result<()> {
 pub fn takes_none(action: &Action) -> bool {
     action.input == Input::None
 }
+
+#[cfg(test)]
+mod tests;
