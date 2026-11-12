@@ -1,0 +1,22 @@
+# The agent's container test's board: Debian 13 (pinned by digest) under systemd as its first
+# process, with polkit and D-Bus and nothing else of the agent's, the agent installed from its .deb
+# as an image builder installs it (no systemd running, so its maintainer scripts start nothing),
+# the catalog's debian pack and the test's stand-in pack in place, root's, and a pack it mustn't
+# trust. The test copies the .deb and the packs in beside this file.
+FROM docker.io/library/debian:trixie-20260918-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+ENV container=docker
+RUN apt-get update -qq \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+      systemd systemd-sysv dbus polkitd init-system-helpers curl ca-certificates \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN systemctl mask getty@.service console-getty.service systemd-firstboot.service
+COPY frc-spotter.deb /tmp/frc-spotter.deb
+RUN dpkg -i /tmp/frc-spotter.deb && rm /tmp/frc-spotter.deb
+COPY packs /etc/frc-spotter/packs
+RUN chown -R root:root /etc/frc-spotter/packs && chmod -R go-w /etc/frc-spotter/packs \
+ && chown nobody /etc/frc-spotter/packs/untrusted/pack.yaml \
+ && find /etc/frc-spotter/packs -name '*.md' -delete
+COPY agent.json /etc/frc-spotter/agent.json
+RUN chmod 0644 /etc/frc-spotter/agent.json
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

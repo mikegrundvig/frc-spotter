@@ -14,4 +14,3 @@ Description: an FRC robot's coprocessor agent, for the robot's manager
  (values collected on a schedule, logs, actions) and measures nothing itself;
  with no packs it reports which computer it is and offers power-off and
  reboot. Packs are folders in /etc/frc-spotter/packs/, or pushed by the robot.
- It bundles its own Java runtime.

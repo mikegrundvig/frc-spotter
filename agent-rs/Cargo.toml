@@ -48,6 +48,8 @@ fixture = []
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+# Its symbols left out: the board keeps the program small, and a panic's message still says where.
+strip = "symbols"
 
 [profile.dev]
 panic = "abort"
