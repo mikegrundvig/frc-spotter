@@ -54,6 +54,8 @@ pub struct Fixture {
     pub addresses: Option<Vec<String>>,
     /// How long a stream's write may stall before it's closed, in place of 10 s.
     pub stall: Option<std::time::Duration>,
+    /// How often a stream sends every value again, in place of 10 s.
+    pub complete: Option<std::time::Duration>,
 }
 
 /// `--name=value` options, after an optional `serve`; why not, when they can't be used.
@@ -84,6 +86,13 @@ pub fn options(args: &[String]) -> Result<Options, String> {
                         .filter(|a| !a.is_empty())
                         .map(str::to_string)
                         .collect(),
+                );
+                continue;
+            }
+            if let Some(complete) = arg.strip_prefix("--fixture-complete=") {
+                fixture.complete = Some(
+                    crate::packs::duration::parse(complete)
+                        .ok_or("--fixture-complete is a duration")?,
                 );
                 continue;
             }
@@ -200,6 +209,12 @@ pub async fn serve(options: Options) -> u8 {
         Server::new(
             agent.clone(),
             options.fixture.stall.unwrap_or(server::STALL),
+            options
+                .fixture
+                .complete
+                .unwrap_or(std::time::Duration::from_nanos(
+                    server::stream::COMPLETE_NANOS,
+                )),
         )
         .serve(listener),
     );

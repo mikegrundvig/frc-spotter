@@ -182,8 +182,10 @@ pub fn query(raw: Option<&str>) -> Result<HashMap<String, String>, Refused> {
     Ok(query)
 }
 
-/// What only a test's agent takes: a value set as its collector would, from the test on this
-/// computer (`POST /fixture/values/<id>`, a `FieldValue` in protobuf). A board's agent has none.
+/// What only a test's agent takes, from the test on this computer: a value set as its collector
+/// would (`POST /fixture/values/<id>`, a `FieldValue` in protobuf), several at once (`POST
+/// /fixture/values`, a `Values`, each naming its id), and how many streams are open (`GET
+/// /fixture/streams`). A board's agent has none.
 #[cfg(feature = "fixture")]
 async fn fixture(
     server: &Arc<Server>,
@@ -193,31 +195,55 @@ async fn fixture(
 ) -> Result<Response<Body>, Refused> {
     use http_body_util::BodyExt;
     use prost::Message;
-    let Some(id) = path.strip_prefix("/fixture/values/") else {
-        return Err(Refused::new(404, format!("no such resource: {path}")));
-    };
     if !from.is_loopback() {
         return Err(Refused::new(
             403,
-            "a test sets values from this computer only",
+            "a test's requests come from this computer only",
         ));
     }
-    let id = id.to_string();
+    // How many streams are open, as text.
+    if path == "/fixture/streams" {
+        let open = server.streams().to_string();
+        return Ok(answer::response(
+            200,
+            Body::Whole(Some(bytes::Bytes::from(open))),
+        ));
+    }
     let bytes = request
         .into_body()
         .collect()
         .await
         .map_err(|e| Refused::new(400, e.to_string()))?
         .to_bytes();
-    let value =
-        crate::proto::FieldValue::decode(bytes).map_err(|e| Refused::new(400, e.to_string()))?;
+    // Several values at once, a `Values` whose each names its value's id, set one after another
+    // as the agent's own thread sets them: no stream sends between them.
+    let values: Vec<(String, crate::proto::FieldValue)> = if path == "/fixture/values" {
+        crate::proto::Values::decode(bytes)
+            .map_err(|e| Refused::new(400, e.to_string()))?
+            .values
+            .into_iter()
+            .map(|value| (value.name.clone(), value))
+            .collect()
+    } else if let Some(id) = path.strip_prefix("/fixture/values/") {
+        let value = crate::proto::FieldValue::decode(bytes)
+            .map_err(|e| Refused::new(400, e.to_string()))?;
+        vec![(id.to_string(), value)]
+    } else {
+        return Err(Refused::new(404, format!("no such resource: {path}")));
+    };
     let description = server.agent.description();
-    let index = description
-        .values
-        .iter()
-        .position(|declared| declared.id == id)
-        .ok_or_else(|| Refused::new(404, format!("no value {id}")))?;
-    server.agent.store.set(index, vec![value]);
+    for (id, value) in values {
+        let index = description
+            .values
+            .iter()
+            .position(|declared| declared.id == id)
+            .ok_or_else(|| Refused::new(404, format!("no value {id}")))?;
+        let value = crate::proto::FieldValue {
+            name: String::new(),
+            ..value
+        };
+        server.agent.store.set(index, vec![value]);
+    }
     Ok(answer::empty(204))
 }
 

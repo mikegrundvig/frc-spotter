@@ -88,3 +88,20 @@ impl RateLimited {
         Some(line)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Fixture;
+
+    #[test]
+    fn what_the_agent_logs_has_its_control_characters_escaped_and_is_cut() {
+        assert_eq!(escaped("a\nb\r\u{0}c\td"), "a\\nb\\r\\u0000c\\td");
+        let cut = escaped(&"x".repeat(MAX_LINE + 10));
+        assert_eq!(cut.len(), MAX_LINE + 3);
+        assert!(cut.ends_with("..."));
+        let fixture = Fixture::new();
+        fixture.host.log("one\n<2>two");
+        assert!(fixture.log().contains("one\\n<2>two"));
+    }
+}

@@ -362,3 +362,47 @@ pub fn unserved_port() -> (u16, Vec<tokio::net::TcpSocket>) {
         }
     }
 }
+
+/// A key pair, and what a robot's manager does with it to sign a write.
+pub struct Signer {
+    pub key: ed25519_dalek::SigningKey,
+    /// Its public half, as agent.json lists it.
+    pub public: String,
+    /// Its id, as a signature names it.
+    pub id: String,
+}
+
+impl Signer {
+    pub fn new(seed: u8) -> Signer {
+        use base64::Engine;
+        let key = signing_key(seed);
+        let public = trusted(&key);
+        let der = base64::engine::general_purpose::STANDARD
+            .decode(&public)
+            .expect("its encoding");
+        let id = crate::protocol::signing::key_id(&der);
+        Signer { key, public, id }
+    }
+
+    /// A write's `Spotter-Signature`: over the challenge, its counter, method, path and body.
+    pub fn sign(
+        &self,
+        challenge: &str,
+        counter: i64,
+        method: &str,
+        path: &str,
+        body: &[u8],
+    ) -> String {
+        use base64::Engine;
+        use ed25519_dalek::Signer as _;
+        use sha2::Digest;
+        let hash = sha2::Sha256::digest(body);
+        let message = crate::protocol::signing::message(challenge, counter, method, path, &hash);
+        let signature = self.key.sign(&message);
+        format!(
+            "{} {counter} {}",
+            self.id,
+            base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())
+        )
+    }
+}

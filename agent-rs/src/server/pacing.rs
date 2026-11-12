@@ -113,9 +113,39 @@ mod tests {
         assert!(pacing.complete_due(20_000 * MS));
     }
 
+    /// What puts each off, or starts it again, on a stream connected at some time other than 0.
     #[test]
-    fn a_long_heartbeat_wakes_for_every_value_first() {
-        let pacing = Pacing::new(5_000 * MS, 1_000 * MS, 0);
+    fn what_was_sent_puts_each_off_and_the_next_starts_its_own_wait() {
+        const T0: u64 = 1_234_560_000_000;
+        let mut pacing = Pacing::new(250 * MS, 10_000 * MS, T0);
+        assert!(!pacing.heartbeat_due(T0));
+        // Anything sent puts the heartbeat off: a busy stream sends no heartbeats.
+        pacing.sent(T0 + 200 * MS);
+        assert!(!pacing.heartbeat_due(T0 + 250 * MS));
+        assert!(pacing.heartbeat_due(T0 + 450 * MS));
+        assert_eq!(pacing.wake(), T0 + 450 * MS);
+        // A change waits 20 ms for others, counted from the first; once taken, the next change
+        // starts its own wait.
+        pacing.changed(T0 + 100 * MS);
+        pacing.changed(T0 + 115 * MS);
+        assert!(pacing.changes_due(T0 + 120 * MS));
+        pacing.changes_taken();
+        assert_eq!(pacing.wake(), T0 + 450 * MS);
+        pacing.changed(T0 + 600 * MS);
+        assert!(!pacing.changes_due(T0 + 619 * MS));
+        assert!(pacing.changes_due(T0 + 620 * MS));
+        // A new description sent every value early: the 10 s start again from then.
+        pacing.complete_sent(T0 + 3_000 * MS);
+        assert!(!pacing.complete_due(T0 + 10_000 * MS));
+        assert!(pacing.complete_due(T0 + 13_000 * MS));
+    }
+
+    /// It wakes for the soonest of them: every value, a long heartbeat's first; then a change.
+    #[test]
+    fn it_wakes_for_the_soonest_of_them() {
+        let mut pacing = Pacing::new(5_000 * MS, 1_000 * MS, 0);
         assert_eq!(pacing.wake(), 1_000 * MS);
+        pacing.changed(10 * MS);
+        assert_eq!(pacing.wake(), 30 * MS);
     }
 }

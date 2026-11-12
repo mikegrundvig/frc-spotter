@@ -118,7 +118,7 @@ pub fn open(
             stall: server.stall,
             inbox: Inbox::new(Pacing::new(
                 heartbeat.as_nanos() as u64,
-                COMPLETE_NANOS,
+                server.complete,
                 monotonic_nanos(),
             )),
         };

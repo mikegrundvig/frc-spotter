@@ -131,3 +131,131 @@ fn valid(key: &VerifyingKey, message: &[u8], signature: &[u8]) -> bool {
         Err(_) => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sha2::{Digest, Sha256};
+
+    use super::*;
+    use crate::testing::Signer;
+
+    const BODY: &[u8] = b"front camera";
+    const PATH: &str = "/v2/actions/team.ok";
+
+    fn hash(body: &[u8]) -> Vec<u8> {
+        Sha256::digest(body).to_vec()
+    }
+
+    #[test]
+    fn a_write_signed_over_the_challenge_with_a_rising_counter_is_taken() {
+        let team = Signer::new(1);
+        let signatures = Signatures::new(std::slice::from_ref(&team.public));
+        assert!(signatures.required());
+        assert!(
+            team.id.len() == 16
+                && team
+                    .id
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
+        let challenge = signatures.open();
+        let decoded = URL_SAFE_NO_PAD.decode(&challenge).expect("base64url");
+        assert_eq!(decoded.len(), CHALLENGE_BYTES);
+        let sign = |counter| team.sign(&challenge, counter, "POST", PATH, BODY);
+        let verify = |signed: String| signatures.verify("POST", PATH, &hash(BODY), Some(&signed));
+        assert_eq!(verify(sign(1)), Ok(()));
+        assert_eq!(verify(sign(5)), Ok(()));
+        // Replayed, or not higher: refused.
+        assert_eq!(
+            verify(sign(5)),
+            Err("counter 5 was used already on this connection (the last was 5)".into())
+        );
+        let lower = verify(sign(3)).expect_err("refused");
+        assert!(lower.starts_with("counter 3 was used already"), "{lower}");
+    }
+
+    #[test]
+    fn a_write_of_another_body_method_path_or_key_is_refused() {
+        let team = Signer::new(1);
+        let other = Signer::new(2);
+        let signatures = Signatures::new(std::slice::from_ref(&team.public));
+        let challenge = signatures.open();
+        let signed = team.sign(&challenge, 1, "POST", PATH, BODY);
+        let by_other = other.sign(&challenge, 1, "POST", PATH, BODY);
+        // The right key's id, another key's signature.
+        let forged = format!(
+            "{} 1 {}",
+            team.id,
+            by_other.split(' ').nth(2).expect("its signature")
+        );
+        let rows: [(&str, Vec<u8>, &str, String); 4] = [
+            (
+                PATH,
+                hash(b""),
+                &signed,
+                "the signature doesn't match this request".into(),
+            ),
+            (
+                "/v2/actions/core.reboot",
+                hash(BODY),
+                &signed,
+                "the signature doesn't match".into(),
+            ),
+            (
+                PATH,
+                hash(BODY),
+                &by_other,
+                format!("key {} isn't one this board trusts", other.id),
+            ),
+            (
+                PATH,
+                hash(BODY),
+                &forged,
+                "the signature doesn't match".into(),
+            ),
+        ];
+        for (path, body, header, why) in rows {
+            let refused = signatures
+                .verify("POST", path, &body, Some(header))
+                .expect_err("refused");
+            assert!(refused.starts_with(&why), "{refused}");
+        }
+    }
+
+    #[test]
+    fn an_unsigned_or_malformed_write_is_refused_with_why() {
+        let team = Signer::new(1);
+        let signatures = Signatures::new(std::slice::from_ref(&team.public));
+        signatures.open();
+        let verify = |header: Option<&str>| signatures.verify("POST", PATH, &hash(BODY), header);
+        assert_eq!(
+            verify(None),
+            Err("this board requires signed writes, and this one isn't signed".into())
+        );
+        assert_eq!(
+            verify(Some("a b")),
+            Err("Spotter-Signature is <key id> <counter> <signature>".into())
+        );
+        let malformed = verify(Some(&format!("{} one two", team.id))).expect_err("refused");
+        assert!(malformed.contains("<signature in base64>"), "{malformed}");
+    }
+
+    #[test]
+    fn a_challenge_is_useless_after_its_connection_closes() {
+        let team = Signer::new(1);
+        let signatures = Signatures::new(std::slice::from_ref(&team.public));
+        let verify = |signed: String| signatures.verify("POST", PATH, &hash(BODY), Some(&signed));
+        let old = signatures.open();
+        signatures.close(&old);
+        assert_eq!(
+            verify(team.sign(&old, 1, "POST", PATH, BODY)),
+            Err("no stream is connected, so there's no challenge to sign".into())
+        );
+        let fresh = signatures.open();
+        assert_ne!(fresh, old);
+        let stale = verify(team.sign(&old, 1, "POST", PATH, BODY)).expect_err("refused");
+        assert!(stale.starts_with("the signature doesn't match"), "{stale}");
+        assert_eq!(verify(team.sign(&fresh, 1, "POST", PATH, BODY)), Ok(()));
+        assert!(!Signatures::new(&[]).required());
+    }
+}

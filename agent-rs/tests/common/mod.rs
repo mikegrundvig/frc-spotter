@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::{Buf, Bytes, BytesMut};
-use frc_spotter::proto::{Event, Problem};
+use frc_spotter::proto::{Event, FieldValue, Problem, Values, event};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
@@ -98,6 +98,16 @@ impl Board {
     }
 
     pub async fn start_on(&self, port: u16, extra: &[&str]) -> Agent {
+        self.launch(port, Some(CONTROLLER), extra).await
+    }
+
+    /// Starts the agent naming no controller on its command line: its settings', or else the
+    /// robot controller's on its own network, as its addresses (`--fixture-addresses=`) say.
+    pub async fn start_unnamed(&self, extra: &[&str]) -> Agent {
+        self.launch(0, None, extra).await
+    }
+
+    async fn launch(&self, port: u16, controller: Option<IpAddr>, extra: &[&str]) -> Agent {
         let mut command = Command::new(PROGRAM);
         command
             .arg("--fixture")
@@ -109,8 +119,10 @@ impl Board {
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        if !extra.iter().any(|arg| arg.starts_with("--controller=")) {
-            command.arg(format!("--controller={CONTROLLER}"));
+        if let Some(controller) = controller
+            && !extra.iter().any(|arg| arg.starts_with("--controller="))
+        {
+            command.arg(format!("--controller={controller}"));
         }
         let mut child = command.spawn().expect("the agent starts");
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -298,19 +310,72 @@ impl Agent {
         sender.send_request(request).await.expect("an answer")
     }
 
+    /// A request written by hand, from the controller's address, as a client that sends what it
+    /// likes would: the whole answer, as text, once the agent closes the connection.
+    pub async fn raw(&self, request: &str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut socket = tokio::net::TcpStream::connect(self.address())
+            .await
+            .expect("the agent answers");
+        socket
+            .write_all(request.as_bytes())
+            .await
+            .expect("the request");
+        let mut answer = Vec::new();
+        tokio::time::timeout(WAIT, socket.read_to_end(&mut answer))
+            .await
+            .expect("an answer in time")
+            .expect("an answer");
+        String::from_utf8_lossy(&answer).into_owned()
+    }
+
+    /// How many streams are open (`GET /fixture/streams`).
+    pub async fn streams(&self) -> usize {
+        self.get("/fixture/streams")
+            .await
+            .text()
+            .parse()
+            .expect("a count")
+    }
+
+    /// Waits for the agent to have this many streams open.
+    pub async fn streams_open(&self, count: usize) {
+        let until = tokio::time::Instant::now() + WAIT;
+        loop {
+            let open = self.streams().await;
+            if open == count {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < until,
+                "{open} streams open, never {count}"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Sets values as their collectors would, all at once (`POST /fixture/values`): by id.
+    pub async fn set(&self, values: &[(&str, FieldValue)]) {
+        let values = Values {
+            values: values
+                .iter()
+                .map(|(id, value)| FieldValue {
+                    name: id.to_string(),
+                    ..value.clone()
+                })
+                .collect(),
+            ..Values::default()
+        };
+        let answer = self.post("/fixture/values", &values.encode_to_vec()).await;
+        assert_eq!(answer.status, 204, "{}", answer.text());
+    }
+
     /// Opens a stream from an address: its answer's head, and its events as they come.
     pub async fn stream(&self, from: IpAddr, query: &str) -> Stream {
         let response = self
             .send(from, "GET", &format!("/v2/stream{query}"), &[], b"")
             .await;
-        let status = response.status().as_u16();
-        let headers = response.headers().clone();
-        Stream {
-            status,
-            headers,
-            body: response.into_body(),
-            buffer: BytesMut::new(),
-        }
+        Stream::of(response)
     }
 }
 
@@ -323,12 +388,53 @@ pub struct Stream {
 }
 
 impl Stream {
+    /// A stream's answer, its events to read as they come.
+    pub fn of(response: hyper::Response<Incoming>) -> Stream {
+        let status = response.status().as_u16();
+        let headers = response.headers().clone();
+        Stream {
+            status,
+            headers,
+            body: response.into_body(),
+            buffer: BytesMut::new(),
+        }
+    }
+
     pub fn challenge(&self) -> String {
         self.headers
             .get("spotter-challenge")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string()
+    }
+
+    /// The next line of a stream asked for as JSON lines, or none when it ends.
+    pub async fn line(&mut self) -> Option<String> {
+        let until = tokio::time::Instant::now() + WAIT;
+        loop {
+            if let Some(end) = self.buffer.iter().position(|b| *b == b'\n') {
+                let line = self.buffer.split_to(end + 1);
+                return Some(String::from_utf8_lossy(&line[..end]).into_owned());
+            }
+            match tokio::time::timeout_at(until, self.body.frame()).await {
+                Err(_) | Ok(None) | Ok(Some(Err(_))) => return None,
+                Ok(Some(Ok(frame))) => {
+                    if let Ok(data) = frame.into_data() {
+                        self.buffer.extend_from_slice(&data);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The next event that isn't a heartbeat.
+    pub async fn next_not_heartbeat(&mut self) -> Option<Event> {
+        loop {
+            let event = self.next().await?;
+            if !matches!(event.event, Some(event::Event::Heartbeat(_))) {
+                return Some(event);
+            }
+        }
     }
 
     /// The next event, or none when the stream ends (or nothing comes within the wait).
@@ -364,4 +470,70 @@ impl Stream {
 pub fn write(file: &Path, text: &str) {
     fs::create_dir_all(file.parent().expect("a folder")).expect("its folders");
     fs::write(file, text).expect("the file");
+}
+
+/// A key pair, and what a robot's manager does with it to sign a write.
+pub struct Signer {
+    key: ed25519_dalek::SigningKey,
+    /// Its public half, as agent.json lists it: its X.509 encoding, in base64.
+    pub public: String,
+    /// Its id, as a signature names it.
+    pub id: String,
+}
+
+impl Signer {
+    /// A key from a seed, the same for every run so a failure repeats.
+    pub fn new(seed: u8) -> Signer {
+        use base64::Engine;
+        use ed25519_dalek::pkcs8::EncodePublicKey;
+        let key = ed25519_dalek::SigningKey::from_bytes(&[seed; 32]);
+        let der = key
+            .verifying_key()
+            .to_public_key_der()
+            .expect("its X.509 encoding");
+        let public = base64::engine::general_purpose::STANDARD.encode(der.as_bytes());
+        let id = frc_spotter::protocol::signing::key_id(der.as_bytes());
+        Signer { key, public, id }
+    }
+
+    /// A write's `Spotter-Signature`: over the challenge, its counter, method, path and body.
+    pub fn sign(
+        &self,
+        challenge: &str,
+        counter: i64,
+        method: &str,
+        path: &str,
+        body: &[u8],
+    ) -> String {
+        use base64::Engine;
+        use ed25519_dalek::Signer as _;
+        use sha2::Digest;
+        let hash = sha2::Sha256::digest(body);
+        let message =
+            frc_spotter::protocol::signing::message(challenge, counter, method, path, &hash);
+        let signature = self.key.sign(&message).to_bytes();
+        format!(
+            "{} {counter} {}",
+            self.id,
+            base64::engine::general_purpose::STANDARD.encode(signature)
+        )
+    }
+}
+
+/// A number, as a value.
+pub fn number(value: f64) -> FieldValue {
+    FieldValue {
+        value: Some(frc_spotter::proto::field_value::Value::Number(value)),
+        ..FieldValue::default()
+    }
+}
+
+/// Text, as a value.
+pub fn text(value: &str) -> FieldValue {
+    FieldValue {
+        value: Some(frc_spotter::proto::field_value::Value::Text(
+            value.to_string(),
+        )),
+        ..FieldValue::default()
+    }
 }

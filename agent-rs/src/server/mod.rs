@@ -15,7 +15,7 @@ pub mod events;
 pub mod pacing;
 mod routes;
 pub mod signatures;
-mod stream;
+pub mod stream;
 mod writes;
 
 use std::collections::HashMap;
@@ -59,10 +59,14 @@ pub struct Server {
     refusals: RateLimited,
     failures: RateLimited,
     stall: Duration,
+    /// How often a stream sends every value again: [`stream::COMPLETE_NANOS`] on a board.
+    complete: u64,
 }
 
 impl Server {
-    pub fn new(agent: Arc<Agent>, stall: Duration) -> Arc<Server> {
+    /// A server for the agent: `stall` is how long a stream's write may stall, `complete` how often
+    /// a stream sends every value again ([`STALL`] and [`stream::COMPLETE_NANOS`] on a board).
+    pub fn new(agent: Arc<Agent>, stall: Duration, complete: Duration) -> Arc<Server> {
         Arc::new(Server {
             agent,
             under_way: Mutex::new(HashMap::new()),
@@ -71,6 +75,7 @@ impl Server {
             refusals: RateLimited::new(REFUSAL_LOG_MICROS),
             failures: RateLimited::new(REFUSAL_LOG_MICROS),
             stall,
+            complete: complete.as_nanos() as u64,
         })
     }
 
@@ -264,3 +269,6 @@ pub async fn bind(address: SocketAddr) -> io::Result<TcpListener> {
     socket.bind(address)?;
     socket.listen(MAX_CONNECTIONS as u32)
 }
+
+#[cfg(test)]
+mod tests;
