@@ -1,8 +1,9 @@
-// Publishing what a robot program uses (spotter-manager, and spotter-agent for its command line) to Spotter's
+// Publishing what a robot program uses (spotter-manager) to Spotter's
 // Maven repository: the static one on the gh-pages branch, served by GitHub Pages at
 // https://mikegrundvig.github.io/frc-spotter/maven, as com.michaelgrundvig.frc:<project>. A project
 // applies this with ext.mavenDescription set; and with ext.mavenJar, a jar task whose jar is
-// published in place of the project's own, with no dependencies (spotter-agent: its runnable jar). The release workflow checks out gh-pages and publishes into it
+// published in place of the project's own, with no dependencies. The release workflow checks out
+// gh-pages and publishes into it
 // (-PpagesRepository=<its maven folder>); Gradle reads the maven-metadata.xml already there, so a
 // new version is added and the old ones kept. Each file gets its .md5, .sha1, .sha256, and .sha512.
 //

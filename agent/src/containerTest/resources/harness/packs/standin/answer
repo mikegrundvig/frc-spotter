@@ -1,3 +1,0 @@
-#!/bin/sh
-# The stand-in's own health, as a team's script prints it: JSON, judged however it likes.
-echo '{"answer": 42, "mood": {"level": "ok", "message": "fine"}, "ignored": true}'

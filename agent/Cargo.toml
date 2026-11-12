@@ -1,0 +1,55 @@
+[package]
+name = "frc-spotter"
+version = "0.5.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[dependencies]
+base64 = "0.22"
+bytes = "1"
+crc32fast = "1"
+ed25519-dalek = { version = "2", features = ["pkcs8"] }
+env_logger = { version = "0.11", default-features = false }
+form_urlencoded = "1"
+getrandom = "0.3"
+http-body-util = "0.1"
+http = "1"
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+log = "0.4"
+nix = { version = "0.30", features = ["fs", "net", "process", "signal", "time", "user"] }
+prost = "0.14"
+saphyr-parser = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+time = { version = "0.3", features = ["parsing"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
+
+[build-dependencies]
+prost-build = "0.14"
+protox = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+
+[features]
+# A test's agent: --fixture counts its files as root's and its address as 127.0.0.1, and it takes a
+# value set as its collector would (POST /fixture/values/<id>) from this computer. For the
+# manager's tests and the agent's own; a board's program is built without it.
+fixture = []
+
+# A panic anywhere ends the program at once, so systemd starts the agent again with all its parts,
+# rather than one task dying alone and the agent running on without it.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+# Its symbols left out: the board keeps the program small, and a panic's message still says where.
+strip = "symbols"
+
+[profile.dev]
+panic = "abort"

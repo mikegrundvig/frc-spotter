@@ -4,7 +4,7 @@
 //
 //   ./gradlew -g "$(mktemp -d)" --write-verification-metadata sha256 \
 //     --init-script gradle/every-platform.gradle \
-//     ci :spotter-agent:agentRelease :spotter-manager:resolveEveryPlatform
+//     ci :spotter-manager:resolveEveryPlatform
 allprojects {
     if (path == ":spotter-manager") {
         afterEvaluate {
