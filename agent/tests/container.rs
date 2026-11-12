@@ -233,13 +233,39 @@ fn the_installed_package_serves_under_systemd_in_its_sandbox() {
         curl(&runtime, &name, &["http://127.0.0.1:5808/v2/describe"]).as_slice(),
     )
     .expect("a description");
+    // With the agent's journal, should it fail: a board whose identity can't be read says why there.
     assert_eq!(
         description
             .identity
             .as_ref()
             .expect("its identity")
             .hostname,
-        "vision-front"
+        "vision-front",
+        "the agent's journal:\n{}",
+        ok(
+            &runtime,
+            &[
+                "exec",
+                &name,
+                "journalctl",
+                "-u",
+                "frc-spotter.service",
+                "--no-pager",
+                "-n",
+                "50"
+            ]
+        )
+    );
+    // Its addresses, read in its sandbox: the container's one, on its runtime's network.
+    assert!(
+        !description
+            .identity
+            .as_ref()
+            .expect("its identity")
+            .addresses
+            .is_empty(),
+        "no addresses in {:?}",
+        description.identity
     );
     let packs: Vec<&str> = description.packs.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(packs, ["debian", "standin"]);

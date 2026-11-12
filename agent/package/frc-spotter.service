@@ -73,7 +73,9 @@ RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
 DevicePolicy=closed
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# AF_NETLINK is how a program asks the kernel for the computer's addresses (getifaddrs): the agent
+# reads its own that way, for its description and to work out the robot controller's.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 IPAddressDeny=any
 IPAddressAllow=localhost 10.0.0.0/8 169.254.0.0/16
 
