@@ -13,7 +13,7 @@ crc32fast = "1"
 ed25519-dalek = { version = "2", features = ["pkcs8"] }
 env_logger = { version = "0.11", default-features = false }
 form_urlencoded = "1"
-getrandom = "0.3"
+getrandom = "0.4"
 http-body-util = "0.1"
 http = "1"
 hyper = { version = "1", features = ["http1", "server", "client"] }
