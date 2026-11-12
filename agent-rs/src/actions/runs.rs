@@ -703,10 +703,10 @@ fn size(folder: &Path) -> u64 {
 }
 
 fn delete(host: &Host, folder: &Path) {
-    if let Err(e) = fs::remove_dir_all(folder) {
-        if e.kind() != io::ErrorKind::NotFound {
-            host.log(&format!("Couldn't remove {}: {e}", folder.display()));
-        }
+    if let Err(e) = fs::remove_dir_all(folder)
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        host.log(&format!("Couldn't remove {}: {e}", folder.display()));
     }
 }
 

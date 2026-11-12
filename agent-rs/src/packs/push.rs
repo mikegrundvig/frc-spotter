@@ -91,13 +91,13 @@ pub fn apply(host: &Host, received: &Path, id: &str) -> Result<(), Refusal> {
             Ok(())
         }
         Err(e) => {
-            if let Some(kept) = aside {
-                if let Err(back) = fs::rename(&kept, &packs) {
-                    host.log(&format!(
-                        "Couldn't put the packs back from {} after a failed push: {back}",
-                        kept.display()
-                    ));
-                }
+            if let Some(kept) = aside
+                && let Err(back) = fs::rename(&kept, &packs)
+            {
+                host.log(&format!(
+                    "Couldn't put the packs back from {} after a failed push: {back}",
+                    kept.display()
+                ));
             }
             delete(host, &unpacked);
             Err(e)
@@ -257,3 +257,6 @@ fn delete(host: &Host, path: &Path) {
         host.log(&format!("Couldn't remove {}: {e}", path.display()));
     }
 }
+
+#[cfg(test)]
+mod tests;

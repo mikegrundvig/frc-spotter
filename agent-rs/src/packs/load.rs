@@ -329,3 +329,6 @@ fn untrusted_owner(owner: &Owner) -> String {
     }
     String::new()
 }
+
+#[cfg(test)]
+mod tests;

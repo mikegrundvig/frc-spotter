@@ -148,3 +148,84 @@ pub fn program(folder: &Path, relative: &str) -> Option<String> {
 fn show(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+
+    fn pack(dir: &Path, name: &str, yaml: &str) -> PathBuf {
+        let folder = dir.join("packs").join(name);
+        fs::create_dir_all(&folder).expect("its folder");
+        fs::write(folder.join(pack::FILE), yaml).expect("its pack.yaml");
+        folder
+    }
+
+    #[test]
+    fn a_good_pack_passes_with_its_notes() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let folder = pack(
+            dir.path(),
+            "web",
+            "pack: web\ncollectors:\n  - id: page\n    http: {get: \"http://localhost:5800/\"}\n    every: 1s\n    fields:\n      status: {type: number}\n",
+        );
+        let report = check(std::slice::from_ref(&folder));
+        assert!(report.passed(), "{:?}", report.problems);
+        assert_eq!(report.packs, 1);
+        assert_eq!(
+            report.notes,
+            [
+                format!(
+                    "{}/pack.yaml:7: collector page's field status is its command's own exit code or HTTP status, not a key of its output",
+                    show(&folder)
+                ),
+                TRUST_SKIPPED.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_program_of_the_packs_own_must_run_once_pushed() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let folder = pack(dir.path(), "p", "pack: p\n");
+        fs::write(folder.join("plain"), "echo 1\n").expect("plain");
+        fs::write(folder.join("script"), "#!/bin/sh\necho 1\n").expect("script");
+        fs::write(folder.join("binary"), "\u{7f}ELF").expect("binary");
+        fs::set_permissions(folder.join("binary"), fs::Permissions::from_mode(0o755))
+            .expect("its mode");
+        let plain = program(&folder, "plain").expect("plain won't run");
+        assert!(plain.contains("neither an execute bit nor a #!"), "{plain}");
+        assert_eq!(program(&folder, "script"), None);
+        assert_eq!(program(&folder, "binary"), None);
+        assert_eq!(
+            program(&folder, "nothing"),
+            Some("./nothing isn't in the pack's folder".to_string())
+        );
+    }
+
+    #[test]
+    fn a_folder_of_packs_is_held_to_a_boards_bounds() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let mut actions = "actions:\n".to_string();
+        for i in 0..32 {
+            actions.push_str(&format!("  - {{id: a{i}, run: [true]}}\n"));
+        }
+        for i in 0..4 {
+            pack(
+                dir.path(),
+                &format!("a{i}"),
+                &format!("pack: a{i}\n{actions}"),
+            );
+        }
+        let report = check(&[dir.path().join("packs")]);
+        assert!(!report.passed());
+        assert_eq!(
+            report.problems,
+            [format!(
+                "{}: ignored, as its 32 actions would pass the 128 a board may have (98 so far)",
+                show(&dir.path().join("packs").join("a3"))
+            )]
+        );
+    }
+}

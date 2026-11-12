@@ -77,10 +77,10 @@ fn scalar_words(scalar: &Scalar, unit: &str) -> String {
 /// message, or why it has none; empty when it's ok.
 pub fn judge(declaration: &FieldDeclaration, value: &FieldValue) -> (Level, String) {
     let reading = Reading::of(value);
-    if let Reading::Status(level, message) = &reading {
-        if *level != Level::Unavailable {
-            return (*level, message.clone());
-        }
+    if let Reading::Status(level, message) = &reading
+        && *level != Level::Unavailable
+    {
+        return (*level, message.clone());
     }
     let unit = &declaration.unit;
     if let Some(why) = declaration
@@ -150,18 +150,16 @@ fn matched(limit: &Limit, unit: &str, reading: &Reading) -> Option<String> {
             if let Some(Scalar {
                 value: Some(scalar::Value::Number(equals)),
             }) = &limit.equals
+                && n == equals
             {
-                if n == equals {
-                    return Some(format!("is {}", number(*equals, unit)));
-                }
+                return Some(format!("is {}", number(*equals, unit)));
             }
             if let Some(Scalar {
                 value: Some(scalar::Value::Number(other)),
             }) = &limit.not_equals
+                && n != other
             {
-                if n != other {
-                    return Some(format!("isn't {}", number(*other, unit)));
-                }
+                return Some(format!("isn't {}", number(*other, unit)));
             }
             None
         }
@@ -169,18 +167,16 @@ fn matched(limit: &Limit, unit: &str, reading: &Reading) -> Option<String> {
             if let Some(Scalar {
                 value: Some(scalar::Value::Flag(equals)),
             }) = &limit.equals
+                && flag == equals
             {
-                if flag == equals {
-                    return Some(format!("is {equals}"));
-                }
+                return Some(format!("is {equals}"));
             }
             if let Some(Scalar {
                 value: Some(scalar::Value::Flag(other)),
             }) = &limit.not_equals
+                && flag != other
             {
-                if flag != other {
-                    return Some(format!("isn't {other}"));
-                }
+                return Some(format!("isn't {other}"));
             }
             None
         }
@@ -191,21 +187,19 @@ fn matched(limit: &Limit, unit: &str, reading: &Reading) -> Option<String> {
             if let Some(Scalar {
                 value: Some(scalar::Value::Text(equals)),
             }) = &limit.equals
+                && text == equals
             {
-                if text == equals {
-                    return Some(format!("is {}", scalar_words(limit.equals.as_ref()?, unit)));
-                }
+                return Some(format!("is {}", scalar_words(limit.equals.as_ref()?, unit)));
             }
             if let Some(Scalar {
                 value: Some(scalar::Value::Text(other)),
             }) = &limit.not_equals
+                && text != other
             {
-                if text != other {
-                    return Some(format!(
-                        "isn't {}",
-                        scalar_words(limit.not_equals.as_ref()?, unit)
-                    ));
-                }
+                return Some(format!(
+                    "isn't {}",
+                    scalar_words(limit.not_equals.as_ref()?, unit)
+                ));
             }
             None
         }

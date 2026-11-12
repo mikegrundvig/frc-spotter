@@ -72,11 +72,11 @@ impl RateLimited {
     /// (then it's counted for the next).
     pub fn line(&self, message: &str, now_micros: u64) -> Option<String> {
         let mut state = self.state.lock().expect("the log's lock");
-        if let Some(last) = state.last_micros {
-            if now_micros.saturating_sub(last) < self.period_micros {
-                state.held += 1;
-                return None;
-            }
+        if let Some(last) = state.last_micros
+            && now_micros.saturating_sub(last) < self.period_micros
+        {
+            state.held += 1;
+            return None;
         }
         let line = if state.held == 0 {
             message.to_string()

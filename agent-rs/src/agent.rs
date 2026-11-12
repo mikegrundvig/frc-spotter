@@ -14,7 +14,7 @@ use crate::commands::Commands;
 use crate::configuration::Configuration;
 use crate::logs::{self, Logs};
 use crate::packs::pack;
-use crate::proto::{Description, Identity, Values};
+use crate::proto::{Description, Values};
 use crate::protocol;
 use crate::server::describer;
 use crate::server::events::Events;
@@ -129,10 +129,10 @@ impl Agent {
     pub fn description(&self) -> Description {
         let now = self.host.nanos();
         let mut described = self.described.lock().expect("the description's lock");
-        if let Some((last, at)) = described.as_ref() {
-            if now.saturating_sub(*at) < DESCRIPTION_NANOS {
-                return last.clone();
-            }
+        if let Some((last, at)) = described.as_ref()
+            && now.saturating_sub(*at) < DESCRIPTION_NANOS
+        {
+            return last.clone();
         }
         let read = match identity::read(&self.host) {
             Ok(read) => read,
@@ -142,7 +142,7 @@ impl Agent {
                 described
                     .as_ref()
                     .and_then(|(last, _)| last.identity.clone())
-                    .unwrap_or_else(Identity::default)
+                    .unwrap_or_default()
             }
         };
         let fresh = describer::describe(&self.version, &self.configuration, read);

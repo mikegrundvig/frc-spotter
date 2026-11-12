@@ -101,12 +101,12 @@ pub fn options(args: &[String]) -> Result<Options, String> {
         given.insert(name.to_string(), value.to_string());
     }
     for (option, flag) in [("controller", "--controller"), ("bind", "--bind")] {
-        if let Some(address) = given.get(option) {
-            if !is_ipv4(address) {
-                return Err(format!(
-                    "{flag} must be an IPv4 address, such as 10.12.34.2: {address}"
-                ));
-            }
+        if let Some(address) = given.get(option)
+            && !is_ipv4(address)
+        {
+            return Err(format!(
+                "{flag} must be an IPv4 address, such as 10.12.34.2: {address}"
+            ));
         }
     }
     let port = match given.get("port") {

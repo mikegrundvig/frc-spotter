@@ -439,13 +439,14 @@ impl Reader<'_> {
                 unit = value(&parts, "unit")
                     .and_then(|n| self.text(n, "unit"))
                     .unwrap_or_default();
-                if !unit.is_empty() && !["ns", "us", "ms", "s"].contains(&unit.as_str()) {
-                    if let Some((unit_key, _)) = get(&parts, "unit") {
-                        self.problem(
-                            unit_key,
-                            format!("a time's unit is ns, us, ms or s, not {unit}"),
-                        );
-                    }
+                if !unit.is_empty()
+                    && !["ns", "us", "ms", "s"].contains(&unit.as_str())
+                    && let Some((unit_key, _)) = get(&parts, "unit")
+                {
+                    self.problem(
+                        unit_key,
+                        format!("a time's unit is ns, us, ms or s, not {unit}"),
+                    );
                 }
             }
             Some(time_node) => {
@@ -491,13 +492,14 @@ impl Reader<'_> {
                 _ => self.problem(key, format!("input is none, text or file, not {given}")),
             }
         }
-        if let Some(Command::Http(http)) = &command {
-            if http.method == Method::Get && input != Input::None {
-                self.problem(
-                    node,
-                    format!("action {id} sends a GET, which takes no input"),
-                );
-            }
+        if let Some(Command::Http(http)) = &command
+            && http.method == Method::Get
+            && input != Input::None
+        {
+            self.problem(
+                node,
+                format!("action {id} sends a GET, which takes no input"),
+            );
         }
         let timeout = match get(&keys, "timeout") {
             Some(entry) => self.duration(entry, Duration::from_millis(1), Action::MAX_TIMEOUT),
@@ -779,10 +781,10 @@ impl Reader<'_> {
         let file_name = value(&keys, "name")
             .and_then(|n| self.described(n, "name"))
             .unwrap_or_default();
-        if let Some((name_key, _)) = get(&keys, "name") {
-            if type_name != "file" {
-                self.problem(name_key, "name is the file a file field downloads as");
-            }
+        if let Some((name_key, _)) = get(&keys, "name")
+            && type_name != "file"
+        {
+            self.problem(name_key, "name is the file a file field downloads as");
         }
         let warn = self.limit(get(&keys, "warn"), kind);
         let fail = self.limit(get(&keys, "fail"), kind);
@@ -970,28 +972,27 @@ impl Reader<'_> {
                 ..
             },
         )) = entry
+            && items.len() > most
         {
-            if items.len() > most {
-                self.problem(
-                    key,
-                    format!("a pack has at most {most} {what}, not {}", items.len()),
-                );
-            }
+            self.problem(
+                key,
+                format!("a pack has at most {most} {what}, not {}", items.len()),
+            );
         }
     }
 
     /// A problem when a collector or a response declares more than the most fields.
     fn fields_bounded(&mut self, key: &Node, node: &Node, what: &str) {
-        if let NodeKind::Mapping(entries) = &node.kind {
-            if entries.len() > MAX_FIELDS {
-                self.problem(
-                    key,
-                    format!(
-                        "{what} has at most {MAX_FIELDS} fields, not {}",
-                        entries.len()
-                    ),
-                );
-            }
+        if let NodeKind::Mapping(entries) = &node.kind
+            && entries.len() > MAX_FIELDS
+        {
+            self.problem(
+                key,
+                format!(
+                    "{what} has at most {MAX_FIELDS} fields, not {}",
+                    entries.len()
+                ),
+            );
         }
     }
 
@@ -1088,3 +1089,6 @@ pub fn local(url: &str) -> bool {
         && ["localhost", "127.0.0.1", "[::1]"]
             .contains(&authority.host().to_ascii_lowercase().as_str())
 }
+
+#[cfg(test)]
+mod tests;

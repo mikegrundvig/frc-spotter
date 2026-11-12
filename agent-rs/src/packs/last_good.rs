@@ -109,14 +109,14 @@ pub fn begin(host: &Host) -> bool {
 /// The agent stopped cleanly: a start in this boot doesn't count this one as one that didn't stay
 /// up.
 pub fn stopped(host: &Host) {
-    if let Some(marker) = Marker::read(host) {
-        if host.path(MARKER).exists() {
-            Marker {
-                stopped: true,
-                ..marker
-            }
-            .write(host);
+    if let Some(marker) = Marker::read(host)
+        && host.path(MARKER).exists()
+    {
+        Marker {
+            stopped: true,
+            ..marker
         }
+        .write(host);
     }
 }
 
@@ -144,4 +144,147 @@ pub fn set_aside() -> String {
         "{PUSHED}: set aside for this start, as the last start with them didn't stay up {} s (the agent crashed or was killed, or the board went down in two boots in a row); the next start tries them again, and a push replaces them",
         HEALTHY.as_secs()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use prost::Message;
+
+    use super::*;
+    use crate::configuration::Configuration;
+    use crate::packs::push;
+    use crate::protocol::pack_hash;
+    use crate::testing::{Fixture, files};
+
+    /// A board with pushed packs, its controller named by its team: only then does it take pushes,
+    /// and load pushed packs.
+    fn board() -> Fixture {
+        let fixture = Fixture::new();
+        fixture.config("{\"team\": 1234}");
+        fixture.pushed("team", "pack: team\n");
+        fixture
+    }
+
+    fn marked(fixture: &Fixture) -> bool {
+        fixture.path(MARKER).exists()
+    }
+
+    fn loads(fixture: &Fixture) -> usize {
+        fixture.configuration().packs.packs.len()
+    }
+
+    fn new_boot(fixture: &Fixture, id: u8) {
+        fixture.write(
+            BOOT_ID,
+            &format!("3c1e6a2e-0000-4000-8000-00000000000{id}\n"),
+        );
+    }
+
+    #[test]
+    fn a_start_with_pushed_packs_leaves_its_marker_until_its_stayed_up() {
+        let fixture = board();
+        let first = fixture.configuration();
+        let names: Vec<&str> = first.packs.packs.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["team"]);
+        assert!(first.problems.is_empty(), "{:?}", first.problems);
+        assert!(marked(&fixture));
+        healthy(&fixture.host);
+        assert!(!marked(&fixture));
+        assert_eq!(loads(&fixture), 1);
+    }
+
+    #[test]
+    fn a_start_after_one_that_didnt_stay_up_sets_its_pushed_packs_aside_and_still_takes_pushes() {
+        let fixture = board();
+        // The first start loads them, and never stays up: it crashes, or is killed out of memory.
+        fixture.configuration();
+        let second: Configuration = fixture.configuration();
+        assert!(second.packs.packs.is_empty());
+        assert_eq!(second.problems, [set_aside()]);
+        // What's on its disk is still what it says it has, so it isn't pushed the same again.
+        let on_disk = pack_hash::of_folder(&fixture.path(PUSHED)).expect("its hash");
+        assert!(!on_disk.is_empty());
+        assert_eq!(second.packs.pushed_hash, on_disk);
+        assert!(second.accepts_pushes());
+
+        // That start stays up: the next one tries them again.
+        healthy(&fixture.host);
+        assert_eq!(loads(&fixture), 1);
+    }
+
+    #[test]
+    fn a_push_gives_its_packs_a_fresh_try() {
+        let fixture = board();
+        fixture.configuration();
+        assert!(marked(&fixture));
+        let body = push::bundle_file(&fixture.host).expect("a file for the bundle");
+        let bundle = files(&[("team/pack.yaml", "pack: team\nversion: 2.0.0\n")]);
+        fs::write(&body, bundle.encode_to_vec()).expect("the bundle");
+        push::apply(&fixture.host, &body, "1").expect("pushed");
+        assert!(!marked(&fixture));
+        let versions: Vec<String> = fixture
+            .configuration()
+            .packs
+            .packs
+            .iter()
+            .map(|p| p.version.clone())
+            .collect();
+        assert_eq!(versions, ["2.0.0"]);
+    }
+
+    #[test]
+    fn a_board_without_pushed_packs_or_refusing_them_leaves_no_marker() {
+        let none = Fixture::new();
+        none.pack("vision", "pack: vision\n");
+        none.configuration();
+        assert!(!marked(&none));
+
+        let refusing = board();
+        refusing.config("{\"acceptPushes\": false}");
+        refusing.configuration();
+        assert!(!marked(&refusing));
+    }
+
+    #[tokio::test]
+    async fn an_agent_counts_its_start_good_once_its_been_up() {
+        let fixture = board();
+        let agent = fixture.agent(None);
+        assert!(marked(&fixture));
+        let collectors = agent.collectors.start();
+        // Not yet: a minute from now, on the agent's own timer, which a test doesn't wait for.
+        assert!(marked(&fixture));
+        assert_eq!(HEALTHY, Duration::from_secs(60));
+        for each in collectors {
+            each.abort();
+        }
+    }
+
+    #[test]
+    fn a_clean_stop_isnt_a_start_that_didnt_stay_up() {
+        let fixture = board();
+        fixture.configuration();
+        // Restarted for a change, a moment later: systemd stops it, and its hook says so.
+        stopped(&fixture.host);
+        assert_eq!(loads(&fixture), 1);
+        stopped(&fixture.host);
+        assert_eq!(loads(&fixture), 1);
+    }
+
+    #[test]
+    fn a_boot_counts_only_the_second_in_a_row_whose_start_didnt_stay_up() {
+        let fixture = board();
+        fixture.configuration();
+        // Switched off within the minute, as a robot often is: the next boot loads them.
+        new_boot(&fixture, 2);
+        assert_eq!(loads(&fixture), 1);
+        // And again, within the minute: two boots in a row, as a pack that reboots the board makes.
+        new_boot(&fixture, 3);
+        let third = fixture.configuration();
+        assert!(third.packs.packs.is_empty());
+        assert_eq!(third.problems, [set_aside()]);
+        // A boot that stays up starts afresh.
+        healthy(&fixture.host);
+        new_boot(&fixture, 4);
+        assert_eq!(loads(&fixture), 1);
+    }
 }

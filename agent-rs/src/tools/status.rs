@@ -106,17 +106,16 @@ async fn read(address: &str, wait: Duration) -> Result<Board, String> {
 
 /// The host and port an address names: on the protocol's port unless it says.
 fn place(address: &str) -> (String, u16) {
-    if let Some((host, port)) = address.rsplit_once(':') {
-        if !host.contains(':') || host.starts_with('[') {
-            if let Ok(port) = port.parse() {
-                return (
-                    host.trim_start_matches('[')
-                        .trim_end_matches(']')
-                        .to_string(),
-                    port,
-                );
-            }
-        }
+    if let Some((host, port)) = address.rsplit_once(':')
+        && (!host.contains(':') || host.starts_with('['))
+        && let Ok(port) = port.parse()
+    {
+        return (
+            host.trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_string(),
+            port,
+        );
     }
     (address.to_string(), protocol::PORT)
 }
@@ -190,14 +189,14 @@ async fn attempt(address: &str) -> Result<Board, String> {
                 }
                 _ => {}
             }
-            if let Some(description) = &description {
-                if seen.len() == values.len() {
-                    return Ok(Board {
-                        description: description.clone(),
-                        values,
-                        protocol,
-                    });
-                }
+            if let Some(description) = &description
+                && seen.len() == values.len()
+            {
+                return Ok(Board {
+                    description: description.clone(),
+                    values,
+                    protocol,
+                });
             }
         }
         match body.frame().await {

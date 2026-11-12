@@ -291,3 +291,70 @@ impl Owners for RootOwners {
         Ok(Owner::root(if executable { 0o755 } else { 0o644 }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// The board as the agent finds it on a real filesystem: its files' owners, and the rest.
+    #[test]
+    fn a_files_owner_and_mode_are_the_filesystems_own() {
+        let dir = tempfile::tempdir().expect("a folder");
+        let log = Arc::new(Mutex::new(Vec::<String>::new()));
+        let lines = log.clone();
+        let host = Host::new(
+            dir.path().to_path_buf(),
+            Box::new(SystemOwners),
+            Box::new(SystemAddresses),
+            Arc::new(monotonic_nanos),
+            Arc::new(move |line: &str| lines.lock().expect("the log").push(line.to_string())),
+        );
+        let file = dir.path().join("etc/frc-spotter/packs/vision/pack.yaml");
+        fs::create_dir_all(file.parent().expect("its folder")).expect("its folders");
+        fs::write(&file, "pack: vision\n").expect("the file");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o664)).expect("its mode");
+        let owner = host
+            .owner("/etc/frc-spotter/packs/vision/pack.yaml")
+            .expect("its owner");
+        let uid = fs::metadata(&file).expect("its metadata").uid();
+        let user = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid))
+            .ok()
+            .flatten()
+            .map_or(uid.to_string(), |user| user.name);
+        assert_eq!(owner.user, user);
+        assert_eq!(owner.is_root(), user == "root");
+        assert_eq!(owner.mode, 0o664);
+        assert!(owner.writable_by_others());
+        assert_eq!(
+            host.list("/etc/frc-spotter/packs").expect("the folder"),
+            ["vision"]
+        );
+        assert!(host.list("/nothing").expect("nothing").is_empty());
+        assert!(host.is_folder("/etc/frc-spotter/packs/vision"));
+        assert_eq!(
+            host.line("/etc/frc-spotter/packs/vision/pack.yaml")
+                .expect("the line"),
+            Some("pack: vision".to_string())
+        );
+        assert_eq!(host.read("/nothing").expect("nothing"), None);
+        assert!(host.nanos() > 0);
+        host.log("logged");
+        assert_eq!(*log.lock().expect("the log"), ["logged"]);
+    }
+
+    #[test]
+    fn its_addresses_leave_out_loopback_and_link_local() {
+        let addresses = SystemAddresses.read().expect("the addresses");
+        assert!(addresses.len() <= MAX_ADDRESSES);
+        for address in addresses {
+            assert!(
+                !address.starts_with("127.")
+                    && address != "::1"
+                    && !address.starts_with("fe80:")
+                    && !address.contains('%'),
+                "{address}"
+            );
+        }
+    }
+}

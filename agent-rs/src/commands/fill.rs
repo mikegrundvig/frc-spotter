@@ -141,12 +141,11 @@ pub fn from_text(field: &Field, text: &str) -> FieldValue {
     match field.kind {
         FieldType::Number => {
             let first = text.split_whitespace().next().unwrap_or("");
-            if is_number(first) {
-                if let Ok(number) = first.parse::<f64>() {
-                    if number.is_finite() {
-                        return value(field_value::Value::Number(number));
-                    }
-                }
+            if is_number(first)
+                && let Ok(number) = first.parse::<f64>()
+                && number.is_finite()
+            {
+                return value(field_value::Value::Number(number));
             }
             unavailable(format!("not a number: {}", quote(text)))
         }

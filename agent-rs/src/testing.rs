@@ -184,3 +184,86 @@ impl Fixture {
         self.dir.path()
     }
 }
+
+impl Default for Fixture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A signing key for a test, the same for every run so a failure repeats: its seed a byte.
+pub fn signing_key(seed: u8) -> ed25519_dalek::SigningKey {
+    ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+}
+
+/// A key's public half as agent.json lists it: its X.509 encoding, in base64.
+pub fn trusted(key: &ed25519_dalek::SigningKey) -> String {
+    use base64::Engine;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
+    let der = key
+        .verifying_key()
+        .to_public_key_der()
+        .expect("its X.509 encoding");
+    base64::engine::general_purpose::STANDARD.encode(der.as_bytes())
+}
+
+/// One of the spec's example packs, from the tests' pack folders: its pack.yaml.
+pub fn example(name: &str) -> String {
+    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/resources/packs")
+        .join(name)
+        .join(FILE);
+    fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()))
+}
+
+/// The repository's catalog of packs, beside the crate.
+pub fn catalog() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../packs")
+}
+
+/// A folder's packs as a bundle, as the manager makes and sends it: every file by its path, with
+/// `/`, executable as a push carries it.
+pub fn bundle(folder: &Path) -> crate::proto::PackBundle {
+    fn walk(folder: &Path, prefix: &str, files: &mut Vec<crate::proto::PackFile>) {
+        let mut entries: Vec<_> = fs::read_dir(folder)
+            .expect("the folder")
+            .flatten()
+            .collect();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            if entry.path().is_dir() {
+                walk(&entry.path(), &path, files);
+            } else {
+                files.push(crate::proto::PackFile {
+                    path,
+                    executable: crate::protocol::pack_hash::executable(&entry.path())
+                        .expect("its mode"),
+                    content: fs::read(entry.path()).expect("its bytes"),
+                });
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(folder, "", &mut files);
+    crate::proto::PackBundle { files }
+}
+
+/// A bundle made by hand: a path and its text each, all plain files.
+pub fn files(paths_and_texts: &[(&str, &str)]) -> crate::proto::PackBundle {
+    crate::proto::PackBundle {
+        files: paths_and_texts
+            .iter()
+            .map(|(path, text)| crate::proto::PackFile {
+                path: path.to_string(),
+                executable: false,
+                content: text.as_bytes().to_vec(),
+            })
+            .collect(),
+    }
+}

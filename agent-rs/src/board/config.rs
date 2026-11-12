@@ -216,3 +216,98 @@ fn text_member(members: &serde_json::Map<String, Value>, key: &str) -> Result<St
         Some(_) => Err(format!("{key} must be text")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{signing_key, trusted};
+
+    #[test]
+    fn every_setting_is_read() {
+        let key = trusted(&signing_key(1));
+        let config = AgentConfig::parse(&format!(
+            "{{\"port\": 5809, \"controller\": \"10.12.34.2\", \"bind\": \"10.12.34.11\", \"acceptPushes\": false, \"trustedKeys\": [\"{key}\"]}}"
+        ))
+        .expect("the settings");
+        assert_eq!(
+            config,
+            AgentConfig {
+                port: 5809,
+                controller: "10.12.34.2".into(),
+                team: 0,
+                bind: "10.12.34.11".into(),
+                accept_pushes: false,
+                trusted_keys: vec![key.clone()],
+            }
+        );
+        assert_eq!(config.named_controller(), "10.12.34.2");
+        assert_eq!(AgentConfig::parse("{}"), Ok(AgentConfig::default()));
+        assert_eq!(AgentConfig::default().port, protocol::PORT);
+        assert!(AgentConfig::default().accept_pushes);
+        assert!(public_key(&key).is_ok());
+    }
+
+    #[test]
+    fn a_team_names_its_controller() {
+        for (json, controller) in [
+            ("{\"team\": 1234}", "10.12.34.2"),
+            ("{\"team\": 254}", "10.2.54.2"),
+            ("{\"team\": 12345}", "10.123.45.2"),
+            ("{}", ""),
+        ] {
+            let config = AgentConfig::parse(json).expect(json);
+            assert_eq!(config.named_controller(), controller, "{json}");
+        }
+    }
+
+    /// Anything wrong is refused with why: `(json, what the refusal starts with, or holds)`.
+    #[test]
+    fn anything_else_is_refused_with_why() {
+        let exactly: &[(&str, &str)] = &[
+            (
+                "{\"team\": 30000}",
+                "team 30000 is out of range: 1 to 25599",
+            ),
+            (
+                "{\"team\": \"1234\"}",
+                "team must be a whole number, such as 1234",
+            ),
+            ("[]", "it isn't a JSON object"),
+            ("{\"port\": \"5808\"}", "port must be a whole number"),
+            ("{\"port\": 5808.5}", "port must be a whole number"),
+            ("{\"bind\": 1}", "bind must be text"),
+            (
+                "{\"acceptPushes\": \"no\"}",
+                "acceptPushes must be true or false",
+            ),
+            (
+                "{\"trustedKeys\": \"x\"}",
+                "trustedKeys must be a list of keys",
+            ),
+            (
+                "{\"trustedKeys\": [1]}",
+                "trustedKeys must be a list of keys, each text",
+            ),
+        ];
+        for (json, why) in exactly {
+            assert_eq!(AgentConfig::parse(json), Err(why.to_string()), "{json}");
+        }
+        let holding: &[(&str, &str)] = &[
+            (
+                "{\"team\": 1234, \"controller\": \"10.12.34.2\"}",
+                "it names the controller or the team, not both",
+            ),
+            ("{\"name\": \"x\"}", "not name"),
+            ("{\"port\": 80}", "out of range"),
+            ("{\"controller\": \"robot.local\"}", "isn't an IPv4 address"),
+            (
+                "{\"trustedKeys\": [\"MCowBQ\"]}",
+                "isn't an Ed25519 public key",
+            ),
+        ];
+        for (json, why) in holding {
+            let refused = AgentConfig::parse(json).expect_err(json);
+            assert!(refused.contains(why), "{json}: {refused}");
+        }
+    }
+}

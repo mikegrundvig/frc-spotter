@@ -12,3 +12,8 @@ pub mod pack;
 pub mod push;
 pub mod reader;
 pub mod yaml;
+
+#[cfg(test)]
+mod catalog_scripts_tests;
+#[cfg(test)]
+mod catalog_tests;

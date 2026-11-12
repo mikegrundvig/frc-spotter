@@ -93,20 +93,34 @@ pub fn load(text: &str) -> Result<Option<Node>, Refused> {
     Ok(builder.root)
 }
 
+/// What saphyr's scanner says of flow collections nested more than 255 deep.
+const SCANNER_NESTING: &str = "recursion limit exceeded";
+
 /// Refuses YAML nested deeper than [`MAX_DEPTH`], from the parser's own events, before anything is
 /// built.
 fn depth(text: &str) -> Result<(), Refused> {
+    let nested = |line: usize| {
+        Refused::at(
+            line,
+            format!("nested deeper than {MAX_DEPTH} (a pack needs five or six)"),
+        )
+    };
     let mut depth = 0usize;
     for event in Parser::new_from_str(text) {
-        let (event, span) = event.map_err(|e| Refused::at(e.marker().line(), e.info()))?;
+        // The scanner reads a flow collection's brackets ahead of its events, and refuses more
+        // than 255 of them itself: deeper than any pack, so said as the depth it is.
+        let (event, span) = event.map_err(|e| {
+            if e.info() == SCANNER_NESTING {
+                nested(e.marker().line())
+            } else {
+                Refused::at(e.marker().line(), e.info())
+            }
+        })?;
         match event {
             Event::SequenceStart(..) | Event::MappingStart(..) => {
                 depth += 1;
                 if depth > MAX_DEPTH {
-                    return Err(Refused::at(
-                        span.start.line(),
-                        format!("nested deeper than {MAX_DEPTH} (a pack needs five or six)"),
-                    ));
+                    return Err(nested(span.start.line()));
                 }
             }
             Event::SequenceEnd | Event::MappingEnd => depth -= 1,
