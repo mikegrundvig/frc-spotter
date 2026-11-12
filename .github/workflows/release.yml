@@ -1,25 +1,21 @@
 name: Release
 
-# A version tag (v0.1.0) builds the agent's packages and publishes them as that tag's GitHub
-# release, with their SHA-256 checksums: the .deb and the tarball for 64-bit ARM and x86 Linux, each
-# built on its own architecture (jlink links the runtime of the computer it runs on), and the -all.jar,
-# alone and with its files, which is also Spotter's command line (java -jar ... check, status). Image
-# builders pin a release by its version and checksums. It also publishes what a robot program uses,
-# com.michaelgrundvig.frc:spotter-manager and spotter-agent (its runnable jar, for a robot build's
-# check and status), with their sources, javadoc, and checksums, into the static
-# Maven repository on the gh-pages branch (maven/), which GitHub Pages serves at
-# https://mikegrundvig.github.io/frc-spotter/maven: the new version added, the old ones kept.
+# A version tag (v0.5.0, agent/Cargo.toml's version) builds the agent's packages and publishes them
+# as that tag's GitHub release, with their SHA-256 checksums: the .deb and the tarball for 64-bit
+# ARM and x86 Linux, each built and tested on its own architecture (arm64 on GitHub's arm runner,
+# as the boards are). Image builders pin a release by its version and checksums. It also publishes
+# what a robot program uses, com.michaelgrundvig.frc:spotter-manager, with its sources, javadoc and
+# checksums, into the static Maven repository on the gh-pages branch (maven/), which GitHub Pages
+# serves at https://mikegrundvig.github.io/frc-spotter/maven: the new version added, the old ones
+# kept.
 #
 # Nothing is published untested: each architecture's job runs every check CI runs, the container
-# tests included (the agent's .deb installed on Debian 13 under systemd, the manager against it, the
-# catalog's packs), on its own architecture, before it builds what it uploads; so the arm64 .deb,
-# what the boards run, is run on arm64 before it's published. Run by hand (Actions, "Run workflow"),
-# it tests and packages both architectures and publishes nothing: a release's dry run.
+# test of its own .deb included, before it uploads what it built. Run by hand (Actions, "Run
+# workflow"), it tests and packages both architectures and publishes nothing: a release's dry run.
 #
-# No job that runs Gradle can write to the repository: every build runs with a read-only token and
-# no credentials on disk, so a compromised build dependency can't push a branch or a tag, or change
-# what robot programs download. The two jobs that write (the release, gh-pages) run no build: they
-# publish what the builds left as artifacts.
+# No job that builds can write to the repository: every build runs with a read-only token and no
+# credentials on disk. The two jobs that write (the release, gh-pages) run no build: they publish
+# what the builds left as artifacts.
 on:
   push:
     tags: ["v*"]
@@ -40,46 +36,73 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: agent
+    env:
+      # A tag's version; a dry run's packages are named for the commit.
+      VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('0.0.0-{0}', github.sha) }}
     steps:
       # Actions are pinned to a commit (the version beside it), so a moved tag can't change what
       # runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-      # The gate: formatting, static analysis, tests and coverage, and the container tests against
-      # this architecture's own .deb. A failure here publishes nothing.
-      - name: Every check, on this architecture
-        run: ./gradlew ci
-      - name: Build the packages
+      - name: Rust
+        run: rustup toolchain install --no-self-update
+      # The package lists the crates the program is built from, and their licences, with it.
+      - name: cargo-deny, at a fixed version, built from crates.io with its own lock file
+        run: cargo install --locked cargo-deny@0.20.2
+      - name: The tag is the crate's version
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          ./gradlew :spotter-agent:agentRelease "-PagentVersion=${VERSION#v}"
-        env:
-          # A tag's version; a dry run's packages are named for the commit.
-          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('0.0.0-{0}', github.sha) }}
-      - name: Collect them
-        env:
-          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('0.0.0-{0}', github.sha) }}
-        run: |
-          mkdir -p out
-          cp agent/build/distributions/*.deb agent/build/distributions/*.tar.gz out/
-          if [ "${{ matrix.arch }}" = amd64 ]; then
-            # The -all.jar: the agent, and the command line, for every computer.
-            cp agent/build/distributions/jar/*-all.jar out/
-          else
-            # The -all.jar and its tarball are the same on every architecture: amd64's are published.
-            rm out/*-all.tar.gz
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag is $GITHUB_REF_NAME, but Cargo.toml's version is $version" >&2
+            exit 1
           fi
+      # The gate: what CI checks, on this architecture. A failure here publishes nothing.
+      - name: Licences, advisories, sources
+        run: cargo deny --locked check
+      - name: Tests
+        run: cargo test --locked --features fixture
+      - name: Release build
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          package/package.sh target/release/frc-spotter "${VERSION#v}" "${{ matrix.arch }}" out
           ls -l out
+      - name: The installed package, under systemd in a container
+        env:
+          SPOTTER_REQUIRE_CONTAINERS: "true"
+        run: |
+          SPOTTER_DEB="$(ls "$PWD"/out/*.deb)" cargo test --locked --features fixture --test container -- --nocapture
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: packages-${{ matrix.arch }}
-          path: out/
+          path: |
+            agent/out/*.deb
+            agent/out/*.tar.gz
           if-no-files-found: error
+
+  manager-check:
+    name: Manager (check)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust, for the agent the manager's tests run
+        working-directory: agent
+        run: rustup toolchain install --no-self-update
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Every check
+        run: ./gradlew ci
 
   release:
     name: Publish
-    needs: package
+    needs: [package, manager-check]
     # Only a tag publishes: a dry run stops once both architectures are tested and packaged.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
@@ -100,11 +123,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" out/* --verify-tag --title "Spotter $GITHUB_REF_NAME" \
-            --notes "The coprocessor agent $GITHUB_REF_NAME: its .deb and tarball for arm64 and amd64 Linux, and the -all.jar for a board with Java 17 or newer, alone and with its unit, polkit rules, and install script. The -all.jar is also Spotter's command line, on any computer: java -jar it with check, to check packs, or status, to read a board. SHA256SUMS has every file's checksum. The robot's library, com.michaelgrundvig.frc:spotter-manager ${GITHUB_REF_NAME#v}, and spotter-agent, for a robot build's check and status, are in the Maven repository at https://mikegrundvig.github.io/frc-spotter/maven."
+            --notes "The coprocessor agent $GITHUB_REF_NAME: its .deb and tarball for arm64 and amd64 Linux. The agent's program is also Spotter's command line on a board: frc-spotter check, to check packs, or status, to read a board. SHA256SUMS has every file's checksum. The robot's library, com.michaelgrundvig.frc:spotter-manager ${GITHUB_REF_NAME#v}, is in the Maven repository at https://mikegrundvig.github.io/frc-spotter/maven."
 
   maven:
     name: Maven (build)
-    needs: package
+    needs: [package, manager-check]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -131,7 +154,6 @@ jobs:
       - name: Publish into the repository's folder
         run: |
           ./gradlew :spotter-manager:publishAllPublicationsToPagesRepository \
-            :spotter-agent:publishAllPublicationsToPagesRepository \
             "-PagentVersion=${GITHUB_REF_NAME#v}" "-PpagesRepository=$GITHUB_WORKSPACE/pages/maven"
           find pages/maven -path "*/${GITHUB_REF_NAME#v}/*" -type f | sort
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -170,5 +192,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A maven
-          git commit -m "Publish spotter-manager and spotter-agent ${GITHUB_REF_NAME#v}"
+          git commit -m "Publish spotter-manager ${GITHUB_REF_NAME#v}"
           git push origin HEAD:refs/heads/gh-pages

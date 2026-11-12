@@ -1,10 +1,10 @@
 name: CI
 
-# Runs ./gradlew ci, the same command anyone runs before pushing: formatting, static analysis,
-# tests, and coverage for every project; the checks live in Gradle, not here. On every branch's
-# pushes, and pull requests. x86 Linux only: Docker is there for the container tests (the agent's
-# .deb on Debian 13 under systemd, the -all.jar on Java 17), and they must run, not skip (CI=true).
-# The .deb built here is x86's; an ARM one is built on ARM.
+# The agent's crate (agent/): its crates (cargo deny), formatting, lints and tests, on x86-64 and on
+# arm64 (the coprocessors' architecture), its .deb and tarball packaged and its container test run
+# against that .deb (Docker is on GitHub's runners, so it must run, not skip); and the manager's
+# Gradle ci, whose tests run the agent program built with its test feature. On every branch's pushes
+# and pull requests.
 on:
   push:
     branches: ["**"]
@@ -19,19 +19,65 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
-    name: Build, check, test
-    runs-on: ubuntu-24.04
+  agent:
+    name: Agent (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: agent
     steps:
       # Actions are pinned to a commit (the version beside it), so a moved tag can't change what
       # runs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # rust-toolchain.toml's compiler, with its formatter and linter.
+      - name: Rust
+        run: rustup toolchain install --no-self-update
+      - name: cargo-deny, at a fixed version, built from crates.io with its own lock file
+        run: cargo install --locked cargo-deny@0.20.2
+      - name: Licences, advisories, sources (deny.toml)
+        run: cargo deny --locked check
+      - name: Formatting
+        run: cargo fmt --check
+      - name: Lints
+        run: cargo clippy --all-targets --locked --features fixture -- -D warnings
+      - name: Tests
+        run: cargo test --locked --features fixture
+      - name: Release build
+        run: cargo build --release --locked
+      - name: Package
+        run: package/package.sh target/release/frc-spotter "0.0.0-${GITHUB_SHA::12}" "${{ matrix.arch }}" out
+      - name: The installed package, under systemd in a container
+        env:
+          SPOTTER_REQUIRE_CONTAINERS: "true"
+        run: |
+          SPOTTER_DEB="$(ls "$PWD"/out/*.deb)" cargo test --locked --features fixture --test container -- --nocapture
+
+  manager:
+    name: Manager
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The agent's compiler, for the program the manager's tests run.
+      - name: Rust
+        working-directory: agent
+        run: rustup toolchain install --no-self-update
       # Caches Gradle, its dependencies, and the JDK 25 toolchain Gradle downloads on first use.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-      - name: Formatting, static analysis, tests, coverage, container tests
+      - name: Formatting, static analysis, tests, coverage
         run: ./gradlew ci
       - name: Upload reports
         if: failure()
