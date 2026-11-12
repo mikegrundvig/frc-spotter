@@ -46,8 +46,21 @@ dependencies {
     testImplementation libs.archunit
     // Reads spotter.proto's descriptor (QuickBuffers carries its bytes), to check WireCheck's table.
     testImplementation libs.protobuf.java
-    // The real agent, in the test's own process on a local port, with packs the test writes.
-    testImplementation testFixtures(project(":spotter-agent"))
+}
+
+// The real agent for the tests (LocalAgent): Spotter's agent program, built by cargo with its test
+// feature, which the tests run as a process of its own on a local port, with packs they write.
+def agentCrate = rootProject.file("agent-rs")
+def agentBinary = new File(agentCrate, "target/debug/frc-spotter")
+def agentForTests = tasks.register("agentForTests", Exec) {
+    description = "Build the agent program with its test feature (cargo), for the tests."
+    workingDir agentCrate
+    commandLine "cargo", "build", "--locked", "-j", "4", "--features", "fixture"
+    inputs.files(fileTree(agentCrate) { include "Cargo.toml", "Cargo.lock", "build.rs", "src/**" })
+    .withPropertyName("crate").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(file("src/main/proto/spotter.proto")).withPropertyName("proto")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(agentBinary)
 }
 
 // QuickBuffers in place of protobuf-java, as WPILib generates its own: protoc runs
@@ -77,6 +90,9 @@ protobuf {
 
 tasks.named("test") {
     useJUnitPlatform()
+    dependsOn agentForTests
+    inputs.file(agentBinary).withPropertyName("agentBinary").withPathSensitivity(PathSensitivity.NONE)
+    systemProperty "spotter.agentBinary", agentBinary.absolutePath
 }
 
 ext.nullSafePackages = "com.michaelgrundvig.frc.spotter"
