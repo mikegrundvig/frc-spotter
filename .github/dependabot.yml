@@ -1,4 +1,4 @@
-# Weekly pull requests for newer build tools, test libraries and CI actions. What WPILib supplies or
+# Weekly pull requests for newer build tools, test libraries, the agent's crates and CI actions. What WPILib supplies or
 # pins (WPILib itself, the protobuf and QuickBuffers versions, the JSON library) and Gradle itself are
 # updated deliberately, per WPILib release.
 version: 2
@@ -13,6 +13,10 @@ updates:
       - dependency-name: "us.hebi.quickbuf*"
       - dependency-name: "io.avaje*"
       - dependency-name: "gradle-wrapper"
+  - package-ecosystem: cargo
+    directory: /agent
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

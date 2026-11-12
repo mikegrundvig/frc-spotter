@@ -88,3 +88,20 @@ jobs:
             */build/reports/
             */build/test-results/
           if-no-files-found: warn
+
+  # The one check the repository requires before a merge, by this name: every job above passed.
+  # It runs whatever became of them, since a required check that's skipped counts as passed.
+  checks:
+    name: Build, check, test
+    needs: [agent, manager]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        env:
+          AGENT: ${{ needs.agent.result }}
+          MANAGER: ${{ needs.manager.result }}
+        run: |
+          echo "agent: $AGENT, manager: $MANAGER"
+          [ "$AGENT" = success ] && [ "$MANAGER" = success ]
