@@ -16,7 +16,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 
 use super::store::Store;
 use crate::board::host::Host;
-use crate::commands::{Cancellation, Commands, Options, fill};
+use crate::commands::{Runner, fill};
 use crate::packs::field::Field;
 use crate::packs::pack::{Collector, Pack};
 
@@ -77,7 +77,7 @@ struct State {
 
 pub struct Collectors {
     host: Arc<Host>,
-    commands: Arc<Commands>,
+    runner: Arc<dyn Runner>,
     store: Arc<Store>,
     slots: Vec<Slot>,
     states: Vec<State>,
@@ -88,14 +88,14 @@ impl Collectors {
     pub fn new(
         host: Arc<Host>,
         packs: &[Pack],
-        commands: Arc<Commands>,
+        runner: Arc<dyn Runner>,
         store: Arc<Store>,
     ) -> Collectors {
         let slots = slots(packs);
         let states = slots.iter().map(|_| State::default()).collect();
         Collectors {
             host,
-            commands,
+            runner,
             store,
             slots,
             states,
@@ -157,13 +157,12 @@ impl Collectors {
         let slot = &self.slots[at];
         let collector = &slot.collector;
         let ran = self
-            .commands
-            .run(
+            .runner
+            .collect(
                 &slot.folder,
                 &collector.command,
                 collector.timeout,
-                Options::collector(MAX_OUTPUT),
-                &Cancellation::default(),
+                MAX_OUTPUT,
             )
             .await;
         let values = fill::fill(&collector.fields, &ran, MAX_OUTPUT, "");
@@ -192,3 +191,6 @@ impl Collectors {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

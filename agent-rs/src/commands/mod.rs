@@ -12,7 +12,9 @@ mod pipe_holders;
 mod process;
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -130,6 +132,38 @@ impl Cancellation {
     pub async fn cancelled(&self) {
         let mut asked = self.0.subscribe();
         let _ = asked.wait_for(|cancelled| *cancelled).await;
+    }
+}
+
+/// A collector's run, under way.
+pub type Running<'a> = Pin<Box<dyn Future<Output = Ran> + Send + 'a>>;
+
+/// What runs a collector's command: [`Commands`] on a board; in tests, whatever the test says it
+/// ran, as a collector's schedule is tested apart from the commands it runs.
+pub trait Runner: Send + Sync {
+    /// Runs a command once, as a collector does: no input, its output bounded.
+    fn collect<'a>(
+        &'a self,
+        folder: &'a str,
+        command: &'a Command,
+        timeout: Duration,
+        max_output: usize,
+    ) -> Running<'a>;
+}
+
+impl Runner for Commands {
+    fn collect<'a>(
+        &'a self,
+        folder: &'a str,
+        command: &'a Command,
+        timeout: Duration,
+        max_output: usize,
+    ) -> Running<'a> {
+        Box::pin(async move {
+            let options = Options::collector(max_output);
+            self.run(folder, command, timeout, options, &Cancellation::default())
+                .await
+        })
     }
 }
 

@@ -245,3 +245,6 @@ impl<'a> Slice<'a> {
         page(self.wanted.into_iter().collect(), self.paging)
     }
 }
+
+#[cfg(test)]
+mod tests;

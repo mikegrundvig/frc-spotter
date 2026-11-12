@@ -114,3 +114,108 @@ fn cut(text: &str) -> String {
         text.chars().take(MAX_MESSAGE).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    /// journalctl -o json's names, as the debian pack maps them.
+    fn journal() -> LogMap {
+        LogMap {
+            time: "__REALTIME_TIMESTAMP".into(),
+            time_unit: "us".into(),
+            level: "PRIORITY".into(),
+            source: "SYSLOG_IDENTIFIER".into(),
+            message: "MESSAGE".into(),
+            cursor: "__CURSOR".into(),
+        }
+    }
+
+    #[test]
+    fn journal_lines_are_entries_by_their_map() {
+        let line = "{\"__REALTIME_TIMESTAMP\": \"1759406400123456\", \"PRIORITY\": \"3\", \"SYSLOG_IDENTIFIER\": \"detector\", \"MESSAGE\": \"camera lost\", \"__CURSOR\": \"s=abc;i=1\"}";
+        let entry = entry(line, &journal(), 0).expect("an entry");
+        assert_eq!(
+            entry,
+            LogEntry {
+                time_micros: 1_759_406_400_123_456,
+                level: LogLevel::Error as i32,
+                source: "detector".into(),
+                message: "camera lost".into(),
+                cursor: "s=abc;i=1".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn levels_are_names_or_syslogs_numbers() {
+        let rows = [
+            (json!("error"), LogLevel::Error),
+            (json!(0), LogLevel::Error),
+            (json!("2"), LogLevel::Error),
+            (json!("WARNING"), LogLevel::Warning),
+            (json!("4"), LogLevel::Warning),
+            (json!("5"), LogLevel::Info),
+            (json!("info"), LogLevel::Info),
+            (json!(7), LogLevel::Debug),
+            (json!("loud"), LogLevel::Unspecified),
+        ];
+        for (given, wanted) in rows {
+            assert_eq!(level(Some(&given)), wanted, "{given}");
+        }
+        assert_eq!(level(None), LogLevel::Unspecified);
+        assert_eq!(name(LogLevel::Warning), "warning");
+        assert_eq!(name(LogLevel::Unspecified), "debug");
+    }
+
+    #[test]
+    fn times_are_iso_8601_or_a_number_in_the_declared_unit() {
+        let rows = [
+            (json!("2026-10-02T12:00:01.5Z"), "", 1_790_942_401_500_000),
+            (
+                json!("2026-10-02T08:00:01-04:00"),
+                "",
+                1_790_942_401_000_000,
+            ),
+            (json!(1_759_406_401_i64), "s", 1_759_406_401_000_000),
+            (json!("1759406401000"), "ms", 1_759_406_401_000_000),
+            (
+                json!(1_759_406_401_000_000_000_i64),
+                "ns",
+                1_759_406_401_000_000,
+            ),
+            // A number without a unit, or text that's neither: no time.
+            (json!(1_759_406_401_i64), "", 0),
+            (json!("yesterday"), "", 0),
+            (json!("soon"), "us", 0),
+        ];
+        for (given, unit, wanted) in rows {
+            assert_eq!(micros(Some(&given), unit), wanted, "{given} {unit}");
+        }
+        assert_eq!(micros(None, "us"), 0);
+    }
+
+    #[test]
+    fn a_plain_line_is_a_message_at_info() {
+        let map = LogMap::default();
+        let plain = entry("  step 2 of 3  ", &map, 42).expect("an entry");
+        assert_eq!(plain.message, "step 2 of 3");
+        assert_eq!(plain.level, LogLevel::Info as i32);
+        assert_eq!(plain.time_micros, 42);
+        assert_eq!(entry("   ", &map, 42), None);
+        let json = entry(
+            "{\"level\": \"warning\", \"message\": {\"a\": 1}}",
+            &map,
+            42,
+        )
+        .expect("an entry");
+        assert_eq!(json.level, LogLevel::Warning as i32);
+        assert_eq!(json.message, "{\"a\":1}");
+        assert_eq!(json.time_micros, 42);
+        let long = format!("{{\"message\": \"{}\"}}", "x".repeat(5000));
+        let cut = entry(&long, &map, 0).expect("an entry");
+        assert_eq!(cut.message.len(), MAX_MESSAGE);
+    }
+}
