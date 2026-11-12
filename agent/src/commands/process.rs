@@ -293,6 +293,10 @@ async fn stop(
 
 /// Signals a command's process group, and its descendants that left it.
 fn signal_all(pid: u32, signal: Signal) {
+    // No process number, no signal: process 0 would mean the agent's own group.
+    if pid == 0 {
+        return;
+    }
     for descendant in pipe_holders::descendants(pid) {
         let _ = kill(Pid::from_raw(descendant as i32), signal);
     }
