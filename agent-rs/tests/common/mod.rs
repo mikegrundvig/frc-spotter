@@ -537,3 +537,14 @@ pub fn text(value: &str) -> FieldValue {
         ..FieldValue::default()
     }
 }
+
+/// A port on this computer's loopback that nobody serves, kept so as long as what's returned is:
+/// bound, so no other test can take it, but never listening, so a connection to it is refused.
+pub fn unserved_port() -> (u16, tokio::net::TcpSocket) {
+    let socket = tokio::net::TcpSocket::new_v4().expect("a socket");
+    socket
+        .bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+        .expect("a port");
+    let port = socket.local_addr().expect("its address").port();
+    (port, socket)
+}

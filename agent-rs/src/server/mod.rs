@@ -16,7 +16,7 @@ pub mod pacing;
 mod routes;
 pub mod signatures;
 pub mod stream;
-mod writes;
+pub(crate) mod writes;
 
 use std::collections::HashMap;
 use std::convert::Infallible;

@@ -228,7 +228,7 @@ impl Agent {
         if name.is_empty() {
             Vec::new()
         } else {
-            vec![format!("{name}.local"), name]
+            vec![name.clone(), format!("{name}.local")]
         }
     }
 }
@@ -244,3 +244,6 @@ fn robot_network(address: &str) -> Option<String> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests;

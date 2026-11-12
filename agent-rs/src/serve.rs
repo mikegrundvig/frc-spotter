@@ -154,6 +154,29 @@ fn host(options: &Options) -> Host {
     Host::system(options.root.clone())
 }
 
+/// The port it serves on: the command line's, else its settings', else the protocol's.
+pub fn port(options: &Options, configuration: &Configuration) -> u16 {
+    options.port.unwrap_or(configuration.config.port)
+}
+
+/// The address it listens on: the command line's, else its settings', else every address.
+pub fn bind(options: &Options, configuration: &Configuration) -> IpAddr {
+    let bind = options
+        .bind
+        .clone()
+        .unwrap_or_else(|| configuration.config.bind.clone());
+    bind.parse().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+}
+
+/// The version it says it is: its package's, unless it's a test's agent told another.
+pub fn version(options: &Options) -> String {
+    options
+        .fixture
+        .version
+        .clone()
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+}
+
 /// Serves a board until it's stopped (SIGTERM, SIGINT) or ends itself after a push: its exit
 /// code.
 pub async fn serve(options: Options) -> u8 {
@@ -162,23 +185,11 @@ pub async fn serve(options: Options) -> u8 {
     for problem in &configuration.problems {
         host.log(problem);
     }
-    let port = options.port.unwrap_or(configuration.config.port);
-    let bind = options
-        .bind
-        .clone()
-        .unwrap_or_else(|| configuration.config.bind.clone());
-    let bind: IpAddr = if bind.is_empty() {
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
-    } else {
-        bind.parse().unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
-    };
+    let port = port(&options, &configuration);
+    let bind = bind(&options, &configuration);
     let (exits, mut exit) = mpsc::unbounded_channel::<()>();
     let stays = options.fixture.stays;
-    let version = options
-        .fixture
-        .version
-        .clone()
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let version = version(&options);
     let told = host.clone();
     let agent = Agent::new(
         host.clone(),
@@ -253,4 +264,79 @@ pub async fn serve(options: Options) -> u8 {
     agent.commands.stop_all();
     last_good::stopped(&host);
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::Fixture;
+
+    fn args(given: &[&str]) -> Vec<String> {
+        given.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn options_are_named_and_anything_else_shows_the_usage() {
+        let options =
+            options(&args(&["serve", "--port=5809", "--bind=127.0.0.1"])).expect("options");
+        assert_eq!(options.port, Some(5809));
+        assert_eq!(options.bind.as_deref(), Some("127.0.0.1"));
+        assert_eq!(options.controller, None);
+        let rooted = options_of(&["--root=/x"]);
+        assert_eq!(rooted.root, PathBuf::from("/x"));
+        let usage = super::options(&args(&["--port"])).expect_err("usage");
+        assert!(usage.starts_with("Usage:"), "{usage}");
+    }
+
+    fn options_of(given: &[&str]) -> Options {
+        options(&args(given)).expect("options")
+    }
+
+    #[test]
+    fn a_request_has_as_long_to_arrive_as_the_manager_gives_it() {
+        // As long as the manager waits for an answer, so a 16 MiB push the manager is still
+        // sending, over the radio, isn't cut off.
+        assert_eq!(crate::protocol::REQUEST_SECONDS, 30);
+    }
+
+    #[test]
+    fn the_controller_is_an_address_never_a_name() {
+        for bad in ["robot.local", "10.12.34", "10.12.34.256", "::1", ""] {
+            let refused = options(&args(&[&format!("--controller={bad}")])).expect_err(bad);
+            assert!(
+                refused.contains("--controller must be an IPv4 address"),
+                "{bad}: {refused}"
+            );
+        }
+        assert!(options(&args(&["--controller=10.12.34.2"])).is_ok());
+        let any = options(&args(&["--bind=any"])).expect_err("refused");
+        assert!(any.contains("--bind must be an IPv4 address"), "{any}");
+    }
+
+    #[test]
+    fn it_serves_on_5808_unless_its_settings_or_command_line_say() {
+        let fixture = Fixture::new();
+        let none = fixture.configuration();
+        let nothing = Options::default();
+        assert_eq!(port(&nothing, &none), crate::protocol::PORT);
+        assert_eq!(bind(&nothing, &none), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        fixture.config("{\"port\": 5809, \"bind\": \"127.0.0.1\"}");
+        let configured = fixture.configuration();
+        assert_eq!(port(&nothing, &configured), 5809);
+        assert_eq!(bind(&nothing, &configured), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let given = options_of(&["--port=5807", "--bind=10.12.34.11"]);
+        assert_eq!(port(&given, &configured), 5807);
+        assert_eq!(bind(&given, &configured).to_string(), "10.12.34.11");
+        // Settings that can't be read are ignored.
+        fixture.config("{\"port\": 80}");
+        assert_eq!(
+            port(&nothing, &fixture.configuration()),
+            crate::protocol::PORT
+        );
+    }
+
+    #[test]
+    fn its_version_is_its_packages() {
+        assert_eq!(version(&Options::default()), env!("CARGO_PKG_VERSION"));
+    }
 }
