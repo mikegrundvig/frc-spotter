@@ -24,8 +24,8 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A real agent for a test: Spotter's agent program, run as a process of its own, serving protocol
- * 2 on a local port: a board's files in a folder (as {@code --root} reads them), packs the test
+ * A real agent for a test: Spotter's agent program, run as a process of its own, serving protocol 2
+ * on a local port: a board's files in a folder (as {@code --root} reads them), packs the test
  * writes, scripts the agent really runs. It takes writes from 127.0.0.1, the test playing the robot
  * controller. It's the program built with its test feature, {@code --fixture}: its files count as
  * root's, written by root alone, as an installer leaves them, so its installed packs are trusted;
@@ -108,7 +108,9 @@ public final class LocalAgent implements AutoCloseable {
     String binary = System.getProperty("spotter.agentBinary");
     if (binary == null || !Files.isExecutable(Path.of(binary))) {
       throw new IllegalStateException(
-          "no agent program to test with: the build names it in spotter.agentBinary (" + binary + ")");
+          "no agent program to test with: the build names it in spotter.agentBinary ("
+              + binary
+              + ")");
     }
     return binary;
   }
@@ -157,8 +159,7 @@ public final class LocalAgent implements AutoCloseable {
     }
     port = served[0];
     process = started;
-    Thread watcher =
-        new Thread(() -> watch(started), "local-agent-watch-" + started.pid());
+    Thread watcher = new Thread(() -> watch(started), "local-agent-watch-" + started.pid());
     watcher.setDaemon(true);
     watcher.start();
     return this;

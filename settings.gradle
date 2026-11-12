@@ -13,8 +13,9 @@ plugins {
 rootProject.name = "frc-spotter"
 
 // Spotter is two programs: the manager, the library a robot program uses, with the protocol inside
-// it; and the agent each coprocessor runs, with its command line and its container tests. Each is
-// named as it's published, com.michaelgrundvig.frc:spotter-<name>, in a folder of its short name.
+// it, this build's one project; and the agent each coprocessor runs, a Rust crate in agent/ that
+// cargo builds (the manager's tests run it). The manager is named as it's published,
+// com.michaelgrundvig.frc:spotter-manager, in a folder of its short name.
 // Gradle matches an included build's projects by group and name, so a robot program's
 // includeBuild("../frc-spotter") puts these projects in place of the published ones.
 
@@ -22,8 +23,3 @@ rootProject.name = "frc-spotter"
 // QuickBuffers, and the code they share: the pack hash, signing, the wire checks).
 include "spotter-manager"
 project(":spotter-manager").projectDir = file("manager")
-
-// The agent each coprocessor runs, its command line (check packs, read a board), and its container
-// tests (the agent's .deb under systemd, the manager against it).
-include "spotter-agent"
-project(":spotter-agent").projectDir = file("agent")
