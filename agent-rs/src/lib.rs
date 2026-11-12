@@ -16,3 +16,6 @@ pub mod serve;
 pub mod server;
 pub mod tools;
 pub mod values;
+
+#[cfg(test)]
+pub mod testing;

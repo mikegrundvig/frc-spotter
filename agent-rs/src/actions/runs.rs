@@ -107,7 +107,7 @@ pub fn declared(packs: &[Pack]) -> Vec<Declared> {
 }
 
 /// A run as it's kept.
-struct Kept {
+struct KeptRun {
     run: String,
     action: String,
     state: RunState,
@@ -129,15 +129,15 @@ pub struct Runs {
     commands: Arc<Commands>,
     told: Told,
     actions: Vec<Declared>,
-    kept: Mutex<Kept_>,
+    kept: Mutex<Kept>,
     log_reads: Semaphore,
     max_kept: u64,
 }
 
 /// The runs kept, in the order they started, and how many are going.
 #[derive(Default)]
-struct Kept_ {
-    runs: Vec<Kept>,
+struct Kept {
+    runs: Vec<KeptRun>,
     running: usize,
     /// Set as the agent stops: a run its stop ends keeps the state it had, going.
     closed: bool,
@@ -156,7 +156,7 @@ impl Runs {
             commands,
             told,
             actions,
-            kept: Mutex::new(Kept_::default()),
+            kept: Mutex::new(Kept::default()),
             log_reads: Semaphore::new(LOGS_AT_ONCE),
             max_kept,
         }
@@ -194,13 +194,17 @@ impl Runs {
             match self.restore_one(&run, &path) {
                 Ok(state) => {
                     let action = state.action.clone();
-                    self.kept.lock().expect("the runs' lock").runs.push(Kept {
-                        run,
-                        action,
-                        state,
-                        cancellation: Cancellation::default(),
-                        lines: 0,
-                    });
+                    self.kept
+                        .lock()
+                        .expect("the runs' lock")
+                        .runs
+                        .push(KeptRun {
+                            run,
+                            action,
+                            state,
+                            cancellation: Cancellation::default(),
+                            lines: 0,
+                        });
                 }
                 Err(e) => {
                     self.host
@@ -303,7 +307,7 @@ impl Runs {
             })();
             let state = made.map_err(|e| refused(500, format!("the run can't be kept: {e}")))?;
             let cancellation = Cancellation::default();
-            kept.runs.push(Kept {
+            kept.runs.push(KeptRun {
                 run: run.clone(),
                 action: id.to_string(),
                 state,

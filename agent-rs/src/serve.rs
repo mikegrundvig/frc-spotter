@@ -50,6 +50,10 @@ pub struct Fixture {
     pub version: Option<String>,
     /// It doesn't end after a push, as one that fails to: it says it would, and runs on.
     pub stays: bool,
+    /// Its addresses, in place of 127.0.0.1 alone.
+    pub addresses: Option<Vec<String>>,
+    /// How long a stream's write may stall before it's closed, in place of 10 s.
+    pub stall: Option<std::time::Duration>,
 }
 
 /// `--name=value` options, after an optional `serve`; why not, when they can't be used.
@@ -71,6 +75,22 @@ pub fn options(args: &[String]) -> Result<Options, String> {
             }
             if let Some(version) = arg.strip_prefix("--fixture-version=") {
                 fixture.version = Some(version.to_string());
+                continue;
+            }
+            if let Some(addresses) = arg.strip_prefix("--fixture-addresses=") {
+                fixture.addresses = Some(
+                    addresses
+                        .split(',')
+                        .filter(|a| !a.is_empty())
+                        .map(str::to_string)
+                        .collect(),
+                );
+                continue;
+            }
+            if let Some(stall) = arg.strip_prefix("--fixture-stall=") {
+                fixture.stall = Some(
+                    crate::packs::duration::parse(stall).ok_or("--fixture-stall is a duration")?,
+                );
                 continue;
             }
         }
@@ -111,7 +131,13 @@ fn host(options: &Options) -> Host {
         return Host::new(
             options.root.clone(),
             Box::new(crate::board::host::RootOwners),
-            Box::new(crate::board::host::FixedAddresses(vec!["127.0.0.1".into()])),
+            Box::new(crate::board::host::FixedAddresses(
+                options
+                    .fixture
+                    .addresses
+                    .clone()
+                    .unwrap_or_else(|| vec!["127.0.0.1".into()]),
+            )),
             Arc::new(crate::board::host::monotonic_nanos),
             Arc::new(|line: &str| log::info!("{line}")),
         );
@@ -170,7 +196,13 @@ pub async fn serve(options: Options) -> u8 {
     agent.runs.restore();
     push::tidy(&host);
     let collectors = agent.collectors.start();
-    let server = tokio::spawn(Server::new(agent.clone(), server::STALL).serve(listener));
+    let server = tokio::spawn(
+        Server::new(
+            agent.clone(),
+            options.fixture.stall.unwrap_or(server::STALL),
+        )
+        .serve(listener),
+    );
     host.log(&format!(
         "Coprocessor agent serving protocol 2 on port {port}"
     ));

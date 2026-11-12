@@ -34,6 +34,7 @@ protox = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 
 [features]
 # A test's agent: --fixture counts its files as root's and its address as 127.0.0.1, and it takes a
