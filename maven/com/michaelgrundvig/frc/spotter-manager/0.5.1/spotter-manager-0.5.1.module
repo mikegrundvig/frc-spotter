@@ -1,0 +1,132 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.michaelgrundvig.frc",
+    "module": "spotter-manager",
+    "version": "0.5.1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.4.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "us.hebi.quickbuf",
+          "module": "quickbuf-runtime",
+          "version": {
+            "requires": "1.4"
+          }
+        },
+        {
+          "group": "org.jspecify",
+          "module": "jspecify",
+          "version": {
+            "requires": "1.0.1"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spotter-manager-0.5.1.jar",
+          "url": "spotter-manager-0.5.1.jar",
+          "size": 292581,
+          "sha512": "3f4cf07230af6da0499adc51d0c52f0db77db2d5d74c76adec41dcac2429309a32e9f7c31873452282179f1fe66b67db6a827bc914e3d6cff6f71065642fa4b1",
+          "sha256": "e6736b6b9cd12dbfa3fda54e00a331bb62c9d328f2ced153173b68e716f11fcc",
+          "sha1": "8be138c217d35073d729c0c0fc8e2159aa7b575e",
+          "md5": "fae29f6f404d8d01ead70ed295366b19"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "us.hebi.quickbuf",
+          "module": "quickbuf-runtime",
+          "version": {
+            "requires": "1.4"
+          }
+        },
+        {
+          "group": "org.jspecify",
+          "module": "jspecify",
+          "version": {
+            "requires": "1.0.1"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "spotter-manager-0.5.1.jar",
+          "url": "spotter-manager-0.5.1.jar",
+          "size": 292581,
+          "sha512": "3f4cf07230af6da0499adc51d0c52f0db77db2d5d74c76adec41dcac2429309a32e9f7c31873452282179f1fe66b67db6a827bc914e3d6cff6f71065642fa4b1",
+          "sha256": "e6736b6b9cd12dbfa3fda54e00a331bb62c9d328f2ced153173b68e716f11fcc",
+          "sha1": "8be138c217d35073d729c0c0fc8e2159aa7b575e",
+          "md5": "fae29f6f404d8d01ead70ed295366b19"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "spotter-manager-0.5.1-sources.jar",
+          "url": "spotter-manager-0.5.1-sources.jar",
+          "size": 118441,
+          "sha512": "3b13f22637641ade4c7fc6f3f07f24cd43fe9669c6ef7cf624d5d5a0dfe579cd38dadb4cc5e18b12809c7d44f0f9c7c7c0a3c85a21e7f75ea8d3b0220932c456",
+          "sha256": "db1519877d17c06fab5f7890ab96dc34ad3dc7744529b4856134041de87892e6",
+          "sha1": "82882bbc3c8ec84d0ca2965bc2f7aa653ffbcc45",
+          "md5": "58e9e55804fbf66cf95a1af5d242b3c7"
+        }
+      ]
+    },
+    {
+      "name": "javadocElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "spotter-manager-0.5.1-javadoc.jar",
+          "url": "spotter-manager-0.5.1-javadoc.jar",
+          "size": 4580083,
+          "sha512": "3f1c957324ba3ba1a6f3e12ca7f8b64201cf7191e6d75087308df17800365ab43bbb40c852b833ecbd310ad031b2f6bd8c8eca350307be4a68ec943b9dbe83c7",
+          "sha256": "aba6e3155cef6bab90fbcc17cb9dbc9ae520289506c41fdda5396c7b7fc1c549",
+          "sha1": "b648ee9249e5d5a8c3330cb3cdde61cef074071c",
+          "md5": "746c1800a6a028460ee891c78f0cbca2"
+        }
+      ]
+    }
+  ]
+}
