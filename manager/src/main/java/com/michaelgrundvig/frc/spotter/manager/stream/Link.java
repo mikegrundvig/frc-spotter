@@ -369,7 +369,10 @@ public final class Link implements Runnable, AgentClient.Challenges {
         throw new IOException("it sent an event that can't be read safely: " + e.getMessage(), e);
       }
       source.setInput(bytes, 0, length);
-      event.clearQuick();
+      // Cleared to its defaults, not just marked empty: a field at its default (a value's index 0,
+      // false, an empty text) isn't on the wire, and must read as that default, never as what the
+      // event before left there.
+      event.clear();
       event.mergeFrom(source);
       received(event);
     }

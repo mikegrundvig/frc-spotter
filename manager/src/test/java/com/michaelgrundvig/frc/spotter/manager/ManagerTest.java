@@ -145,6 +145,26 @@ class ManagerTest {
     assertThat(fps.reason()).isEqualTo("below 30 fps");
   }
 
+  /**
+   * The board's first value has index 0, which protobuf leaves off the wire as it does any default.
+   * Its change must still reach it, after an event that began with another value, and nothing else.
+   */
+  @Test
+  void theFirstValuesChangeIsItsOwnAfterAnotherValues() throws Exception {
+    Manager manager = manage(Settings.DEFAULTS, Recorder.NONE);
+    Board board = connected(manager);
+    Value fps = value(board, "vision.health.fps");
+    Value mode = value(board, "vision.health.mode");
+
+    agent.set("vision.health.mode", text("searching"));
+    await(manager, "the mode", () -> mode.text().equals("searching"));
+    agent.set("vision.health.fps", number(20));
+    await(manager, "fps at 20", () -> fps.number() == 20);
+
+    assertThat(mode.text()).isEqualTo("searching");
+    assertThat(value(board, "vision.health.armed").flag()).isTrue();
+  }
+
   @Test
   void eachValueIsJudgedByItsLimitsAndTheAlertsFollow() throws Exception {
     Manager manager = manage(Settings.DEFAULTS, Recorder.NONE);
