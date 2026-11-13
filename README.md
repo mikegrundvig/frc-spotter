@@ -18,8 +18,8 @@ Armbian):
 
 ```sh
 # 1. Install the agent. It's one small program, and needs nothing configured.
-curl -fsSLO https://github.com/mikegrundvig/frc-spotter/releases/download/v0.5.0/frc-spotter_0.5.0_arm64.deb
-sudo apt install ./frc-spotter_0.5.0_arm64.deb
+curl -fsSLO https://github.com/mikegrundvig/frc-spotter/releases/download/v0.5.1/frc-spotter_0.5.1_arm64.deb
+sudo apt install ./frc-spotter_0.5.1_arm64.deb
 
 # 2. Ask it how it is, from the coprocessor or the robot's network.
 curl -H 'Accept: application/json' http://<board>:5808/v2/describe
@@ -93,8 +93,8 @@ The agent, in `agent/` (rustup installs the compiler `rust-toolchain.toml` names
 cargo deny --locked check                                   # licences, advisories, sources
 cargo fmt --check && cargo clippy --all-targets --features fixture -- -D warnings
 cargo test --features fixture                               # the tests: the agent run as a test's
-cargo build --release && package/package.sh target/release/frc-spotter 0.5.0 amd64 out
-SPOTTER_DEB=$PWD/out/frc-spotter_0.5.0_amd64.deb cargo test --features fixture --test container
+cargo build --release && package/package.sh target/release/frc-spotter 0.5.1 amd64 out
+SPOTTER_DEB=$PWD/out/frc-spotter_0.5.1_amd64.deb cargo test --features fixture --test container
 ```
 
 The `fixture` feature builds the agent a test runs, never a board's: `--fixture` counts its files as
