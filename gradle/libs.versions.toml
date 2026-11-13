@@ -2,6 +2,8 @@
 
 [versions]
 spotless = "8.11.0"
+# Named, not left to Spotless: its default follows the Java that runs Gradle.
+google-java-format = "2.0.0"
 errorprone-plugin = "5.2.0"
 errorprone = "2.52.0"
 nullaway = "0.14.3"

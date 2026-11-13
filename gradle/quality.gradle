@@ -217,7 +217,7 @@ spotless {
     java {
         target "src/**/*.java"
         toggleOffOn()
-        googleJavaFormat()
+        googleJavaFormat(libs.versions.google.java.format.get())
         removeUnusedImports()
         trimTrailingWhitespace()
         endWithNewline()
