@@ -7,24 +7,24 @@ license = "MIT"
 publish = false
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 crc32fast = "1"
-ed25519-dalek = { version = "2", features = ["pkcs8"] }
+ed25519-dalek = { version = "3", features = ["pkcs8"] }
 env_logger = { version = "0.11", default-features = false }
 form_urlencoded = "1"
-getrandom = "0.3"
+getrandom = "0.4"
 http-body-util = "0.1"
 http = "1"
 hyper = { version = "1", features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 log = "0.4"
-nix = { version = "0.30", features = ["fs", "net", "process", "signal", "time", "user"] }
+nix = { version = "0.31", features = ["fs", "net", "process", "signal", "time", "user"] }
 prost = "0.14"
 saphyr-parser = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-sha2 = "0.10"
+sha2 = "0.11"
 time = { version = "0.3", features = ["parsing"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
 
@@ -33,6 +33,8 @@ prost-build = "0.14"
 protox = "0.10"
 
 [dev-dependencies]
+# The tests encode a key's public half as agent.json lists it (X.509), which needs alloc.
+ed25519-dalek = { version = "3", features = ["alloc", "pkcs8"] }
 tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 
