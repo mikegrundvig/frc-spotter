@@ -49,16 +49,15 @@ public final class Runs {
             CompletableFuture<Void> later = run.cancelling();
             requests
                 .cancel(id)
-                .whenComplete(
-                    (done, failure) -> {
-                      if (later != null) {
-                        if (failure != null) {
-                          later.completeExceptionally(failure);
-                        } else {
-                          later.complete(null);
-                        }
-                      }
-                    });
+                .whenComplete((done, failure) -> {
+                  if (later != null) {
+                    if (failure != null) {
+                      later.completeExceptionally(failure);
+                    } else {
+                      later.complete(null);
+                    }
+                  }
+                });
           }
         });
   }

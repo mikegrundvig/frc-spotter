@@ -113,12 +113,11 @@ public final class Requests {
 
   /** A page of one of the board's logs. */
   public CompletableFuture<Spotter.LogPage> log(String id, LogQuery query) {
-    return call(
-        () ->
-            AgentClient.parse(
-                WireCheck.LOG_PAGE,
-                Spotter.LogPage.newInstance(),
-                client.get(Protocol.LOGS + id + query(query))));
+    return call(() ->
+        AgentClient.parse(
+            WireCheck.LOG_PAGE,
+            Spotter.LogPage.newInstance(),
+            client.get(Protocol.LOGS + id + query(query))));
   }
 
   /** A log page's query, as the agent takes it: {@code ?from=latest&limit=100}. */

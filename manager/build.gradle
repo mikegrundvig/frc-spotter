@@ -56,7 +56,9 @@ def agentForTests = tasks.register("agentForTests", Exec) {
     description = "Build the agent program with its test feature (cargo), for the tests."
     workingDir agentCrate
     commandLine "cargo", "build", "--locked", "-j", "4", "--features", "fixture"
-    inputs.files(fileTree(agentCrate) { include "Cargo.toml", "Cargo.lock", "build.rs", "src/**" })
+    inputs.files(fileTree(agentCrate) {
+        include "Cargo.toml", "Cargo.lock", "build.rs", "src/**"
+    })
     .withPropertyName("crate").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(file("src/main/proto/spotter.proto")).withPropertyName("proto")
             .withPathSensitivity(PathSensitivity.RELATIVE)

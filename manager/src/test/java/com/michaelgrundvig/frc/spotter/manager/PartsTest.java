@@ -79,16 +79,15 @@ class PartsTest {
     AtomicBoolean done = new AtomicBoolean();
     AtomicReference<String> torn = new AtomicReference<>("");
     Thread writer =
-        new Thread(
-            () -> {
-              for (long i = 1; i <= 2_000_000; i++) {
-                Table back = exchange.back();
-                back.changes = i;
-                back.heardNanos = i;
-                exchange.publish();
-              }
-              done.set(true);
-            });
+        new Thread(() -> {
+          for (long i = 1; i <= 2_000_000; i++) {
+            Table back = exchange.back();
+            back.changes = i;
+            back.heardNanos = i;
+            exchange.publish();
+          }
+          done.set(true);
+        });
     writer.start();
     long last = 0;
     while (!done.get() || exchange.take()) {
@@ -256,12 +255,10 @@ class PartsTest {
 
   @Test
   void anAddressGivenTwiceIsRefused() {
-    assertThatThrownBy(
-            () ->
-                new Manager(
-                    Boards.robot(),
-                    List.of(
-                        new BoardDefinition("10.12.34.11"), new BoardDefinition(" 10.12.34.11"))))
+    assertThatThrownBy(() ->
+            new Manager(
+                Boards.robot(),
+                List.of(new BoardDefinition("10.12.34.11"), new BoardDefinition(" 10.12.34.11"))))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("two boards have the address 10.12.34.11");
   }

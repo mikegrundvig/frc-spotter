@@ -59,34 +59,33 @@ class WireCheckTest {
     }
     Map<String, WireCheck.Type> table = WireCheck.types();
     assertThat(table.keySet()).containsExactlyInAnyOrderElementsOf(messages.keySet());
-    messages.forEach(
-        (name, message) -> {
-          WireCheck.Type type = java.util.Objects.requireNonNull(table.get(name), name);
-          Map<Integer, DescriptorProtos.FieldDescriptorProto> fields = new HashMap<>();
-          for (DescriptorProtos.FieldDescriptorProto field : message.getFieldList()) {
-            fields.put(field.getNumber(), field);
-            boolean isMessage =
-                field.getType() == DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE;
-            WireCheck.Type held = type.message(field.getNumber());
-            if (isMessage) {
-              assertThat(held).as(name + "'s field " + field.getName()).isNotNull();
-              assertThat("." + java.util.Objects.requireNonNull(held).name())
-                  .isEqualTo(field.getTypeName());
-            } else {
-              assertThat(held).as(name + "'s field " + field.getName()).isNull();
-            }
-            assertThat(type.repeats(field.getNumber()))
-                .as(name + "'s field " + field.getName() + " repeats")
-                .isEqualTo(
-                    field.getLabel() == DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED);
-          }
-          // And it says nothing of fields the proto hasn't.
-          for (int number = 0; number < type.fields(); number++) {
-            if (type.message(number) != null || type.repeats(number)) {
-              assertThat(fields).as(name + "'s field " + number).containsKey(number);
-            }
-          }
-        });
+    messages.forEach((name, message) -> {
+      WireCheck.Type type = java.util.Objects.requireNonNull(table.get(name), name);
+      Map<Integer, DescriptorProtos.FieldDescriptorProto> fields = new HashMap<>();
+      for (DescriptorProtos.FieldDescriptorProto field : message.getFieldList()) {
+        fields.put(field.getNumber(), field);
+        boolean isMessage =
+            field.getType() == DescriptorProtos.FieldDescriptorProto.Type.TYPE_MESSAGE;
+        WireCheck.Type held = type.message(field.getNumber());
+        if (isMessage) {
+          assertThat(held).as(name + "'s field " + field.getName()).isNotNull();
+          assertThat("." + java.util.Objects.requireNonNull(held).name())
+              .isEqualTo(field.getTypeName());
+        } else {
+          assertThat(held).as(name + "'s field " + field.getName()).isNull();
+        }
+        assertThat(type.repeats(field.getNumber()))
+            .as(name + "'s field " + field.getName() + " repeats")
+            .isEqualTo(
+                field.getLabel() == DescriptorProtos.FieldDescriptorProto.Label.LABEL_REPEATED);
+      }
+      // And it says nothing of fields the proto hasn't.
+      for (int number = 0; number < type.fields(); number++) {
+        if (type.message(number) != null || type.repeats(number)) {
+          assertThat(fields).as(name + "'s field " + number).containsKey(number);
+        }
+      }
+    });
   }
 
   private static void collect(
@@ -262,12 +261,11 @@ class WireCheckTest {
         ProtoSource.newInstance(new ByteArrayInputStream(bundle)),
         bundle.length);
     byte[] lying = field(1, field(3, Integer.MAX_VALUE, new byte[0]));
-    assertThatThrownBy(
-            () ->
-                WireCheck.check(
-                    WireCheck.PACK_BUNDLE,
-                    ProtoSource.newInstance(new ByteArrayInputStream(lying)),
-                    lying.length))
+    assertThatThrownBy(() ->
+            WireCheck.check(
+                WireCheck.PACK_BUNDLE,
+                ProtoSource.newInstance(new ByteArrayInputStream(lying)),
+                lying.length))
         .hasMessage("spotter.v2.PackFile's field 3 says 2147483647 bytes, and 0 are left");
   }
 }

@@ -76,27 +76,26 @@ class RequestsTest {
     ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor();
     try (ServerSocket dripping = silent()) {
       Thread server =
-          new Thread(
-              () -> {
-                try (Socket socket = dripping.accept()) {
-                  OutputStream out = socket.getOutputStream();
-                  out.write(
-                      ("HTTP/1.1 200 OK\r\n"
-                              + Protocol.HEADER
-                              + ": "
-                              + Protocol.VERSION
-                              + "\r\nContent-Length: 1000\r\n\r\n")
-                          .getBytes(StandardCharsets.US_ASCII));
-                  // A byte at a time, each well within the read timeout.
-                  for (int i = 0; i < 1000; i++) {
-                    out.write(0);
-                    out.flush();
-                    Thread.sleep(100);
-                  }
-                } catch (IOException | InterruptedException e) {
-                  // Dropped by the client, as it should be.
-                }
-              });
+          new Thread(() -> {
+            try (Socket socket = dripping.accept()) {
+              OutputStream out = socket.getOutputStream();
+              out.write(
+                  ("HTTP/1.1 200 OK\r\n"
+                          + Protocol.HEADER
+                          + ": "
+                          + Protocol.VERSION
+                          + "\r\nContent-Length: 1000\r\n\r\n")
+                      .getBytes(StandardCharsets.US_ASCII));
+              // A byte at a time, each well within the read timeout.
+              for (int i = 0; i < 1000; i++) {
+                out.write(0);
+                out.flush();
+                Thread.sleep(100);
+              }
+            } catch (IOException | InterruptedException e) {
+              // Dropped by the client, as it should be.
+            }
+          });
       server.setDaemon(true);
       server.start();
       AgentClient client =
