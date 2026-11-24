@@ -21,7 +21,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 log = "0.4"
 nix = { version = "0.31", features = ["fs", "net", "process", "signal", "time", "user"] }
 prost = "0.14"
-saphyr-parser = "0.3"
+saphyr-parser = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
