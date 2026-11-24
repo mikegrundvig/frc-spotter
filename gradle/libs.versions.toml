@@ -1,7 +1,7 @@
 # Every build and test version in one place.
 
 [versions]
-spotless = "8.11.0"
+spotless = "8.12.0"
 # Named, not left to Spotless: its default follows the Java that runs Gradle.
 google-java-format = "2.0.0"
 errorprone-plugin = "5.2.0"
